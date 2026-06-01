@@ -99,10 +99,7 @@ export default function App() {
   const handleSubmit = async () => {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
-    const { so_number, customer_name, address, contact, order_date, salesman, order_amount, balance,
-            delivery_date, time_slot, plate_no, type, service_note, remark, status, items } = toDb(form);
-    const payload = { so_number, customer_name, address, contact, order_date, salesman, order_amount,
-                      balance, delivery_date, time_slot, plate_no, type, service_note, remark, status, items };
+    const payload = toDb(form);
     if (editId !== null) {
       const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
       if (err) { alert("Error updating: " + err.message); setSaving(false); return; }
@@ -125,9 +122,9 @@ export default function App() {
 
   const MonthNav = () => (
     <div className="flex items-center gap-3 mb-4">
-      <button onClick={() => setBrowseMonth(prevMonth(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">← Prev</button>
+      <button onClick={() => setBrowseMonth(prevMonth(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">Prev</button>
       <input type="month" value={browseMonth} onChange={e => setBrowseMonth(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
-      <button onClick={() => setBrowseMonth(nextMonthYm(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">Next →</button>
+      <button onClick={() => setBrowseMonth(nextMonthYm(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">Next</button>
       {browseMonth !== thisMonth && <button onClick={() => setBrowseMonth(thisMonth)} className="text-xs text-blue-500 hover:underline">Back to current month</button>}
     </div>
   );
@@ -264,12 +261,13 @@ export default function App() {
 
       <div className="max-w-7xl mx-auto px-4 py-4">
 
+        {/* SUMMARY */}
         {activeTab === "Summary" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
             <div className="flex flex-col gap-4">
 
-              {/* Row 1: Summary Cards - all 4 in one row */}
+              {/* Row 1: 4 summary cards in one row */}
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                 {[
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
@@ -294,78 +292,92 @@ export default function App() {
 
               {/* Row 2: Calendar (left) + Outstanding Balance (right) */}
               <div className="flex flex-col xl:flex-row gap-4">
+
+                {/* Calendar */}
                 <div className="flex-1 min-w-0">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr>{["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {weeks.map((week, wi) => (
-                        <tr key={wi}>
-                          {week.map((day, di) => {
-                            const dayOrders = day ? ordersOnDay(day) : [];
-                            const isToday = getDateStr(day) === todayStr;
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr>
+                          {["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => (
+                            <th key={d} className={`px-1 py-2 border border-gray-200 text-center font-bold text-xs w-14 ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {weeks.map((week, wi) => (
+                          <tr key={wi}>
+                            {week.map((day, di) => {
+                              const dayOrders = day ? ordersOnDay(day) : [];
+                              const isToday = getDateStr(day) === todayStr;
+                              return (
+                                <td key={di} className={`border border-gray-200 px-1 py-1 align-top w-14 h-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
+                                  {day && <>
+                                    <div className={`text-xs font-bold mb-0.5 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
+                                    <div className="flex flex-col gap-0.5">
+                                      {dayOrders.map((o, oi) => (
+                                        <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block leading-tight ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>
+                                      ))}
+                                    </div>
+                                  </>}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Outstanding Balance */}
+                <div className="flex-shrink-0">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <table className="text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-gray-100">
+                          {["No","SO No","Sales Person","Amount (RM)","Balance (RM)","Deliver Date","Date Dif","Transfer/Cash"].map(h => (
+                            <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {balanceOrders.length === 0
+                          ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
+                          : balanceOrders.map((o, i) => {
+                            const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
+                            const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
                             return (
-                              <td key={di} className={`border border-gray-200 px-1 py-1 align-top min-w-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
-                                {day && <>
-                                  <div className={`text-xs font-bold mb-1 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
-                                  <div className="flex flex-col gap-0.5">
-                                    {dayOrders.map((o, oi) => <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>)}
-                                  </div>
-                                </>}
-                              </td>
+                              <tr key={i} className="hover:bg-gray-50">
+                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
+                              </tr>
                             );
                           })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                        {balanceOrders.length > 0 && (
+                          <tr className="bg-gray-50 font-bold">
+                            <td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td>
+                            <td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
+                            <td colSpan={3} className="border border-gray-200"></td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex-shrink-0">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                  <table className="text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        {["No","SO No","Sales Person","Amount (RM)","Balance (RM)","Deliver Date","Date Dif","Transfer/Cash"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {balanceOrders.length === 0
-                        ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
-                        : balanceOrders.map((o, i) => {
-                          const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
-                          const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
-                          return (
-                            <tr key={i} className="hover:bg-gray-50">
-                              <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
-                              <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
-                            </tr>
-                          );
-                        })}
-                      {balanceOrders.length > 0 && (
-                        <tr className="bg-gray-50 font-bold">
-                          <td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td>
-                          <td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
-                          <td colSpan={3} className="border border-gray-200"></td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </div>
           </div>
         )}
 
+        {/* MONTHLY VIEW */}
         {activeTab === "Monthly View" && (
           <div>
             <MonthNav />
@@ -374,6 +386,7 @@ export default function App() {
           </div>
         )}
 
+        {/* SERVICE */}
         {activeTab === "Service" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2>
@@ -381,6 +394,7 @@ export default function App() {
           </div>
         )}
 
+        {/* DAILY VIEW */}
         {activeTab === "Daily View" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📆 Daily View</h2>
@@ -404,7 +418,9 @@ export default function App() {
                   <table className="min-w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-100 text-gray-600">
-                        {["Time Slot","Plate No","SO #","Customer","Contact","Type","Items","Supplier","Arrival","Amount","Balance","Status","Remark / Service Note","Actions"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>)}
+                        {["Time Slot","Plate No","SO #","Customer","Contact","Type","Items","Supplier","Arrival","Amount","Balance","Status","Remark / Service Note","Actions"].map(h => (
+                          <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
@@ -426,7 +442,7 @@ export default function App() {
                                 </td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.contact}</td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
-                                  {isService ? <span className="bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">🔧 SERVICE</span> : <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">🚚 DELIVERY</span>}
+                                  {isService ? <span className="bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">SERVICE</span> : <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">DELIVERY</span>}
                                 </td>
                               </>}
                               <td className="border border-gray-200 px-2 py-1">
@@ -446,7 +462,7 @@ export default function App() {
                                   </select>
                                 </td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">
-                                  {isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">🔧 {o.serviceNote}</div>}
+                                  {isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">{o.serviceNote}</div>}
                                   {o.remark && <div className="text-gray-500">{o.remark}</div>}
                                 </td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
@@ -467,6 +483,7 @@ export default function App() {
           </div>
         )}
 
+        {/* ADD / EDIT ORDER */}
         {activeTab === "Add Order" && (
           <div className="max-w-3xl">
             <h2 className="text-base font-bold text-gray-700 mb-4">{editId !== null ? "✏️ Edit Sales Order" : "➕ New Sales Order"}</h2>
@@ -529,7 +546,7 @@ export default function App() {
                     <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-semibold text-gray-600">Item {idx + 1}</span>
-                        {form.items.length > 1 && <button onClick={() => removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">x Remove</button>}
+                        {form.items.length > 1 && <button onClick={() => removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">Remove</button>}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {[{k:"itemCode",l:"Item Code"},{k:"itemName",l:"Item Name"},{k:"unit",l:"Unit"},{k:"supplier",l:"Supplier"}].map(({k,l}) => (
@@ -561,8 +578,10 @@ export default function App() {
             </div>
           </div>
         )}
+
       </div>
 
+      {/* Search Modal */}
       {showSearch && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-20 px-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
@@ -594,6 +613,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Delete Modal */}
       {showDeleteId !== null && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
