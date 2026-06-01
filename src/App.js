@@ -267,7 +267,9 @@ export default function App() {
         {activeTab === "Summary" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
+
+              {/* Row 1: Summary Cards - all 4 in one row */}
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                 {[
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
@@ -281,7 +283,7 @@ export default function App() {
                       <span className="text-lg font-bold">{count}</span>
                     </div>
                     {items && items.length > 0 && (
-                      <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                      <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
                         {items.map((o, i) => <span key={i} onClick={() => handleEdit(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</span>)}
                       </div>
                     )}
@@ -290,8 +292,9 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <div className="min-w-0">
+              {/* Row 2: Calendar (left) + Outstanding Balance (right) */}
+              <div className="flex flex-col xl:flex-row gap-4">
+                <div className="flex-1 min-w-0">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <table className="w-full text-xs border-collapse">
                     <thead>
@@ -321,8 +324,8 @@ export default function App() {
                 </div>
               </div>
 
-                <div className="min-w-0">
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden overflow-x-auto">
+              <div className="flex-shrink-0">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <table className="text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-100">
@@ -356,8 +359,7 @@ export default function App() {
                         </tr>
                       )}
                     </tbody>
-                    </table>
-                  </div>
+                  </table>
                 </div>
               </div>
             </div>
