@@ -290,8 +290,8 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+             <div className="flex-1 min-w-0 overflow-x-auto">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-w-96">
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr>{["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr>
