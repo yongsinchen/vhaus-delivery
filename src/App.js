@@ -18,6 +18,22 @@ const statusColor = s => ({ "Pending": "bg-yellow-100 text-yellow-800", "Out for
 const prevMonth = ym => { const [y,m] = ym.split("-").map(Number); return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`; };
 const nextMonthYm = ym => { const [y,m] = ym.split("-").map(Number); return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`; };
 
+const toDb = o => ({
+  so_number: o.soNumber, customer_name: o.customerName, address: o.address, contact: o.contact,
+  order_date: o.orderDate, salesman: o.salesman, order_amount: o.orderAmount, balance: o.balance,
+  delivery_date: o.deliveryDate, time_slot: o.timeSlot, plate_no: o.plateNo, type: o.type,
+  service_note: o.serviceNote, remark: o.remark, status: o.status, items: JSON.stringify(o.items || [])
+});
+
+const fromDb = o => ({
+  id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
+  address: o.address, contact: o.contact, orderDate: o.order_date, salesman: o.salesman,
+  orderAmount: o.order_amount, balance: o.balance, deliveryDate: o.delivery_date,
+  timeSlot: o.time_slot, plateNo: o.plate_no, type: o.type, serviceNote: o.service_note,
+  remark: o.remark, status: o.status,
+  items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
+});
+
 const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Add Order"];
 
 export default function App() {
@@ -39,55 +55,15 @@ export default function App() {
   const [globalResults, setGlobalResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
 
-  const toDb = o => ({
-    so_number: o.soNumber,
-    customer_name: o.customerName,
-    address: o.address,
-    contact: o.contact,
-    order_date: o.orderDate,
-    salesman: o.salesman,
-    order_amount: o.orderAmount,
-    balance: o.balance,
-    delivery_date: o.deliveryDate,
-    time_slot: o.timeSlot,
-    plate_no: o.plateNo,
-    type: o.type,
-    service_note: o.serviceNote,
-    remark: o.remark,
-    status: o.status,
-    items: JSON.stringify(o.items || [])
-  });
-
-  const fromDb = o => ({
-    id: o.id,
-    created_at: o.created_at,
-    soNumber: o.so_number,
-    customerName: o.customer_name,
-    address: o.address,
-    contact: o.contact,
-    orderDate: o.order_date,
-    salesman: o.salesman,
-    orderAmount: o.order_amount,
-    balance: o.balance,
-    deliveryDate: o.delivery_date,
-    timeSlot: o.time_slot,
-    plateNo: o.plate_no,
-    type: o.type,
-    serviceNote: o.service_note,
-    remark: o.remark,
-    status: o.status,
-    items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
-  });
-
   const loadOrders = async () => {
     setLoading(true); setError(null);
-    const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
-    if (error) setError("Failed to load orders: " + error.message);
+    const { data, error: err } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
+    if (err) setError("Failed to load orders: " + err.message);
     else setOrders((data || []).map(fromDb));
     setLoading(false);
   };
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => { loadOrders(); }, []); // eslint-disable-line
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -123,16 +99,15 @@ export default function App() {
   const handleSubmit = async () => {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
-    const { id, created_at, ...rest } = form;
     const payload = toDb(form);
     if (editId !== null) {
-      const { error } = await supabase.from("orders").update(payload).eq("id", editId);
-      if (error) { alert("Error updating: " + error.message); setSaving(false); return; }
+      const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
+      if (err) { alert("Error updating: " + err.message); setSaving(false); return; }
       setOrders(prev => prev.map(o => o.id === editId ? { ...form } : o));
       setEditId(null);
     } else {
-      const { data, error } = await supabase.from("orders").insert(payload).select();
-      if (error) { alert("Error saving: " + error.message); setSaving(false); return; }
+      const { data, error: err } = await supabase.from("orders").insert(payload).select();
+      if (err) { alert("Error saving: " + err.message); setSaving(false); return; }
       if (data?.[0]) setOrders(prev => [...prev, fromDb(data[0])]);
     }
     setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
@@ -142,15 +117,8 @@ export default function App() {
   };
 
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
-  const handleDelete = async id => {
-    await supabase.from("orders").delete().eq("id", id);
-    setOrders(prev => prev.filter(o => o.id !== id));
-    setShowDeleteId(null);
-  };
-  const updateStatus = async (o, status) => {
-    setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x));
-    await supabase.from("orders").update({ status }).eq("id", o.id);
-  };
+  const handleDelete = async id => { await supabase.from("orders").delete().eq("id", id); setOrders(prev => prev.filter(o => o.id !== id)); setShowDeleteId(null); };
+  const updateStatus = async (o, status) => { setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x)); await supabase.from("orders").update({ status }).eq("id", o.id); };
 
   const MonthNav = () => (
     <div className="flex items-center gap-3 mb-4">
@@ -166,13 +134,14 @@ export default function App() {
       <table className="min-w-full text-xs border-collapse">
         <thead>
           <tr className="bg-gray-100 text-gray-600">
-            {["SO #", "Customer", "Contact", "Time Slot", "Plate No", "Order Date", "Salesman", "Amount", "Balance", "Items", "Supplier", "Item Order", "Sent Out", "Arrival", "Delivery Date", "Status", showService ? "Service Note" : "Remark", "Actions"].map(h => (
+            {["SO #","Customer","Contact","Time Slot","Plate No","Order Date","Salesman","Amount","Balance","Items","Supplier","Item Order","Sent Out","Arrival","Delivery Date","Status", showService ? "Service Note" : "Remark","Actions"].map(h => (
               <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {list.length === 0 ? <tr><td colSpan={18} className="text-center py-8 text-gray-400">No records found</td></tr>
+          {list.length === 0
+            ? <tr><td colSpan={18} className="text-center py-8 text-gray-400">No records found</td></tr>
             : list.map((o, i) => {
               const rowSpan = o.items?.length || 1;
               return o.items?.map((item, ii) => (
@@ -188,7 +157,12 @@ export default function App() {
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">RM {o.orderAmount}</td>
                     <td rowSpan={rowSpan} className={`border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-gray-700"}`}>RM {o.balance}</td>
                   </>}
-                  <td className="border border-gray-200 px-2 py-1"><div className="flex gap-1 items-center"><span className="text-gray-400 w-4">{ii + 1}.</span><div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">×{item.unit}</span></div></div></td>
+                  <td className="border border-gray-200 px-2 py-1">
+                    <div className="flex gap-1 items-center">
+                      <span className="text-gray-400 w-4">{ii + 1}.</span>
+                      <div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">x{item.unit}</span></div>
+                    </div>
+                  </td>
                   <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{item.supplier || "-"}</td>
                   <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.itemOrderDate)}</td>
                   <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.supplierSentDate)}</td>
@@ -197,11 +171,16 @@ export default function App() {
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium">{fmt(o.deliveryDate)}</td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
                       <select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>
-                        {["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}
+                        {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
                       </select>
                     </td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 max-w-32 align-top">{showService ? o.serviceNote : o.remark}</td>
-                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><div className="flex gap-1"><button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button><button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button></div></td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
+                      <div className="flex gap-1">
+                        <button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button>
+                        <button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button>
+                      </div>
+                    </td>
                   </>}
                 </tr>
               ));
@@ -236,7 +215,7 @@ export default function App() {
   const weeks = [];
   let day = 1 - firstDow;
   while (day <= lastDay) { const week = []; for (let d = 0; d < 7; d++) { week.push((day < 1 || day > lastDay) ? null : day); day++; } weeks.push(week); }
-  const getDateStr = d => d ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  const getDateStr = d => d ? `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
   const ordersOnDay = d => { const ds = getDateStr(d); return ds ? orders.filter(o => o.deliveryDate === ds) : []; };
 
   return (
@@ -267,20 +246,21 @@ export default function App() {
         </div>
       </div>
 
-      {!["Add Order", "Summary", "Daily View"].includes(activeTab) && (
+      {!["Add Order","Summary","Daily View"].includes(activeTab) && (
         <div className="max-w-7xl mx-auto px-4 pt-3 flex flex-wrap gap-2">
           <input placeholder="🔍 Search..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300" />
           <select value={filterSalesman} onChange={e => setFilterSalesman(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
             <option value="">All Salesmen</option>{salesmen.map(s => <option key={s}>{s}</option>)}
           </select>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
-            <option value="">All Statuses</option>{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}
+            <option value="">All Statuses</option>{["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
           </select>
           {(search || filterSalesman || filterStatus) && <button onClick={() => { setSearch(""); setFilterSalesman(""); setFilterStatus(""); }} className="text-xs text-red-500 hover:underline">Clear</button>}
         </div>
       )}
 
       <div className="max-w-7xl mx-auto px-4 py-4">
+
         {activeTab === "Summary" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
@@ -297,51 +277,80 @@ export default function App() {
                       <span className="text-xs font-semibold">{label}</span>
                       <span className="text-lg font-bold">{count}</span>
                     </div>
-                    {items && items.length > 0 && <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-28 overflow-y-auto">{items.map((o, i) => <span key={i} onClick={() => handleEdit(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</span>)}</div>}
+                    {items && items.length > 0 && (
+                      <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                        {items.map((o, i) => <span key={i} onClick={() => handleEdit(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</span>)}
+                      </div>
+                    )}
                     {items && items.length === 0 && <div className="bg-white px-3 py-2 text-xs text-gray-400">No orders</div>}
                   </div>
                 ))}
               </div>
+
               <div className="flex-1 min-w-0">
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <table className="w-full text-xs border-collapse">
-                    <thead><tr>{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr></thead>
+                    <thead>
+                      <tr>{["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr>
+                    </thead>
                     <tbody>
                       {weeks.map((week, wi) => (
-                        <tr key={wi}>{week.map((day, di) => {
-                          const dayOrders = day ? ordersOnDay(day) : [];
-                          const isToday = getDateStr(day) === todayStr;
-                          return <td key={di} className={`border border-gray-200 px-1 py-1 align-top min-w-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
-                            {day && <><div className={`text-xs font-bold mb-1 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
-                              <div className="flex flex-col gap-0.5">{dayOrders.map((o, oi) => <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>)}</div></>}
-                          </td>;
-                        })}</tr>
+                        <tr key={wi}>
+                          {week.map((day, di) => {
+                            const dayOrders = day ? ordersOnDay(day) : [];
+                            const isToday = getDateStr(day) === todayStr;
+                            return (
+                              <td key={di} className={`border border-gray-200 px-1 py-1 align-top min-w-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
+                                {day && <>
+                                  <div className={`text-xs font-bold mb-1 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
+                                  <div className="flex flex-col gap-0.5">
+                                    {dayOrders.map((o, oi) => <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>)}
+                                  </div>
+                                </>}
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
+
               <div className="flex-shrink-0">
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <table className="text-xs border-collapse">
-                    <thead><tr className="bg-gray-100">{["No", "SO No", "Sales Person", "Amount (RM)", "Balance (RM)", "Deliver Date", "Date Dif", "Transfer/Cash"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>)}</tr></thead>
+                    <thead>
+                      <tr className="bg-gray-100">
+                        {["No","SO No","Sales Person","Amount (RM)","Balance (RM)","Deliver Date","Date Dif","Transfer/Cash"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>)}
+                      </tr>
+                    </thead>
                     <tbody>
-                      {balanceOrders.length === 0 ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
+                      {balanceOrders.length === 0
+                        ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
                         : balanceOrders.map((o, i) => {
                           const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
                           const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
-                          return <tr key={i} className="hover:bg-gray-50">
-                            <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
-                            <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
-                          </tr>;
+                          return (
+                            <tr key={i} className="hover:bg-gray-50">
+                              <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
+                              <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
+                            </tr>
+                          );
                         })}
-                      {balanceOrders.length > 0 && <tr className="bg-gray-50 font-bold"><td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td><td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td><td colSpan={3} className="border border-gray-200"></td></tr>}
+                      {balanceOrders.length > 0 && (
+                        <tr className="bg-gray-50 font-bold">
+                          <td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td>
+                          <td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
+                          <td colSpan={3} className="border border-gray-200"></td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -350,22 +359,50 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === "Monthly View" && <div><MonthNav /><h2 className="text-base font-bold text-gray-700 mb-3">📅 {monthLabel(browseMonth)} <span className="text-sm font-normal text-gray-400">({browseOrders.length} orders)</span></h2><OrderTable list={browseOrders} /></div>}
-        {activeTab === "Service" && <div><h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2><OrderTable list={services} showService /></div>}
+        {activeTab === "Monthly View" && (
+          <div>
+            <MonthNav />
+            <h2 className="text-base font-bold text-gray-700 mb-3">📅 {monthLabel(browseMonth)} <span className="text-sm font-normal text-gray-400">({browseOrders.length} orders)</span></h2>
+            <OrderTable list={browseOrders} />
+          </div>
+        )}
+
+        {activeTab === "Service" && (
+          <div>
+            <h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2>
+            <OrderTable list={services} showService />
+          </div>
+        )}
 
         {activeTab === "Daily View" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📆 Daily View</h2>
-            <div className="mb-3"><label className="text-xs text-gray-500 block mb-1">Select Date</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
-            <div className="mb-4"><p className="text-xs text-gray-400 mb-2">Dates with orders:</p><div className="flex flex-wrap gap-1">{allDeliveryDates.map(d => <button key={d} onClick={() => setSelectedDate(d)} className={`text-xs px-2 py-1 rounded-full border transition-colors ${selectedDate === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"}`}>{fmt(d)}</button>)}</div></div>
+            <div className="mb-3">
+              <label className="text-xs text-gray-500 block mb-1">Select Date</label>
+              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+            </div>
+            <div className="mb-4">
+              <p className="text-xs text-gray-400 mb-2">Dates with orders:</p>
+              <div className="flex flex-wrap gap-1">
+                {allDeliveryDates.map(d => <button key={d} onClick={() => setSelectedDate(d)} className={`text-xs px-2 py-1 rounded-full border transition-colors ${selectedDate === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"}`}>{fmt(d)}</button>)}
+              </div>
+            </div>
             {selectedDate ? (
               <>
-                <h3 className="font-semibold text-sm text-gray-700 mb-2">Orders on {fmt(selectedDate)} — {dailyOrders.length} order(s) <span className="text-xs font-normal text-gray-400">🚚 {dailyOrders.filter(o => o.type === "Delivery").length} Delivery | 🔧 {dailyOrders.filter(o => o.type === "Service").length} Service</span></h3>
+                <h3 className="font-semibold text-sm text-gray-700 mb-2">
+                  Orders on {fmt(selectedDate)} — {dailyOrders.length} order(s)
+                  <span className="ml-3 text-xs font-normal text-gray-400">🚚 {dailyOrders.filter(o => o.type === "Delivery").length} Delivery | 🔧 {dailyOrders.filter(o => o.type === "Service").length} Service</span>
+                </h3>
                 <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
                   <table className="min-w-full text-xs border-collapse">
-                    <thead><tr className="bg-gray-100 text-gray-600">{["Time Slot", "Plate No", "SO #", "Customer", "Contact", "Type", "Items", "Supplier", "Arrival", "Amount", "Balance", "Status", "Remark / Service Note", "Actions"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>)}</tr></thead>
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-600">
+                        {["Time Slot","Plate No","SO #","Customer","Contact","Type","Items","Supplier","Arrival","Amount","Balance","Status","Remark / Service Note","Actions"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>)}
+                      </tr>
+                    </thead>
                     <tbody>
-                      {dailyOrders.length === 0 ? <tr><td colSpan={14} className="text-center py-8 text-gray-400">No orders.</td></tr>
+                      {dailyOrders.length === 0
+                        ? <tr><td colSpan={14} className="text-center py-8 text-gray-400">No orders.</td></tr>
                         : dailyOrders.map((o, i) => {
                           const isService = o.type === "Service";
                           const rowSpan = o.items?.length || 1;
@@ -375,19 +412,42 @@ export default function App() {
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium text-indigo-700">{o.timeSlot || "-"}</td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.plateNo || "-"}</td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 font-bold text-blue-700 whitespace-nowrap align-top">{o.soNumber}</td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><div className="font-medium whitespace-nowrap">{o.customerName}</div><div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div><div className="text-gray-400 text-xs">{o.salesman}</div></td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top">
+                                  <div className="font-medium whitespace-nowrap">{o.customerName}</div>
+                                  <div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div>
+                                  <div className="text-gray-400 text-xs">{o.salesman}</div>
+                                </td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.contact}</td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{isService ? <span className="bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">🔧 SERVICE</span> : <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">🚚 DELIVERY</span>}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
+                                  {isService ? <span className="bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">🔧 SERVICE</span> : <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">🚚 DELIVERY</span>}
+                                </td>
                               </>}
-                              <td className="border border-gray-200 px-2 py-1"><div className="flex gap-1 items-center"><span className="text-gray-400 w-4">{ii + 1}.</span><div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">×{item.unit}</span></div></div></td>
+                              <td className="border border-gray-200 px-2 py-1">
+                                <div className="flex gap-1 items-center">
+                                  <span className="text-gray-400 w-4">{ii + 1}.</span>
+                                  <div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">x{item.unit}</span></div>
+                                </div>
+                              </td>
                               <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{item.supplier || "-"}</td>
                               <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.arrivalDate)}</td>
                               {ii === 0 && <>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">RM {o.orderAmount}</td>
                                 <td rowSpan={rowSpan} className={`border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-gray-700"}`}>RM {o.balance}</td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}</select></td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">{isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">🔧 {o.serviceNote}</div>}{o.remark && <div className="text-gray-500">{o.remark}</div>}</td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><div className="flex gap-1"><button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button><button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button></div></td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
+                                  <select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>
+                                    {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+                                  </select>
+                                </td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">
+                                  {isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">🔧 {o.serviceNote}</div>}
+                                  {o.remark && <div className="text-gray-500">{o.remark}</div>}
+                                </td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
+                                  <div className="flex gap-1">
+                                    <button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button>
+                                    <button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button>
+                                  </div>
+                                </td>
                               </>}
                             </tr>
                           ));
@@ -404,46 +464,93 @@ export default function App() {
           <div className="max-w-3xl">
             <h2 className="text-base font-bold text-gray-700 mb-4">{editId !== null ? "✏️ Edit Sales Order" : "➕ New Sales Order"}</h2>
             <div className="bg-white rounded-xl shadow p-5 space-y-4">
-              <div><p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Order Information</p>
+              <div>
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Order Information</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[{ k: "soNumber", l: "SO Number", req: true }, { k: "customerName", l: "Customer Name", req: true }, { k: "contact", l: "Contact" }, { k: "orderDate", l: "Order Date", t: "date" }, { k: "salesman", l: "Salesman Name" }, { k: "orderAmount", l: "Order Amount (RM)", t: "number" }, { k: "balance", l: "Balance (RM)", t: "number" }].map(({ k, l, t, req }) => (
-                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label><input type={t || "text"} value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+                  {[{k:"soNumber",l:"SO Number",req:true},{k:"customerName",l:"Customer Name",req:true},{k:"contact",l:"Contact"},{k:"orderDate",l:"Order Date",t:"date"},{k:"salesman",l:"Salesman Name"},{k:"orderAmount",l:"Order Amount (RM)",t:"number"},{k:"balance",l:"Balance (RM)",t:"number"}].map(({k,l,t,req}) => (
+                    <div key={k}>
+                      <label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label>
+                      <input type={t||"text"} value={form[k]} onChange={e => setForm(p => ({...p,[k]:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                    </div>
                   ))}
-                  <div><label className="text-xs font-medium text-gray-600 block mb-0.5">Type</label><select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"><option>Delivery</option><option>Service</option></select></div>
-                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Address</label><textarea value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>
-                </div>
-              </div>
-              <div><p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery Information</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[{ k: "deliveryDate", l: "Delivery Date", t: "date", req: true }, { k: "timeSlot", l: "Time Slot (e.g. 10.00 - 12.00)" }, { k: "plateNo", l: "Plate No" }].map(({ k, l, t, req }) => (
-                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label><input type={t || "text"} value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
-                  ))}
-                  <div><label className="text-xs font-medium text-gray-600 block mb-0.5">Status</label><select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}</select></div>
-                  {form.type === "Service" && <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Service Note</label><textarea value={form.serviceNote} onChange={e => setForm(p => ({ ...p, serviceNote: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>}
-                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Remark</label><textarea value={form.remark} onChange={e => setForm(p => ({ ...p, remark: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-0.5">Type</label>
+                    <select value={form.type} onChange={e => setForm(p => ({...p,type:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+                      <option>Delivery</option><option>Service</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-medium text-gray-600 block mb-0.5">Address</label>
+                    <textarea value={form.address} onChange={e => setForm(p => ({...p,address:e.target.value}))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
+                  </div>
                 </div>
               </div>
               <div>
-                <div className="flex items-center justify-between mb-2"><p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Items</p><button onClick={addItem} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-100">+ Add Item</button></div>
-                <div className="space-y-3">{form.items.map((item, idx) => (
-                  <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    <div className="flex items-center justify-between mb-2"><span className="text-xs font-semibold text-gray-600">Item {idx + 1}</span>{form.items.length > 1 && <button onClick={() => removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">✕ Remove</button>}</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {[{ k: "itemCode", l: "Item Code" }, { k: "itemName", l: "Item Name" }, { k: "unit", l: "Unit" }, { k: "supplier", l: "Supplier" }].map(({ k, l }) => (
-                        <div key={k}><label className="text-xs text-gray-500 block mb-0.5">{l}</label><input value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
-                      ))}
-                      {[{ k: "itemOrderDate", l: "Item Order Date" }, { k: "supplierSentDate", l: "Supplier Sent Date" }, { k: "arrivalDate", l: "Arrival Date" }].map(({ k, l }) => (
-                        <div key={k}><label className="text-xs text-gray-500 block mb-0.5">{l}</label><input type="date" value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
-                      ))}
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery Information</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[{k:"deliveryDate",l:"Delivery Date",t:"date",req:true},{k:"timeSlot",l:"Time Slot (e.g. 10.00 - 12.00)"},{k:"plateNo",l:"Plate No"}].map(({k,l,t,req}) => (
+                    <div key={k}>
+                      <label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label>
+                      <input type={t||"text"} value={form[k]} onChange={e => setForm(p => ({...p,[k]:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                     </div>
+                  ))}
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-0.5">Status</label>
+                    <select value={form.status} onChange={e => setForm(p => ({...p,status:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+                      {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+                    </select>
                   </div>
-                ))}</div>
+                  {form.type === "Service" && (
+                    <div className="sm:col-span-2">
+                      <label className="text-xs font-medium text-gray-600 block mb-0.5">Service Note</label>
+                      <textarea value={form.serviceNote} onChange={e => setForm(p => ({...p,serviceNote:e.target.value}))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
+                    </div>
+                  )}
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-medium text-gray-600 block mb-0.5">Remark</label>
+                    <textarea value={form.remark} onChange={e => setForm(p => ({...p,remark:e.target.value}))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Items</p>
+                  <button onClick={addItem} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-100">+ Add Item</button>
+                </div>
+                <div className="space-y-3">
+                  {form.items.map((item, idx) => (
+                    <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-600">Item {idx + 1}</span>
+                        {form.items.length > 1 && <button onClick={() => removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">x Remove</button>}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[{k:"itemCode",l:"Item Code"},{k:"itemName",l:"Item Name"},{k:"unit",l:"Unit"},{k:"supplier",l:"Supplier"}].map(({k,l}) => (
+                          <div key={k}>
+                            <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
+                            <input value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                          </div>
+                        ))}
+                        {[{k:"itemOrderDate",l:"Item Order Date"},{k:"supplierSentDate",l:"Supplier Sent Date"},{k:"arrivalDate",l:"Arrival Date"}].map(({k,l}) => (
+                          <div key={k}>
+                            <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
+                            <input type="date" value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-4 items-center">
-              <button onClick={handleSubmit} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : editId !== null ? "Update Order" : "Save Order"}</button>
-              {editId !== null && <button onClick={() => { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setActiveTab("Summary"); }} className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">Cancel</button>}
-              {saved && <span className="text-green-600 text-sm font-medium">✅ Saved!</span>}
+              <button onClick={handleSubmit} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                {saving ? "Saving..." : editId !== null ? "Update Order" : "Save Order"}
+              </button>
+              {editId !== null && (
+                <button onClick={() => { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setActiveTab("Summary"); }} className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">Cancel</button>
+              )}
+              {saved && <span className="text-green-600 text-sm font-medium">Saved!</span>}
             </div>
           </div>
         )}
@@ -455,15 +562,22 @@ export default function App() {
             <div className="flex items-center gap-2 p-4 border-b">
               <span className="text-lg">🔍</span>
               <input autoFocus value={globalSearch} onChange={e => handleGlobalSearch(e.target.value)} placeholder="Search SO number, customer, contact, item..." className="flex-1 text-sm focus:outline-none" />
-              <button onClick={() => setShowSearch(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">✕</button>
+              <button onClick={() => setShowSearch(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">x</button>
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {globalSearch && globalResults.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No results found for "{globalSearch}"</div>}
+              {globalSearch && globalResults.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No results found</div>}
               {globalResults.map((o, i) => (
                 <div key={i} onClick={() => { handleEdit(o); setShowSearch(false); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100">
-                  <div className="flex items-center justify-between mb-1"><span className="font-bold text-blue-700 text-sm">{o.soNumber}</span><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>{o.type}</span></div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-blue-700 text-sm">{o.soNumber}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>{o.type}</span>
+                  </div>
                   <div className="text-sm text-gray-700">{o.customerName}</div>
-                  <div className="text-xs text-gray-400 flex gap-3 mt-0.5"><span>📅 {fmt(o.deliveryDate)}</span><span>👤 {o.salesman}</span>{parseFloat(o.balance) > 0 && <span className="text-red-500">💰 RM {o.balance} outstanding</span>}</div>
+                  <div className="text-xs text-gray-400 flex gap-3 mt-0.5">
+                    <span>📅 {fmt(o.deliveryDate)}</span>
+                    <span>👤 {o.salesman}</span>
+                    {parseFloat(o.balance) > 0 && <span className="text-red-500">💰 RM {o.balance} outstanding</span>}
+                  </div>
                   <div className="text-xs text-gray-400 mt-0.5">{o.items?.map(i => i.itemName).filter(Boolean).join(", ")}</div>
                 </div>
               ))}
