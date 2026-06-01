@@ -1,0 +1,450 @@
+import { useState, useEffect, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = "https://lrfyjcupucpdqmbqqbbk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_eAA_n21UDdPrecDlwfa8xQ_3PmFAMkm";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
+const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
+
+const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
+const fmtMonth = d => d ? `${new Date(d).getFullYear()}-${String(new Date(d).getMonth()+1).padStart(2,"0")}` : "";
+const monthLabel = ym => { const [y,m] = ym.split("-"); return new Date(y, m-1, 1).toLocaleString("en-MY", { month: "long", year: "numeric" }); };
+const now = new Date();
+const todayStr = now.toISOString().split("T")[0];
+const thisMonth = fmtMonth(todayStr);
+const statusColor = s => ({ "Pending": "bg-yellow-100 text-yellow-800", "Out for Delivery": "bg-blue-100 text-blue-800", "Delivered": "bg-green-100 text-green-800", "Serviced": "bg-purple-100 text-purple-800" }[s] || "bg-gray-100 text-gray-700");
+const prevMonth = ym => { const [y,m] = ym.split("-").map(Number); return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`; };
+const nextMonthYm = ym => { const [y,m] = ym.split("-").map(Number); return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`; };
+
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Add Order"];
+
+export default function App() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("Summary");
+  const [form, setForm] = useState({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
+  const [editId, setEditId] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [filterSalesman, setFilterSalesman] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [showDeleteId, setShowDeleteId] = useState(null);
+  const [browseMonth, setBrowseMonth] = useState(thisMonth);
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [globalResults, setGlobalResults] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+
+  const loadOrders = async () => {
+    setLoading(true); setError(null);
+    const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
+    if (error) setError("Failed to load orders: " + error.message);
+    else setOrders((data || []).map(o => ({ ...o, items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || []) })));
+    setLoading(false);
+  };
+
+  useEffect(() => { loadOrders(); }, []);
+
+  const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
+
+  const filtered = useMemo(() => orders.filter(o => {
+    if (filterSalesman && o.salesman !== filterSalesman) return false;
+    if (filterStatus && o.status !== filterStatus) return false;
+    if (search) {
+      const itemMatch = o.items?.some(i => `${i.itemCode} ${i.itemName}`.toLowerCase().includes(search.toLowerCase()));
+      if (!`${o.soNumber} ${o.customerName}`.toLowerCase().includes(search.toLowerCase()) && !itemMatch) return false;
+    }
+    return true;
+  }), [orders, filterSalesman, filterStatus, search]);
+
+  const browseOrders = filtered.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === browseMonth);
+  const services = filtered.filter(o => o.type === "Service");
+  const allDeliveryDates = [...new Set(orders.filter(o => o.deliveryDate).map(o => o.deliveryDate))].sort();
+  const dailyOrders = selectedDate ? orders.filter(o => o.deliveryDate === selectedDate) : [];
+
+  const setItem = (idx, key, val) => setForm(p => ({ ...p, items: p.items.map((it, i) => i === idx ? { ...it, [key]: val } : it) }));
+  const addItem = () => setForm(p => ({ ...p, items: [...p.items, { ...EMPTY_ITEM }] }));
+  const removeItem = idx => setForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) }));
+
+  const handleGlobalSearch = v => {
+    setGlobalSearch(v);
+    if (!v.trim()) { setGlobalResults([]); return; }
+    const q = v.toLowerCase();
+    setGlobalResults(orders.filter(o =>
+      o.soNumber?.toLowerCase().includes(q) || o.customerName?.toLowerCase().includes(q) ||
+      o.contact?.includes(q) || o.items?.some(i => i.itemName?.toLowerCase().includes(q) || i.itemCode?.toLowerCase().includes(q))
+    ));
+  };
+
+  const handleSubmit = async () => {
+    if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
+    setSaving(true);
+    const { id, created_at, ...rest } = form;
+    const payload = { ...rest, items: JSON.stringify(rest.items || []) };
+    if (editId !== null) {
+      const { error } = await supabase.from("orders").update(payload).eq("id", editId);
+      if (error) { alert("Error updating: " + error.message); setSaving(false); return; }
+      setOrders(prev => prev.map(o => o.id === editId ? { ...form } : o));
+      setEditId(null);
+    } else {
+      const { data, error } = await supabase.from("orders").insert(payload).select();
+      if (error) { alert("Error saving: " + error.message); setSaving(false); return; }
+      if (data?.[0]) setOrders(prev => [...prev, { ...data[0], items: form.items }]);
+    }
+    setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
+    setActiveTab("Summary");
+    setSaving(false);
+  };
+
+  const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
+  const handleDelete = async id => {
+    await supabase.from("orders").delete().eq("id", id);
+    setOrders(prev => prev.filter(o => o.id !== id));
+    setShowDeleteId(null);
+  };
+  const updateStatus = async (o, status) => {
+    setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x));
+    await supabase.from("orders").update({ status }).eq("id", o.id);
+  };
+
+  const MonthNav = () => (
+    <div className="flex items-center gap-3 mb-4">
+      <button onClick={() => setBrowseMonth(prevMonth(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">← Prev</button>
+      <input type="month" value={browseMonth} onChange={e => setBrowseMonth(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
+      <button onClick={() => setBrowseMonth(nextMonthYm(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">Next →</button>
+      {browseMonth !== thisMonth && <button onClick={() => setBrowseMonth(thisMonth)} className="text-xs text-blue-500 hover:underline">Back to current month</button>}
+    </div>
+  );
+
+  const OrderTable = ({ list, showService = false }) => (
+    <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+      <table className="min-w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-gray-100 text-gray-600">
+            {["SO #", "Customer", "Contact", "Time Slot", "Plate No", "Order Date", "Salesman", "Amount", "Balance", "Items", "Supplier", "Item Order", "Sent Out", "Arrival", "Delivery Date", "Status", showService ? "Service Note" : "Remark", "Actions"].map(h => (
+              <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {list.length === 0 ? <tr><td colSpan={18} className="text-center py-8 text-gray-400">No records found</td></tr>
+            : list.map((o, i) => {
+              const rowSpan = o.items?.length || 1;
+              return o.items?.map((item, ii) => (
+                <tr key={`${i}-${ii}`} className={`${ii === 0 ? "border-t-2 border-gray-300" : ""} hover:bg-blue-50`}>
+                  {ii === 0 && <>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 font-bold text-blue-700 whitespace-nowrap align-top">{o.soNumber}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><div className="font-medium whitespace-nowrap">{o.customerName}</div><div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div></td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.contact}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium text-indigo-700">{o.timeSlot || "-"}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.plateNo || "-"}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{fmt(o.orderDate)}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.salesman}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">RM {o.orderAmount}</td>
+                    <td rowSpan={rowSpan} className={`border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-gray-700"}`}>RM {o.balance}</td>
+                  </>}
+                  <td className="border border-gray-200 px-2 py-1"><div className="flex gap-1 items-center"><span className="text-gray-400 w-4">{ii + 1}.</span><div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">×{item.unit}</span></div></div></td>
+                  <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{item.supplier || "-"}</td>
+                  <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.itemOrderDate)}</td>
+                  <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.supplierSentDate)}</td>
+                  <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.arrivalDate)}</td>
+                  {ii === 0 && <>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium">{fmt(o.deliveryDate)}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
+                      <select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>
+                        {["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 max-w-32 align-top">{showService ? o.serviceNote : o.remark}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><div className="flex gap-1"><button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button><button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button></div></td>
+                  </>}
+                </tr>
+              ));
+            })}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center"><div className="text-4xl mb-3">🏠</div><div className="text-gray-600 font-medium">Loading V Haus Delivery Sheet...</div><div className="text-xs text-gray-400 mt-1">Connecting to database</div></div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center bg-white rounded-xl shadow p-8"><div className="text-4xl mb-3">⚠️</div><div className="text-red-600 font-medium mb-2">{error}</div><button onClick={loadOrders} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">Retry</button></div>
+    </div>
+  );
+
+  const nm = nextMonthYm(thisMonth);
+  const serviceOrders = orders.filter(o => o.type === "Service");
+  const thisMonthOrders = orders.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === thisMonth);
+  const nextMonthOrders = orders.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === nm);
+  const afterOrders = orders.filter(o => o.type === "Delivery" && o.deliveryDate && fmtMonth(o.deliveryDate) > nm);
+  const balanceOrders = orders.filter(o => parseFloat(o.balance) > 0).sort((a, b) => new Date(a.deliveryDate) - new Date(b.deliveryDate));
+
+  const [y, m] = thisMonth.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const weeks = [];
+  let day = 1 - firstDow;
+  while (day <= lastDay) { const week = []; for (let d = 0; d < 7; d++) { week.push((day < 1 || day > lastDay) ? null : day); day++; } weeks.push(week); }
+  const getDateStr = d => d ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  const ordersOnDay = d => { const ds = getDateStr(d); return ds ? orders.filter(o => o.deliveryDate === ds) : []; };
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans">
+      <div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white px-4 py-3 shadow">
+        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-2">
+          <h1 className="text-lg font-bold tracking-wide">🏠 V Haus Living (Pg) Delivery Sheet</h1>
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white text-xs px-3 py-1.5 rounded-lg">🔍 Search SO</button>
+            <button onClick={loadOrders} className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white text-xs px-3 py-1.5 rounded-lg">🔄 Refresh</button>
+            <div className="flex gap-3 text-center text-xs">
+              <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.length}</div><div>Total</div></div>
+              <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.filter(o => o.status === "Pending").length}</div><div>Pending</div></div>
+              <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{serviceOrders.length}</div><div>Service</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border-b shadow-sm sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto flex overflow-x-auto">
+          {TABS.map(t => (
+            <button key={t} onClick={() => { setActiveTab(t); if (t !== "Add Order") { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); } }}
+              className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === t ? "border-blue-600 text-blue-700 bg-blue-50" : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
+              {t === "Add Order" ? (editId !== null ? "✏️ Edit Order" : "➕ Add Order") : t === "Monthly View" ? `📅 ${monthLabel(browseMonth)}` : t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!["Add Order", "Summary", "Daily View"].includes(activeTab) && (
+        <div className="max-w-7xl mx-auto px-4 pt-3 flex flex-wrap gap-2">
+          <input placeholder="🔍 Search..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          <select value={filterSalesman} onChange={e => setFilterSalesman(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
+            <option value="">All Salesmen</option>{salesmen.map(s => <option key={s}>{s}</option>)}
+          </select>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
+            <option value="">All Statuses</option>{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}
+          </select>
+          {(search || filterSalesman || filterStatus) && <button onClick={() => { setSearch(""); setFilterSalesman(""); setFilterStatus(""); }} className="text-xs text-red-500 hover:underline">Clear</button>}
+        </div>
+      )}
+
+      <div className="max-w-7xl mx-auto px-4 py-4">
+        {activeTab === "Summary" && (
+          <div>
+            <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
+            <div className="flex flex-col xl:flex-row gap-4">
+              <div className="flex-shrink-0 flex flex-col gap-3 min-w-48">
+                {[
+                  { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
+                  { label: `📅 ${monthLabel(thisMonth)}`, count: thisMonthOrders.length, color: "bg-blue-500", border: "border-blue-300", items: thisMonthOrders },
+                  { label: `📅 ${monthLabel(nm)}`, count: nextMonthOrders.length, color: "bg-orange-400", border: "border-orange-300", items: nextMonthOrders },
+                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: null },
+                ].map(({ label, count, color, border, items }) => (
+                  <div key={label} className={`rounded-xl border-2 ${border} overflow-hidden shadow-sm`}>
+                    <div className={`${color} text-white px-4 py-2 flex items-center justify-between`}>
+                      <span className="text-xs font-semibold">{label}</span>
+                      <span className="text-lg font-bold">{count}</span>
+                    </div>
+                    {items && items.length > 0 && <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-28 overflow-y-auto">{items.map((o, i) => <span key={i} onClick={() => handleEdit(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</span>)}</div>}
+                    {items && items.length === 0 && <div className="bg-white px-3 py-2 text-xs text-gray-400">No orders</div>}
+                  </div>
+                ))}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  <table className="w-full text-xs border-collapse">
+                    <thead><tr>{["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr></thead>
+                    <tbody>
+                      {weeks.map((week, wi) => (
+                        <tr key={wi}>{week.map((day, di) => {
+                          const dayOrders = day ? ordersOnDay(day) : [];
+                          const isToday = getDateStr(day) === todayStr;
+                          return <td key={di} className={`border border-gray-200 px-1 py-1 align-top min-w-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
+                            {day && <><div className={`text-xs font-bold mb-1 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
+                              <div className="flex flex-col gap-0.5">{dayOrders.map((o, oi) => <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>)}</div></>}
+                          </td>;
+                        })}</tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="flex-shrink-0">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  <table className="text-xs border-collapse">
+                    <thead><tr className="bg-gray-100">{["No", "SO No", "Sales Person", "Amount (RM)", "Balance (RM)", "Deliver Date", "Date Dif", "Transfer/Cash"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {balanceOrders.length === 0 ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
+                        : balanceOrders.map((o, i) => {
+                          const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
+                          const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
+                          return <tr key={i} className="hover:bg-gray-50">
+                            <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
+                            <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
+                          </tr>;
+                        })}
+                      {balanceOrders.length > 0 && <tr className="bg-gray-50 font-bold"><td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td><td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td><td colSpan={3} className="border border-gray-200"></td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "Monthly View" && <div><MonthNav /><h2 className="text-base font-bold text-gray-700 mb-3">📅 {monthLabel(browseMonth)} <span className="text-sm font-normal text-gray-400">({browseOrders.length} orders)</span></h2><OrderTable list={browseOrders} /></div>}
+        {activeTab === "Service" && <div><h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2><OrderTable list={services} showService /></div>}
+
+        {activeTab === "Daily View" && (
+          <div>
+            <h2 className="text-base font-bold text-gray-700 mb-3">📆 Daily View</h2>
+            <div className="mb-3"><label className="text-xs text-gray-500 block mb-1">Select Date</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+            <div className="mb-4"><p className="text-xs text-gray-400 mb-2">Dates with orders:</p><div className="flex flex-wrap gap-1">{allDeliveryDates.map(d => <button key={d} onClick={() => setSelectedDate(d)} className={`text-xs px-2 py-1 rounded-full border transition-colors ${selectedDate === d ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"}`}>{fmt(d)}</button>)}</div></div>
+            {selectedDate ? (
+              <>
+                <h3 className="font-semibold text-sm text-gray-700 mb-2">Orders on {fmt(selectedDate)} — {dailyOrders.length} order(s) <span className="text-xs font-normal text-gray-400">🚚 {dailyOrders.filter(o => o.type === "Delivery").length} Delivery | 🔧 {dailyOrders.filter(o => o.type === "Service").length} Service</span></h3>
+                <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+                  <table className="min-w-full text-xs border-collapse">
+                    <thead><tr className="bg-gray-100 text-gray-600">{["Time Slot", "Plate No", "SO #", "Customer", "Contact", "Type", "Items", "Supplier", "Arrival", "Amount", "Balance", "Status", "Remark / Service Note", "Actions"].map(h => <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {dailyOrders.length === 0 ? <tr><td colSpan={14} className="text-center py-8 text-gray-400">No orders.</td></tr>
+                        : dailyOrders.map((o, i) => {
+                          const isService = o.type === "Service";
+                          const rowSpan = o.items?.length || 1;
+                          return o.items?.map((item, ii) => (
+                            <tr key={`${i}-${ii}`} className={`${ii === 0 ? "border-t-2 border-gray-300" : ""} ${isService ? "bg-purple-50 hover:bg-purple-100" : "hover:bg-blue-50"}`}>
+                              {ii === 0 && <>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium text-indigo-700">{o.timeSlot || "-"}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.plateNo || "-"}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 font-bold text-blue-700 whitespace-nowrap align-top">{o.soNumber}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><div className="font-medium whitespace-nowrap">{o.customerName}</div><div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div><div className="text-gray-400 text-xs">{o.salesman}</div></td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.contact}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{isService ? <span className="bg-purple-200 text-purple-800 text-xs font-bold px-2 py-0.5 rounded-full">🔧 SERVICE</span> : <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">🚚 DELIVERY</span>}</td>
+                              </>}
+                              <td className="border border-gray-200 px-2 py-1"><div className="flex gap-1 items-center"><span className="text-gray-400 w-4">{ii + 1}.</span><div>{item.itemCode && <span className="text-gray-400 mr-1">[{item.itemCode}]</span>}<span className="font-medium">{item.itemName}</span><span className="ml-1 text-gray-500">×{item.unit}</span></div></div></td>
+                              <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{item.supplier || "-"}</td>
+                              <td className="border border-gray-200 px-2 py-1 whitespace-nowrap">{fmt(item.arrivalDate)}</td>
+                              {ii === 0 && <>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">RM {o.orderAmount}</td>
+                                <td rowSpan={rowSpan} className={`border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-gray-700"}`}>RM {o.balance}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}</select></td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">{isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">🔧 {o.serviceNote}</div>}{o.remark && <div className="text-gray-500">{o.remark}</div>}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top"><div className="flex gap-1"><button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button><button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button></div></td>
+                              </>}
+                            </tr>
+                          ));
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : <p className="text-xs text-gray-400">Select a date to view orders.</p>}
+          </div>
+        )}
+
+        {activeTab === "Add Order" && (
+          <div className="max-w-3xl">
+            <h2 className="text-base font-bold text-gray-700 mb-4">{editId !== null ? "✏️ Edit Sales Order" : "➕ New Sales Order"}</h2>
+            <div className="bg-white rounded-xl shadow p-5 space-y-4">
+              <div><p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Order Information</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[{ k: "soNumber", l: "SO Number", req: true }, { k: "customerName", l: "Customer Name", req: true }, { k: "contact", l: "Contact" }, { k: "orderDate", l: "Order Date", t: "date" }, { k: "salesman", l: "Salesman Name" }, { k: "orderAmount", l: "Order Amount (RM)", t: "number" }, { k: "balance", l: "Balance (RM)", t: "number" }].map(({ k, l, t, req }) => (
+                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label><input type={t || "text"} value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+                  ))}
+                  <div><label className="text-xs font-medium text-gray-600 block mb-0.5">Type</label><select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"><option>Delivery</option><option>Service</option></select></div>
+                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Address</label><textarea value={form.address} onChange={e => setForm(p => ({ ...p, address: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>
+                </div>
+              </div>
+              <div><p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery Information</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[{ k: "deliveryDate", l: "Delivery Date", t: "date", req: true }, { k: "timeSlot", l: "Time Slot (e.g. 10.00 - 12.00)" }, { k: "plateNo", l: "Plate No" }].map(({ k, l, t, req }) => (
+                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label><input type={t || "text"} value={form[k]} onChange={e => setForm(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+                  ))}
+                  <div><label className="text-xs font-medium text-gray-600 block mb-0.5">Status</label><select value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">{["Pending", "Out for Delivery", "Delivered", "Serviced"].map(s => <option key={s}>{s}</option>)}</select></div>
+                  {form.type === "Service" && <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Service Note</label><textarea value={form.serviceNote} onChange={e => setForm(p => ({ ...p, serviceNote: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>}
+                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-0.5">Remark</label><textarea value={form.remark} onChange={e => setForm(p => ({ ...p, remark: e.target.value }))} rows={2} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none" /></div>
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2"><p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Items</p><button onClick={addItem} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-100">+ Add Item</button></div>
+                <div className="space-y-3">{form.items.map((item, idx) => (
+                  <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2"><span className="text-xs font-semibold text-gray-600">Item {idx + 1}</span>{form.items.length > 1 && <button onClick={() => removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">✕ Remove</button>}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[{ k: "itemCode", l: "Item Code" }, { k: "itemName", l: "Item Name" }, { k: "unit", l: "Unit" }, { k: "supplier", l: "Supplier" }].map(({ k, l }) => (
+                        <div key={k}><label className="text-xs text-gray-500 block mb-0.5">{l}</label><input value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+                      ))}
+                      {[{ k: "itemOrderDate", l: "Item Order Date" }, { k: "supplierSentDate", l: "Supplier Sent Date" }, { k: "arrivalDate", l: "Arrival Date" }].map(({ k, l }) => (
+                        <div key={k}><label className="text-xs text-gray-500 block mb-0.5">{l}</label><input type="date" value={item[k]} onChange={e => setItem(idx, k, e.target.value)} className="w-full border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
+                      ))}
+                    </div>
+                  </div>
+                ))}</div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-4 items-center">
+              <button onClick={handleSubmit} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : editId !== null ? "Update Order" : "Save Order"}</button>
+              {editId !== null && <button onClick={() => { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setActiveTab("Summary"); }} className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">Cancel</button>}
+              {saved && <span className="text-green-600 text-sm font-medium">✅ Saved!</span>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showSearch && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-20 px-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+            <div className="flex items-center gap-2 p-4 border-b">
+              <span className="text-lg">🔍</span>
+              <input autoFocus value={globalSearch} onChange={e => handleGlobalSearch(e.target.value)} placeholder="Search SO number, customer, contact, item..." className="flex-1 text-sm focus:outline-none" />
+              <button onClick={() => setShowSearch(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">✕</button>
+            </div>
+            <div className="max-h-96 overflow-y-auto">
+              {globalSearch && globalResults.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No results found for "{globalSearch}"</div>}
+              {globalResults.map((o, i) => (
+                <div key={i} onClick={() => { handleEdit(o); setShowSearch(false); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100">
+                  <div className="flex items-center justify-between mb-1"><span className="font-bold text-blue-700 text-sm">{o.soNumber}</span><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>{o.type}</span></div>
+                  <div className="text-sm text-gray-700">{o.customerName}</div>
+                  <div className="text-xs text-gray-400 flex gap-3 mt-0.5"><span>📅 {fmt(o.deliveryDate)}</span><span>👤 {o.salesman}</span>{parseFloat(o.balance) > 0 && <span className="text-red-500">💰 RM {o.balance} outstanding</span>}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{o.items?.map(i => i.itemName).filter(Boolean).join(", ")}</div>
+                </div>
+              ))}
+              {!globalSearch && <div className="text-center py-8 text-gray-400 text-sm">Start typing to search...</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteId !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <h3 className="font-bold text-gray-800 mb-2">Delete Order?</h3>
+            <p className="text-sm text-gray-600 mb-4">Are you sure? This cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowDeleteId(null)} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+              <button onClick={() => handleDelete(showDeleteId)} className="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
