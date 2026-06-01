@@ -87,7 +87,7 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => { loadOrders(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadOrders(); }, []);
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -123,7 +123,7 @@ export default function App() {
   const handleSubmit = async () => {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
-       const { id, created_at } = form; // eslint-disable-line no-unused-vars
+    const { id, created_at, ...rest } = form;
     const payload = toDb(form);
     if (editId !== null) {
       const { error } = await supabase.from("orders").update(payload).eq("id", editId);
