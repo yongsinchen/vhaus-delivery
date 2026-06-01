@@ -273,7 +273,7 @@ export default function App() {
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
                   { label: `📅 ${monthLabel(thisMonth)}`, count: thisMonthOrders.length, color: "bg-blue-500", border: "border-blue-300", items: thisMonthOrders },
                   { label: `📅 ${monthLabel(nm)}`, count: nextMonthOrders.length, color: "bg-orange-400", border: "border-orange-300", items: nextMonthOrders },
-                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: afterOrders },
+                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: null },
                 ].map(({ label, count, color, border, items }) => (
                   <div key={label} className={`rounded-xl border-2 ${border} overflow-hidden shadow-sm`}>
                     <div className={`${color} text-white px-4 py-2 flex items-center justify-between`}>
