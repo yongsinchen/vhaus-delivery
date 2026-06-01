@@ -99,7 +99,10 @@ export default function App() {
   const handleSubmit = async () => {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
-    const payload = toDb(form);
+    const { so_number, customer_name, address, contact, order_date, salesman, order_amount, balance,
+            delivery_date, time_slot, plate_no, type, service_note, remark, status, items } = toDb(form);
+    const payload = { so_number, customer_name, address, contact, order_date, salesman, order_amount,
+                      balance, delivery_date, time_slot, plate_no, type, service_note, remark, status, items };
     if (editId !== null) {
       const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
       if (err) { alert("Error updating: " + err.message); setSaving(false); return; }
