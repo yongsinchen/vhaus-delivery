@@ -267,8 +267,8 @@ export default function App() {
         {activeTab === "Summary" && (
           <div>
             <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
-            <div className="flex flex-col xl:flex-row gap-4">
-              <div className="flex-shrink-0 flex flex-col gap-3 min-w-48">
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
                 {[
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
                   { label: `📅 ${monthLabel(thisMonth)}`, count: thisMonthOrders.length, color: "bg-blue-500", border: "border-blue-300", items: thisMonthOrders },
@@ -290,8 +290,9 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="min-w-0">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr>{["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => <th key={d} className={`px-2 py-2 border border-gray-200 text-center font-bold ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>)}</tr>
@@ -320,8 +321,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex-shrink-0">
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="min-w-0">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden overflow-x-auto">
                   <table className="text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-100">
@@ -355,7 +356,8 @@ export default function App() {
                         </tr>
                       )}
                     </tbody>
-                  </table>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
