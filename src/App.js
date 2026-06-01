@@ -36,6 +36,105 @@ const fromDb = o => ({
 
 const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Add Order"];
 
+// ── Order View Modal ──────────────────────────────────────────────
+const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
+  const hasBalance = parseFloat(o.balance) > 0;
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xl font-bold text-blue-700">{o.soNumber}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${o.type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>{o.type}</span>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">x</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          {/* Customer */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Customer</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Customer Name</p><p className="text-sm font-semibold text-gray-800">{o.customerName || "-"}</p></div>
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Contact</p><p className="text-sm font-semibold text-gray-800">{o.contact || "-"}</p></div>
+              <div className="bg-gray-50 rounded-lg p-3 sm:col-span-1"><p className="text-xs text-gray-400 mb-1">Address</p><p className="text-sm text-gray-800 leading-snug">{o.address || "-"}</p></div>
+            </div>
+          </div>
+
+          {/* Delivery */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Delivery Date</p><p className="text-sm font-semibold text-gray-800">{fmt(o.deliveryDate)}</p></div>
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Time Slot</p><p className="text-sm font-semibold text-indigo-700">{o.timeSlot || "-"}</p></div>
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Plate No</p><p className="text-sm font-semibold text-gray-800">{o.plateNo || "-"}</p></div>
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Salesman</p><p className="text-sm font-semibold text-gray-800">{o.salesman || "-"}</p></div>
+            </div>
+          </div>
+
+          {/* Payment */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Payment</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Order Amount</p><p className="text-sm font-semibold text-gray-800">RM {o.orderAmount || "0"}</p></div>
+              <div className={`rounded-lg p-3 ${hasBalance ? "bg-red-50" : "bg-green-50"}`}>
+                <p className="text-xs text-gray-400 mb-1">Balance</p>
+                <p className={`text-sm font-bold ${hasBalance ? "text-red-600" : "text-green-600"}`}>RM {o.balance || "0"}</p>
+              </div>
+              {hasBalance && <div className="bg-red-50 rounded-lg p-3 flex items-center gap-2"><span className="text-red-500 text-lg">⚠️</span><p className="text-xs text-red-600 font-medium">Outstanding balance remaining</p></div>}
+            </div>
+          </div>
+
+          {/* Items */}
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Items ({o.items?.length || 0})</p>
+            <div className="space-y-2">
+              {o.items?.map((item, i) => (
+                <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">Item {i+1}</span>
+                    {item.itemCode && <span className="text-xs text-gray-400">[{item.itemCode}]</span>}
+                    <span className="text-sm font-semibold text-gray-800">{item.itemName || "-"}</span>
+                    <span className="text-xs text-gray-500 ml-auto">Qty: {item.unit}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div><span className="text-gray-400">Supplier:</span> <span className="font-medium">{item.supplier || "-"}</span></div>
+                    <div><span className="text-gray-400">Item Order:</span> <span className="font-medium">{fmt(item.itemOrderDate)}</span></div>
+                    <div><span className="text-gray-400">Sent Out:</span> <span className="font-medium">{fmt(item.supplierSentDate)}</span></div>
+                    <div><span className="text-gray-400">Arrival:</span> <span className="font-medium">{fmt(item.arrivalDate)}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Notes */}
+          {(o.remark || o.serviceNote) && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Notes</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {o.remark && <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Remark</p><p className="text-sm text-gray-800">{o.remark}</p></div>}
+                {o.serviceNote && <div className="bg-purple-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Service Note</p><p className="text-sm text-purple-700 font-medium">{o.serviceNote}</p></div>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t flex items-center justify-between">
+          <button onClick={() => { if (window.confirm("Delete this order? This cannot be undone.")) onDelete(o.id); }} className="text-xs text-red-400 hover:text-red-600 hover:underline">Delete Order</button>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+            <button onClick={onEdit} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1">✏️ Edit Order</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +153,7 @@ export default function App() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalResults, setGlobalResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [viewOrder, setViewOrder] = useState(null);
 
   const loadOrders = async () => {
     setLoading(true); setError(null);
@@ -96,6 +196,16 @@ export default function App() {
     ));
   };
 
+  const handleView = o => setViewOrder(o);
+  const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
+  const handleDelete = async id => {
+    await supabase.from("orders").delete().eq("id", id);
+    setOrders(prev => prev.filter(o => o.id !== id));
+    setShowDeleteId(null);
+    setViewOrder(null);
+  };
+  const updateStatus = async (o, status) => { setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x)); await supabase.from("orders").update({ status }).eq("id", o.id); };
+
   const handleSubmit = async () => {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
@@ -116,10 +226,6 @@ export default function App() {
     setSaving(false);
   };
 
-  const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
-  const handleDelete = async id => { await supabase.from("orders").delete().eq("id", id); setOrders(prev => prev.filter(o => o.id !== id)); setShowDeleteId(null); };
-  const updateStatus = async (o, status) => { setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x)); await supabase.from("orders").update({ status }).eq("id", o.id); };
-
   const MonthNav = () => (
     <div className="flex items-center gap-3 mb-4">
       <button onClick={() => setBrowseMonth(prevMonth(browseMonth))} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm hover:bg-gray-50 font-medium">Prev</button>
@@ -129,25 +235,33 @@ export default function App() {
     </div>
   );
 
+  // SO number cell with view + edit
+  const SoCell = ({ o }) => (
+    <div className="flex items-center gap-1 whitespace-nowrap">
+      <button onClick={() => handleView(o)} className="font-bold text-blue-700 hover:underline text-xs">{o.soNumber}</button>
+      <button onClick={() => handleEdit(o)} className="text-gray-300 hover:text-blue-500 text-xs" title="Edit order">✏️</button>
+    </div>
+  );
+
   const OrderTable = ({ list, showService = false }) => (
     <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
       <table className="min-w-full text-xs border-collapse">
         <thead>
           <tr className="bg-gray-100 text-gray-600">
-            {["SO #","Customer","Contact","Time Slot","Plate No","Order Date","Salesman","Amount","Balance","Items","Supplier","Item Order","Sent Out","Arrival","Delivery Date","Status", showService ? "Service Note" : "Remark","Actions"].map(h => (
+            {["SO #","Customer","Contact","Time Slot","Plate No","Order Date","Salesman","Amount","Balance","Items","Supplier","Item Order","Sent Out","Arrival","Delivery Date","Status", showService ? "Service Note" : "Remark"].map(h => (
               <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {list.length === 0
-            ? <tr><td colSpan={18} className="text-center py-8 text-gray-400">No records found</td></tr>
+            ? <tr><td colSpan={17} className="text-center py-8 text-gray-400">No records found</td></tr>
             : list.map((o, i) => {
               const rowSpan = o.items?.length || 1;
               return o.items?.map((item, ii) => (
                 <tr key={`${i}-${ii}`} className={`${ii === 0 ? "border-t-2 border-gray-300" : ""} hover:bg-blue-50`}>
                   {ii === 0 && <>
-                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 font-bold text-blue-700 whitespace-nowrap align-top">{o.soNumber}</td>
+                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><SoCell o={o} /></td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><div className="font-medium whitespace-nowrap">{o.customerName}</div><div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div></td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.contact}</td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium text-indigo-700">{o.timeSlot || "-"}</td>
@@ -175,12 +289,6 @@ export default function App() {
                       </select>
                     </td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 max-w-32 align-top">{showService ? o.serviceNote : o.remark}</td>
-                    <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
-                      <div className="flex gap-1">
-                        <button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button>
-                        <button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button>
-                      </div>
-                    </td>
                   </>}
                 </tr>
               ));
@@ -267,13 +375,13 @@ export default function App() {
             <h2 className="text-base font-bold text-gray-700 mb-3">📊 Summary — {monthLabel(thisMonth)}</h2>
             <div className="flex flex-col gap-4">
 
-              {/* Row 1: 4 summary cards in one row */}
-              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              {/* Row 1: 4 summary cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 {[
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
                   { label: `📅 ${monthLabel(thisMonth)}`, count: thisMonthOrders.length, color: "bg-blue-500", border: "border-blue-300", items: thisMonthOrders },
                   { label: `📅 ${monthLabel(nm)}`, count: nextMonthOrders.length, color: "bg-orange-400", border: "border-orange-300", items: nextMonthOrders },
-                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: null },
+                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: afterOrders },
                 ].map(({ label, count, color, border, items }) => (
                   <div key={label} className={`rounded-xl border-2 ${border} overflow-hidden shadow-sm`}>
                     <div className={`${color} text-white px-4 py-2 flex items-center justify-between`}>
@@ -282,7 +390,11 @@ export default function App() {
                     </div>
                     {items && items.length > 0 && (
                       <div className="bg-white px-3 py-2 flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                        {items.map((o, i) => <span key={i} onClick={() => handleEdit(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</span>)}
+                        {items.map((o, i) => (
+                          <span key={i} className="flex items-center gap-0.5">
+                            <button onClick={() => handleView(o)} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 hover:bg-gray-200 cursor-pointer font-medium text-gray-700 border border-gray-200">{o.soNumber}</button>
+                          </span>
+                        ))}
                       </div>
                     )}
                     {items && items.length === 0 && <div className="bg-white px-3 py-2 text-xs text-gray-400">No orders</div>}
@@ -290,17 +402,17 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Row 2: Calendar (left) + Outstanding Balance (right) */}
-              <div className="flex flex-col xl:flex-row gap-4">
+              {/* Row 2: Calendar + Outstanding — fixed layout */}
+              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_420px] gap-4">
 
                 {/* Calendar */}
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 overflow-x-auto">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <table className="w-full text-xs border-collapse">
+                    <table className="w-full min-w-[720px] text-xs border-collapse table-fixed">
                       <thead>
                         <tr>
                           {["MON","TUE","WED","THU","FRI","SAT","SUN"].map(d => (
-                            <th key={d} className={`px-1 py-2 border border-gray-200 text-center font-bold text-xs w-14 ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>
+                            <th key={d} className={`px-1 py-2 border border-gray-200 text-center font-bold text-xs ${d === "SAT" || d === "SUN" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{d}</th>
                           ))}
                         </tr>
                       </thead>
@@ -311,12 +423,12 @@ export default function App() {
                               const dayOrders = day ? ordersOnDay(day) : [];
                               const isToday = getDateStr(day) === todayStr;
                               return (
-                                <td key={di} className={`border border-gray-200 px-1 py-1 align-top w-14 h-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
+                                <td key={di} className={`border border-gray-200 px-1 py-1 align-top h-16 ${!day ? "bg-gray-50" : isToday ? "bg-yellow-50" : di >= 5 ? "bg-blue-50" : ""}`}>
                                   {day && <>
                                     <div className={`text-xs font-bold mb-0.5 ${isToday ? "text-yellow-600" : "text-gray-400"}`}>{day}</div>
                                     <div className="flex flex-col gap-0.5">
                                       {dayOrders.map((o, oi) => (
-                                        <span key={oi} onClick={() => handleEdit(o)} className={`text-xs px-1 rounded cursor-pointer hover:opacity-80 truncate block leading-tight ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</span>
+                                        <button key={oi} onClick={() => handleView(o)} className={`text-xs px-1 rounded hover:opacity-80 truncate text-left leading-tight ${o.type === "Service" ? "bg-green-200 text-green-800" : "bg-blue-200 text-blue-800"}`}>{o.soNumber}</button>
                                       ))}
                                     </div>
                                   </>}
@@ -331,12 +443,12 @@ export default function App() {
                 </div>
 
                 {/* Outstanding Balance */}
-                <div className="flex-shrink-0">
+                <div className="min-w-0 overflow-x-auto">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <table className="text-xs border-collapse">
+                    <table className="min-w-[420px] text-xs border-collapse w-full">
                       <thead>
                         <tr className="bg-gray-100">
-                          {["No","SO No","Sales Person","Amount (RM)","Balance (RM)","Deliver Date","Date Dif","Transfer/Cash"].map(h => (
+                          {["No","SO No","Sales Person","Amount","Balance","Deliver Date","Date Dif","Remark"].map(h => (
                             <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -350,7 +462,9 @@ export default function App() {
                             return (
                               <tr key={i} className="hover:bg-gray-50">
                                 <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-center font-medium text-blue-700 cursor-pointer hover:underline" onClick={() => handleEdit(o)}>{o.soNumber}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">
+                                  <button onClick={() => handleView(o)} className="font-medium text-blue-700 hover:underline">{o.soNumber}</button>
+                                </td>
                                 <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
                                 <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
                                 <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
@@ -418,14 +532,14 @@ export default function App() {
                   <table className="min-w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-100 text-gray-600">
-                        {["Time Slot","Plate No","SO #","Customer","Contact","Type","Items","Supplier","Arrival","Amount","Balance","Status","Remark / Service Note","Actions"].map(h => (
+                        {["Time Slot","Plate No","SO #","Customer","Contact","Type","Items","Supplier","Arrival","Amount","Balance","Status","Remark / Service Note"].map(h => (
                           <th key={h} className="border border-gray-200 px-2 py-2 whitespace-nowrap text-left font-semibold">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {dailyOrders.length === 0
-                        ? <tr><td colSpan={14} className="text-center py-8 text-gray-400">No orders.</td></tr>
+                        ? <tr><td colSpan={13} className="text-center py-8 text-gray-400">No orders.</td></tr>
                         : dailyOrders.map((o, i) => {
                           const isService = o.type === "Service";
                           const rowSpan = o.items?.length || 1;
@@ -434,7 +548,7 @@ export default function App() {
                               {ii === 0 && <>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium text-indigo-700">{o.timeSlot || "-"}</td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">{o.plateNo || "-"}</td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 font-bold text-blue-700 whitespace-nowrap align-top">{o.soNumber}</td>
+                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top"><SoCell o={o} /></td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top">
                                   <div className="font-medium whitespace-nowrap">{o.customerName}</div>
                                   <div className="text-gray-400 text-xs max-w-40 leading-tight">{o.address}</div>
@@ -464,12 +578,6 @@ export default function App() {
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">
                                   {isService && o.serviceNote && <div className="text-purple-700 font-medium mb-1">{o.serviceNote}</div>}
                                   {o.remark && <div className="text-gray-500">{o.remark}</div>}
-                                </td>
-                                <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
-                                  <div className="flex gap-1">
-                                    <button onClick={() => handleEdit(o)} className="bg-blue-500 text-white px-2 py-0.5 rounded text-xs hover:bg-blue-600">Edit</button>
-                                    <button onClick={() => setShowDeleteId(o.id)} className="bg-red-400 text-white px-2 py-0.5 rounded text-xs hover:bg-red-500">Del</button>
-                                  </div>
                                 </td>
                               </>}
                             </tr>
@@ -581,6 +689,16 @@ export default function App() {
 
       </div>
 
+      {/* Order View Modal */}
+      {viewOrder && (
+        <OrderViewModal
+          order={viewOrder}
+          onClose={() => setViewOrder(null)}
+          onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }}
+          onDelete={handleDelete}
+        />
+      )}
+
       {/* Search Modal */}
       {showSearch && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-20 px-4">
@@ -593,7 +711,7 @@ export default function App() {
             <div className="max-h-96 overflow-y-auto">
               {globalSearch && globalResults.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No results found</div>}
               {globalResults.map((o, i) => (
-                <div key={i} onClick={() => { handleEdit(o); setShowSearch(false); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100">
+                <div key={i} onClick={() => { handleView(o); setShowSearch(false); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100">
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-bold text-blue-700 text-sm">{o.soNumber}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>{o.type}</span>
@@ -613,7 +731,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Delete Modal */}
+      {/* Delete Confirm Modal */}
       {showDeleteId !== null && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
