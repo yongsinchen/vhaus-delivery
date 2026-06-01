@@ -39,11 +39,51 @@ export default function App() {
   const [globalResults, setGlobalResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
 
+  const toDb = o => ({
+    so_number: o.soNumber,
+    customer_name: o.customerName,
+    address: o.address,
+    contact: o.contact,
+    order_date: o.orderDate,
+    salesman: o.salesman,
+    order_amount: o.orderAmount,
+    balance: o.balance,
+    delivery_date: o.deliveryDate,
+    time_slot: o.timeSlot,
+    plate_no: o.plateNo,
+    type: o.type,
+    service_note: o.serviceNote,
+    remark: o.remark,
+    status: o.status,
+    items: JSON.stringify(o.items || [])
+  });
+
+  const fromDb = o => ({
+    id: o.id,
+    created_at: o.created_at,
+    soNumber: o.so_number,
+    customerName: o.customer_name,
+    address: o.address,
+    contact: o.contact,
+    orderDate: o.order_date,
+    salesman: o.salesman,
+    orderAmount: o.order_amount,
+    balance: o.balance,
+    deliveryDate: o.delivery_date,
+    timeSlot: o.time_slot,
+    plateNo: o.plate_no,
+    type: o.type,
+    serviceNote: o.service_note,
+    remark: o.remark,
+    status: o.status,
+    items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
+  });
+
   const loadOrders = async () => {
     setLoading(true); setError(null);
     const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
     if (error) setError("Failed to load orders: " + error.message);
-    else setOrders((data || []).map(o => ({ ...o, items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || []) })));
+    else setOrders((data || []).map(fromDb));
     setLoading(false);
   };
 
@@ -84,7 +124,7 @@ export default function App() {
     if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
     setSaving(true);
     const { id, created_at, ...rest } = form;
-    const payload = { ...rest, items: JSON.stringify(rest.items || []) };
+    const payload = toDb(form);
     if (editId !== null) {
       const { error } = await supabase.from("orders").update(payload).eq("id", editId);
       if (error) { alert("Error updating: " + error.message); setSaving(false); return; }
@@ -93,7 +133,7 @@ export default function App() {
     } else {
       const { data, error } = await supabase.from("orders").insert(payload).select();
       if (error) { alert("Error saving: " + error.message); setSaving(false); return; }
-      if (data?.[0]) setOrders(prev => [...prev, { ...data[0], items: form.items }]);
+      if (data?.[0]) setOrders(prev => [...prev, fromDb(data[0])]);
     }
     setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
     setSaved(true); setTimeout(() => setSaved(false), 2000);
