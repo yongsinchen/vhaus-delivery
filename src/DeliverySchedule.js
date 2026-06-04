@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
-const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
+
 const statusColor = s => ({
   "Pending": "bg-yellow-100 text-yellow-800",
   "Out for Delivery": "bg-blue-100 text-blue-800",
