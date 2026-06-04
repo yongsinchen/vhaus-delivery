@@ -35,7 +35,7 @@ const fromDb = o => ({
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
-const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Add Order"];
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "Add Order"];
 
 // ── Order View Modal ──────────────────────────────────────────────
 const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
@@ -491,7 +491,8 @@ export default function App() {
             </div>
           </div>
         )}
-
+ {/* Delivery Schedule */}
+{activeTab === "Delivery Schedule" && <DeliverySchedule />}
         {/* MONTHLY VIEW */}
         {activeTab === "Monthly View" && (
           <div>
