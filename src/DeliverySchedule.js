@@ -524,9 +524,6 @@ export default function DeliverySchedule() {
       // Also add to delivery_route_orders using the SO's order id
       const trip = trips.find(t => t.id === id);
       if (trip) {
-        const { data: orderData } = await fetch(`${API}/delivery/unassigned?date=${date}`).then(r => r.json()).catch(() => ({ data: [] }));
-        // Find order id from unassigned or just use so_number lookup via a separate endpoint
-        // For now assign using trip's linked order
         const tripOrder = unassigned.find(o => o.so_number === trip.so_number);
         if (tripOrder) {
           await fetch(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order_id: tripOrder.id, sequence_no: seqNo }) });
