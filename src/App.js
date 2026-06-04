@@ -35,7 +35,7 @@ const fromDb = o => ({
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
-const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "Add Order"];
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "Add Order"];
 
 // ── Order View Modal ───testing───────────────────────────────────────────
 const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
@@ -156,6 +156,51 @@ export default function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [viewOrder, setViewOrder] = useState(null);
 
+  const [servicePending, setServicePending] = useState([]);
+  const [spLoading, setSpLoading] = useState(false);
+
+  const BACKEND = "https://vhaus-bot-production.up.railway.app";
+
+  const loadServicePending = async () => {
+    setSpLoading(true);
+    try {
+      const res = await fetch(`${BACKEND}/service-pending`);
+      const data = await res.json();
+      setServicePending(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to load service pending:", e);
+    }
+    setSpLoading(false);
+  };
+
+  const convertServicePending = async (id) => {
+    try {
+      const res = await fetch(`${BACKEND}/service-pending/${id}/convert`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Converted to Service Order: ${data.svNumber}`);
+        loadServicePending();
+        loadOrders();
+      } else {
+        alert("Failed to convert: " + (data.error || "Unknown error"));
+      }
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  };
+
+  const removeServicePending = async (id) => {
+    if (!window.confirm("Remove this service pending? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${BACKEND}/service-pending/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) loadServicePending();
+      else alert("Failed: " + (data.error || "Unknown error"));
+    } catch (e) {
+      alert("Error: " + e.message);
+    }
+  };
+
   const loadOrders = async () => {
     setLoading(true); setError(null);
     const { data, error: err } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
@@ -164,7 +209,7 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => { loadOrders(); }, []); // eslint-disable-line
+  useEffect(() => { loadOrders(); loadServicePending(); }, []); // eslint-disable-line
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -356,7 +401,7 @@ export default function App() {
         </div>
       </div>
 
-      {!["Add Order","Summary","Daily View","🚨 Flagged"].includes(activeTab) && (
+      {!["Add Order","Summary","Daily View","🚨 Flagged","🔧 Service Pending"].includes(activeTab) && (
         <div className="max-w-7xl mx-auto px-4 pt-3 flex flex-wrap gap-2">
           <input placeholder="🔍 Search..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300" />
           <select value={filterSalesman} onChange={e => setFilterSalesman(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
@@ -494,6 +539,91 @@ export default function App() {
         )}
  {/* Delivery Schedule */}
 {activeTab === "Delivery Schedule" && <DeliverySchedule />}
+
+        {/* SERVICE PENDING */}
+        {activeTab === "🔧 Service Pending" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-bold text-gray-700">🔧 Service Pending</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Orders not settled by driver. Convert to a Service Order (SV-xxx) or remove if not applicable.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="bg-orange-100 text-orange-700 font-bold text-sm px-3 py-1 rounded-full">{servicePending.length} pending</span>
+                <button onClick={loadServicePending} className="text-xs bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">🔄 Refresh</button>
+              </div>
+            </div>
+            {spLoading ? (
+              <div className="text-center py-12 text-gray-400 text-sm">Loading...</div>
+            ) : servicePending.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">✅</div>
+                <div className="font-medium">No pending services</div>
+                <div className="text-xs mt-1">All deliveries settled</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {servicePending.map(sp => (
+                  <div key={sp.id} className="bg-white border-2 border-orange-200 rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-orange-50 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-orange-500 text-lg">🔧</span>
+                        <div>
+                          <span className="font-bold text-blue-700 text-sm">SO {sp.so_number}</span>
+                          <span className="text-xs bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded-full ml-2">Not Settled</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => removeServicePending(sp.id)}
+                          className="text-xs bg-white border border-red-300 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50"
+                        >
+                          🗑 Remove
+                        </button>
+                        <button
+                          onClick={() => convertServicePending(sp.id)}
+                          className="text-xs bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600"
+                        >
+                          → Convert to Service
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-400 mb-1">🚚 Driver</p>
+                        <p className="text-sm font-semibold">{sp.driver || "-"}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-400 mb-1">🤝 Helper (Kelindan)</p>
+                        <p className="text-sm font-semibold">{sp.helper || "-"}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-400 mb-1">📅 Date</p>
+                        <p className="text-sm font-semibold">{sp.date ? fmt(sp.date) : "-"}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-400 mb-1">🕒 Reported</p>
+                        <p className="text-sm font-semibold">{sp.created_at ? new Date(sp.created_at).toLocaleDateString("en-MY") : "-"}</p>
+                      </div>
+                      {sp.note && (
+                        <div className="col-span-2 sm:col-span-4 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                          <p className="text-xs font-bold text-orange-600 mb-1">📝 Issue / Note</p>
+                          <p className="text-sm text-gray-800">{sp.note}</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="px-4 py-2 border-t bg-gray-50">
+                      <p className="text-xs text-gray-400">
+                        Convert to create a new Service Order with running number (SV-001, SV-002...).
+                        Remove if the issue is resolved or not applicable.
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* FLAGGED ORDERS */}
         {activeTab === "🚨 Flagged" && (
