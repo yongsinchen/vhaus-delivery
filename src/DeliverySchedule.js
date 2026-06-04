@@ -414,7 +414,7 @@ export default function DeliverySchedule() {
   const handleAssignedDrop = async (routeId, toIndex) => {
     if (!draggingAssigned || draggingAssigned.routeId !== routeId) return;
     const { fromIndex } = draggingAssigned;
-    if (fromIndex === toIndex) { setDraggingAssigned(null); setDragOverIndex(null); return; }
+    if (fromIndex === toIndex) { setDraggingAssigned(null); return; }
 
     // Reorder locally
     const route = routes.find(r => r.id === routeId);
