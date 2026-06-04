@@ -8,6 +8,13 @@ const statusColor = s => ({
   "Delivered": "bg-green-100 text-green-800",
 }[s] || "bg-gray-100 text-gray-700");
 
+// Malaysia local date helper
+const getMalaysiaDate = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit"
+}).format(new Date());
+
+const todayMY = getMalaysiaDate();
+
 const parseItems = items => {
   try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); }
   catch { return []; }
@@ -73,10 +80,16 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
         )}
       </div>
 
-      {/* Row 2: Address | Preferred | Scheduled */}
+      {/* Row 2: Address | Placed Date | Preferred | Scheduled | Remark */}
       <div className="space-y-1.5 mb-1.5">
         <p className="text-xs text-gray-400 truncate">{o.address}</p>
 
+        {/* Placed Order Date */}
+        <p className="text-xs text-gray-500">
+          <span className="text-gray-400">Placed Order Date:</span> {o.order_date || "-"}
+        </p>
+
+        {/* Preferred Time */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-400 flex-shrink-0">Preferred:</span>
           {preferredTime
@@ -111,6 +124,13 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
         {isLocked && scheduledTime && (
           <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">⏰ {scheduledTime}</span>
         )}
+
+        {/* Remark */}
+        {o.remark && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded p-2 text-xs">
+            <span className="font-semibold">Remark: </span>{o.remark}
+          </div>
+        )}
       </div>
 
       {/* Row 3: Eye + Items + Route Note */}
@@ -124,12 +144,23 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
             {items.length === 0
               ? <p className="text-xs text-gray-400">No items found.</p>
               : items.map((item, i) => (
-                <div key={i} className="text-xs">
+                <div key={i} className="text-xs border-b border-gray-50 pb-1.5 last:border-0 last:pb-0">
                   <p className="font-medium text-gray-700">
                     {i + 1}. {item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName || "-"} <span className="text-gray-400">x{item.unit || 1}</span>
                   </p>
                   {item.supplier && <p className="text-gray-400 ml-3">Supplier: {item.supplier}</p>}
-                  {item.arrivalDate && <p className="text-gray-400 ml-3">Arrival: {item.arrivalDate}</p>}
+                  <p className="ml-3">
+                    <span className="text-gray-400">Supplier Order Date: </span>
+                    {item.itemOrderDate
+                      ? <span className="text-gray-600">{item.itemOrderDate}</span>
+                      : <span className="text-gray-400">-</span>}
+                  </p>
+                  <p className="ml-3">
+                    <span className="text-gray-400">Arrival: </span>
+                    {item.arrivalDate
+                      ? <span className="text-gray-600">{item.arrivalDate}</span>
+                      : <span className="text-red-600 font-semibold">No arrival date</span>}
+                  </p>
                 </div>
               ))}
           </div>
@@ -541,12 +572,21 @@ export default function DeliverySchedule() {
                           {isLocked && <p className="text-xs text-orange-500 mt-0.5">Route is locked because it is already out for delivery.</p>}
                         </div>
                         <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex flex-col items-end gap-1">
                           <select value={route.status} onChange={e => updateStatus(route.id, e.target.value)}
                             className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
                             {isLocked
                               ? ["Out for Delivery", "Delivered"].map(s => <option key={s}>{s}</option>)
-                              : ["Pending", "Out for Delivery", "Delivered"].map(s => <option key={s}>{s}</option>)}
+                              : ["Pending"].concat(
+                                  route.delivery_date === todayMY ? ["Out for Delivery"] : [],
+                                  ["Delivered"]
+                                ).map(s => <option key={s}>{s}</option>)
+                            }
                           </select>
+                          {!isLocked && route.delivery_date !== todayMY && (
+                            <p className="text-xs text-orange-400 text-right">Out for Delivery only available on delivery date.</p>
+                          )}
+                        </div>
                           {!isLocked && <>
                             <button onClick={() => { setEditRouteId(route.id); setEditRoute({ ...route }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
                             <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
