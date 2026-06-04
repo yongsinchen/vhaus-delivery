@@ -8,7 +8,6 @@ const statusColor = s => ({
   "Delivered": "bg-green-100 text-green-800",
 }[s] || "bg-gray-100 text-gray-700");
 
-// ── Helpers ───────────────────────────────────────────────────────
 const parseItems = items => {
   try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); }
   catch { return []; }
@@ -17,10 +16,11 @@ const parseItems = items => {
 const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", status: "Active" };
 const EMPTY_ROUTE = { vehicle_id: "", lorry_plate: "", driver_name: "", area: "", notes: "" };
 
-// ── Assigned Order Card — OUTSIDE main component ──────────────────
-function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
+// ── Assigned Order Card ───────────────────────────────────────────
+function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragStart, onDragOver, onDrop, onSaved }) {
   const o = ro.orders;
   const [scheduledTime, setScheduledTime] = useState(ro.scheduled_time_range || "");
+  const [editingTime, setEditingTime] = useState(!ro.scheduled_time_range);
   const [routeNote, setRouteNote] = useState(ro.route_note || "");
   const [showItems, setShowItems] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -30,6 +30,7 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
   const preferredTime = o.time_slot || "";
 
   const saveScheduledTime = async () => {
+    if (!scheduledTime.trim()) return;
     setSaving(true);
     await fetch(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
       method: "PATCH",
@@ -37,8 +38,11 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
       body: JSON.stringify({ scheduled_time_range: scheduledTime })
     });
     setSaving(false);
+    setEditingTime(false);
     if (onSaved) onSaved();
   };
+
+  const usePreferred = () => { if (preferredTime) setScheduledTime(preferredTime); };
 
   const saveRouteNote = async (val) => {
     setRouteNote(val);
@@ -49,39 +53,30 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
     });
   };
 
-  const usePreferred = () => {
-    if (!preferredTime) return;
-    setScheduledTime(preferredTime);
-  };
-
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
-
-      {/* Row 1: Seq | SO | Customer | Balance | Unassign */}
-      <div className="flex items-center gap-2 mb-1.5">
-        <input
-          type="number"
-          value={ro.sequence_no}
-          min={1}
-          onChange={e => onSeqChange(routeId, o.id, e.target.value)}
-          className="w-8 text-center border rounded text-xs py-0.5 font-bold text-blue-700 flex-shrink-0"
-        />
-        <span className="font-bold text-blue-700 text-xs">{o.so_number}</span>
+    <div
+      className={`bg-gray-50 border rounded-lg p-2 ${isLocked ? "border-gray-200 opacity-80" : "border-gray-200 cursor-grab"}`}
+      draggable={!isLocked}
+      onDragStart={() => !isLocked && onDragStart(index)}
+      onDragOver={e => { e.preventDefault(); !isLocked && onDragOver(index); }}
+      onDrop={() => !isLocked && onDrop(index)}
+    >
+      {/* Row 1: Handle | # | SO | Customer | Balance | Unassign */}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab">⋮⋮</span>}
+        <span className="text-xs text-gray-400 font-medium flex-shrink-0">#{index + 1}</span>
+        <span className="font-bold text-blue-700 text-xs flex-shrink-0">{o.so_number}</span>
         <span className="text-xs font-medium text-gray-700 truncate flex-1">{o.customer_name}</span>
-        {parseFloat(o.balance) > 0 && (
-          <span className="text-red-500 text-xs font-medium flex-shrink-0">RM {o.balance}</span>
+        {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs font-medium flex-shrink-0">RM {o.balance}</span>}
+        {!isLocked && (
+          <button onClick={() => onUnassign(routeId, o.id)} className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0" title="Unassign">x</button>
         )}
-        <button
-          onClick={() => onUnassign(routeId, o.id)}
-          className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0"
-          title="Unassign">x</button>
       </div>
 
-      {/* Row 2: Address | Preferred Time | Scheduled Time */}
+      {/* Row 2: Address | Preferred | Scheduled */}
       <div className="space-y-1.5 mb-1.5">
         <p className="text-xs text-gray-400 truncate">{o.address}</p>
 
-        {/* Preferred Time */}
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-400 flex-shrink-0">Preferred:</span>
           {preferredTime
@@ -89,45 +84,43 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
             : <span className="text-xs text-gray-300">-</span>}
         </div>
 
-        {/* Scheduled Time input + Save + Use Current */}
-        <div className="flex items-center gap-1">
-          <input
-            value={scheduledTime}
-            onChange={e => setScheduledTime(e.target.value)}
-            placeholder="Actual scheduled time..."
-            className={`flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 min-w-0 ${scheduledTime ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500"}`}
-          />
-          {preferredTime && (
-            <button
-              onClick={usePreferred}
-              className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-1 rounded whitespace-nowrap flex-shrink-0"
-              title="Copy preferred time">
-              Use
-            </button>
-          )}
-          <button
-            onClick={saveScheduledTime}
-            disabled={saving}
-            className="text-xs bg-blue-600 text-white hover:bg-blue-700 px-2 py-1 rounded flex-shrink-0 disabled:opacity-50">
-            {saving ? "..." : "Save"}
-          </button>
-        </div>
+        {!isLocked && (
+          editingTime ? (
+            <div className="flex items-center gap-1">
+              <input
+                value={scheduledTime}
+                onChange={e => setScheduledTime(e.target.value)}
+                placeholder="Actual scheduled time..."
+                className={`flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 min-w-0 ${scheduledTime ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500"}`}
+              />
+              {preferredTime && (
+                <button onClick={usePreferred} className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-1 rounded whitespace-nowrap flex-shrink-0">Use</button>
+              )}
+              <button onClick={saveScheduledTime} disabled={saving} className="text-xs bg-blue-600 text-white hover:bg-blue-700 px-2 py-1 rounded flex-shrink-0 disabled:opacity-50">
+                {saving ? "..." : "Save"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 flex-1 truncate">⏰ {scheduledTime}</span>
+              <button onClick={() => setEditingTime(true)} className="text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 px-2 py-1 rounded flex-shrink-0">Edit</button>
+            </div>
+          )
+        )}
+
+        {isLocked && scheduledTime && (
+          <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">⏰ {scheduledTime}</span>
+        )}
       </div>
 
-      {/* Row 3: Eye button + Route Note */}
+      {/* Row 3: Eye + Items + Route Note */}
       <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowItems(p => !p)}
-            className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
-            title="Toggle items">
-            👁️ <span>{showItems ? "Hide Items" : "View Items"}</span>
-          </button>
-        </div>
+        <button onClick={() => setShowItems(p => !p)} className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1">
+          👁️ <span>{showItems ? "Hide Items" : "View Items"}</span>
+        </button>
 
-        {/* Items list */}
         {showItems && (
-          <div className="bg-white border border-gray-100 rounded-lg p-2 mt-1 space-y-1.5">
+          <div className="bg-white border border-gray-100 rounded-lg p-2 space-y-1.5">
             {items.length === 0
               ? <p className="text-xs text-gray-400">No items found.</p>
               : items.map((item, i) => (
@@ -142,20 +135,22 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
           </div>
         )}
 
-        {/* Route Note */}
-        <input
-          value={routeNote}
-          onChange={e => setRouteNote(e.target.value)}
-          onBlur={e => saveRouteNote(e.target.value)}
-          placeholder="Route note (optional)"
-          className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
-        />
+        {!isLocked && (
+          <input
+            value={routeNote}
+            onChange={e => setRouteNote(e.target.value)}
+            onBlur={e => saveRouteNote(e.target.value)}
+            placeholder="Route note (optional)"
+            className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
+          />
+        )}
+        {isLocked && routeNote && <p className="text-xs text-gray-400 italic">{routeNote}</p>}
       </div>
     </div>
   );
 }
 
-// ── Vehicle Modal — OUTSIDE main component ────────────────────────
+// ── Vehicle Modal ─────────────────────────────────────────────────
 function VehicleModal({ vehicles, onClose, onRefresh }) {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
@@ -164,30 +159,18 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
 
   const createVehicle = async () => {
     if (!newVehicle.driver_name && !newVehicle.vehicle_plate) return alert("Please enter driver name or vehicle plate.");
-    await fetch(`${API}/delivery/vehicles`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newVehicle)
-    });
-    setNewVehicle({ ...EMPTY_VEHICLE });
-    setShowAddVehicle(false);
-    onRefresh();
+    await fetch(`${API}/delivery/vehicles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newVehicle) });
+    setNewVehicle({ ...EMPTY_VEHICLE }); setShowAddVehicle(false); onRefresh();
   };
 
   const saveVehicle = async (id) => {
-    await fetch(`${API}/delivery/vehicles/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editVehicle)
-    });
-    setEditVehicleId(null);
-    onRefresh();
+    await fetch(`${API}/delivery/vehicles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editVehicle) });
+    setEditVehicleId(null); onRefresh();
   };
 
   const deleteVehicle = async (id) => {
     if (!window.confirm("Delete this vehicle?")) return;
-    await fetch(`${API}/delivery/vehicles/${id}`, { method: "DELETE" });
-    onRefresh();
+    await fetch(`${API}/delivery/vehicles/${id}`, { method: "DELETE" }); onRefresh();
   };
 
   return (
@@ -202,26 +185,15 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
             <div className="bg-blue-50 rounded-xl p-4 mb-4 border border-blue-200">
               <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3">Add New Vehicle</p>
               <div className="grid grid-cols-2 gap-3">
-                {[
-                  { k: "driver_name", l: "Driver Name" },
-                  { k: "vehicle_plate", l: "Vehicle Plate" },
-                  { k: "vehicle_type", l: "Vehicle Type (e.g. Lorry, Van)", span: true }
-                ].map(({ k, l, span }) => (
+                {[{ k: "driver_name", l: "Driver Name" }, { k: "vehicle_plate", l: "Vehicle Plate" }, { k: "vehicle_type", l: "Vehicle Type (e.g. Lorry, Van)", span: true }].map(({ k, l, span }) => (
                   <div key={k} className={span ? "col-span-2" : ""}>
                     <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
-                    <input
-                      value={newVehicle[k]}
-                      onChange={e => setNewVehicle(p => ({ ...p, [k]: e.target.value }))}
-                      className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                    />
+                    <input value={newVehicle[k]} onChange={e => setNewVehicle(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                   </div>
                 ))}
                 <div>
                   <label className="text-xs text-gray-500 block mb-0.5">Status</label>
-                  <select
-                    value={newVehicle.status}
-                    onChange={e => setNewVehicle(p => ({ ...p, status: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+                  <select value={newVehicle.status} onChange={e => setNewVehicle(p => ({ ...p, status: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
                     <option>Active</option><option>Inactive</option>
                   </select>
                 </div>
@@ -241,26 +213,15 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
                 {editVehicleId === v.id ? (
                   <div>
                     <div className="grid grid-cols-2 gap-2 mb-2">
-                      {[
-                        { k: "driver_name", l: "Driver Name" },
-                        { k: "vehicle_plate", l: "Vehicle Plate" },
-                        { k: "vehicle_type", l: "Vehicle Type" }
-                      ].map(({ k, l }) => (
+                      {[{ k: "driver_name", l: "Driver Name" }, { k: "vehicle_plate", l: "Vehicle Plate" }, { k: "vehicle_type", l: "Vehicle Type" }].map(({ k, l }) => (
                         <div key={k}>
                           <label className="text-xs text-gray-400 block mb-0.5">{l}</label>
-                          <input
-                            value={editVehicle[k] || ""}
-                            onChange={e => setEditVehicle(p => ({ ...p, [k]: e.target.value }))}
-                            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
-                          />
+                          <input value={editVehicle[k] || ""} onChange={e => setEditVehicle(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300" />
                         </div>
                       ))}
                       <div>
                         <label className="text-xs text-gray-400 block mb-0.5">Status</label>
-                        <select
-                          value={editVehicle.status || "Active"}
-                          onChange={e => setEditVehicle(p => ({ ...p, status: e.target.value }))}
-                          className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300">
+                        <select value={editVehicle.status || "Active"} onChange={e => setEditVehicle(p => ({ ...p, status: e.target.value }))} className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300">
                           <option>Active</option><option>Inactive</option>
                         </select>
                       </div>
@@ -296,25 +257,20 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
   );
 }
 
-// ── Add Route Modal — OUTSIDE main component ──────────────────────
+// ── Add Route Modal ───────────────────────────────────────────────
 function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
   const [newRoute, setNewRoute] = useState({ ...EMPTY_ROUTE });
 
   const onVehicleSelect = (vehicleId) => {
     const v = activeVehicles.find(v => String(v.id) === String(vehicleId));
-    if (v) {
-      setNewRoute(p => ({ ...p, vehicle_id: v.id, lorry_plate: v.vehicle_plate || "", driver_name: v.driver_name || "" }));
-    } else {
-      setNewRoute(p => ({ ...p, vehicle_id: "" }));
-    }
+    if (v) setNewRoute(p => ({ ...p, vehicle_id: v.id, lorry_plate: v.vehicle_plate || "", driver_name: v.driver_name || "" }));
+    else setNewRoute(p => ({ ...p, vehicle_id: "" }));
   };
 
   const handleCreate = async () => {
     if (!newRoute.lorry_plate && !newRoute.driver_name) return alert("Please select a vehicle or enter lorry plate / driver name.");
     const res = await onCreate(newRoute);
-    if (res && res.error) {
-      alert(res.error);
-    }
+    if (res && res.error) alert(res.error);
   };
 
   return (
@@ -323,39 +279,22 @@ function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
         <h3 className="font-bold text-gray-800 mb-4">Add New Route</h3>
         <div className="mb-3">
           <label className="text-xs text-gray-500 block mb-0.5">Select Vehicle (Active only)</label>
-          <select
-            value={newRoute.vehicle_id}
-            onChange={e => onVehicleSelect(e.target.value)}
-            className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <select value={newRoute.vehicle_id} onChange={e => onVehicleSelect(e.target.value)} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
             <option value="">-- Select Vehicle --</option>
             {activeVehicles.map(v => (
-              <option key={v.id} value={v.id}>
-                {v.vehicle_plate ? `${v.vehicle_plate} — ` : ""}{v.driver_name || "Unknown driver"}{v.vehicle_type ? ` (${v.vehicle_type})` : ""}
-              </option>
+              <option key={v.id} value={v.id}>{v.vehicle_plate ? `${v.vehicle_plate} — ` : ""}{v.driver_name || "Unknown driver"}{v.vehicle_type ? ` (${v.vehicle_type})` : ""}</option>
             ))}
           </select>
           {activeVehicles.length === 0 && (
-            <p className="text-xs text-orange-500 mt-1">
-              No active vehicles.{" "}
-              <button onClick={onGoToVehicles} className="underline">Add vehicle first</button>
-            </p>
+            <p className="text-xs text-orange-500 mt-1">No active vehicles.{" "}<button onClick={onGoToVehicles} className="underline">Add vehicle first</button></p>
           )}
         </div>
         <p className="text-xs text-gray-400 mb-2">Or enter manually:</p>
         <div className="space-y-2">
-          {[
-            { k: "lorry_plate", l: "Lorry Plate No" },
-            { k: "driver_name", l: "Driver Name" },
-            { k: "area", l: "Area / Zone" },
-            { k: "notes", l: "Notes" }
-          ].map(({ k, l }) => (
+          {[{ k: "lorry_plate", l: "Lorry Plate No" }, { k: "driver_name", l: "Driver Name" }, { k: "area", l: "Area / Zone" }, { k: "notes", l: "Notes" }].map(({ k, l }) => (
             <div key={k}>
               <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
-              <input
-                value={newRoute[k]}
-                onChange={e => setNewRoute(p => ({ ...p, [k]: e.target.value }))}
-                className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
+              <input value={newRoute[k]} onChange={e => setNewRoute(p => ({ ...p, [k]: e.target.value }))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
             </div>
           ))}
         </div>
@@ -379,7 +318,9 @@ export default function DeliverySchedule() {
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [editRouteId, setEditRouteId] = useState(null);
   const [editRoute, setEditRoute] = useState({});
-  const [dragOrder, setDragOrder] = useState(null);
+  const [dragOrder, setDragOrder] = useState(null); // for unassigned drag
+  const [draggingAssigned, setDraggingAssigned] = useState(null); // { routeId, fromIndex }
+  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const loadRoutes = useCallback(async () => {
     setLoading(true);
@@ -410,63 +351,88 @@ export default function DeliverySchedule() {
 
   const createRoute = async (newRoute) => {
     const res = await fetch(`${API}/delivery/routes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...newRoute, delivery_date: date })
     });
     const data = await res.json();
     if (res.status === 409 || data.error) return { error: data.error };
-    setShowAddRoute(false);
-    loadRoutes();
+    setShowAddRoute(false); loadRoutes();
   };
 
   const updateRoute = async (id) => {
-    await fetch(`${API}/delivery/routes/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editRoute)
-    });
-    setEditRouteId(null);
-    loadRoutes();
+    await fetch(`${API}/delivery/routes/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editRoute) });
+    setEditRouteId(null); loadRoutes();
   };
 
   const deleteRoute = async (id) => {
-    if (!window.confirm("Delete this route? Assigned orders will be unassigned.")) return;
-    await fetch(`${API}/delivery/routes/${id}`, { method: "DELETE" });
+    if (!window.confirm("Delete this route?")) return;
+    const res = await fetch(`${API}/delivery/routes/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
     loadRoutes();
   };
 
   const assignOrder = async (routeId, orderId) => {
     const route = routes.find(r => r.id === routeId);
     const seqNo = (route?.orders?.length || 0) + 1;
-    await fetch(`${API}/delivery/routes/${routeId}/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const res = await fetch(`${API}/delivery/routes/${routeId}/orders`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order_id: orderId, sequence_no: seqNo })
     });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
     loadRoutes();
   };
 
   const unassignOrder = async (routeId, orderId) => {
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
+    const res = await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
     loadRoutes();
   };
 
   const updateStatus = async (routeId, status) => {
     await fetch(`${API}/delivery/routes/${routeId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status })
     });
     await loadRoutes();
   };
 
   const updateSeq = async (routeId, orderId, seq) => {
     await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sequence_no: parseInt(seq) })
     });
+  };
+
+  // ── Assigned order drag-to-sort ───────────────────────────────
+  const handleAssignedDragStart = (routeId, fromIndex) => {
+    setDraggingAssigned({ routeId, fromIndex });
+  };
+
+  const handleAssignedDragOver = (index) => {
+    setDragOverIndex(index);
+  };
+
+  const handleAssignedDrop = async (routeId, toIndex) => {
+    if (!draggingAssigned || draggingAssigned.routeId !== routeId) return;
+    const { fromIndex } = draggingAssigned;
+    if (fromIndex === toIndex) { setDraggingAssigned(null); setDragOverIndex(null); return; }
+
+    // Reorder locally
+    const route = routes.find(r => r.id === routeId);
+    if (!route) return;
+    const newOrders = [...route.orders];
+    const [moved] = newOrders.splice(fromIndex, 1);
+    newOrders.splice(toIndex, 0, moved);
+
+    // Optimistic update
+    setRoutes(prev => prev.map(r => r.id === routeId ? { ...r, orders: newOrders } : r));
+    setDraggingAssigned(null);
+    setDragOverIndex(null);
+
+    // Persist sequence to backend
+    await Promise.all(newOrders.map((ro, i) => updateSeq(routeId, ro.orders?.id || ro.order_id, i + 1)));
     loadRoutes();
   };
 
@@ -485,22 +451,8 @@ export default function DeliverySchedule() {
 
       {loading && <div className="text-center py-8 text-gray-400 text-sm">Loading...</div>}
 
-      {showVehicleModal && (
-        <VehicleModal
-          vehicles={vehicles}
-          onClose={() => setShowVehicleModal(false)}
-          onRefresh={loadVehicles}
-        />
-      )}
-
-      {showAddRoute && (
-        <AddRouteModal
-          activeVehicles={activeVehicles}
-          onClose={() => setShowAddRoute(false)}
-          onCreate={createRoute}
-          onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }}
-        />
-      )}
+      {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
+      {showAddRoute && <AddRouteModal activeVehicles={activeVehicles} onClose={() => setShowAddRoute(false)} onCreate={createRoute} onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }} />}
 
       <div className="flex flex-col xl:flex-row gap-4">
 
@@ -509,8 +461,7 @@ export default function DeliverySchedule() {
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
             <div className="px-4 py-3 border-b bg-orange-50 rounded-t-xl">
               <h3 className="text-sm font-bold text-orange-700">
-                📦 Unassigned
-                <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{unassigned.length}</span>
+                📦 Unassigned <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{unassigned.length}</span>
               </h3>
             </div>
             <div className="p-3 space-y-2 max-h-screen overflow-y-auto">
@@ -533,7 +484,9 @@ export default function DeliverySchedule() {
                         <select onChange={e => { if (e.target.value) assignOrder(e.target.value, o.id); }}
                           className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
                           <option value="">Assign to route...</option>
-                          {routes.map(r => <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>)}
+                          {routes.filter(r => r.status === "Pending").map(r => (
+                            <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>
+                          ))}
                         </select>
                       )}
                     </div>
@@ -553,68 +506,85 @@ export default function DeliverySchedule() {
             </div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {routes.map(route => (
-              <div key={route.id} className="bg-white rounded-xl border border-gray-200 shadow-sm"
-                onDragOver={e => e.preventDefault()}
-                onDrop={() => { if (dragOrder) { assignOrder(route.id, dragOrder.id); setDragOrder(null); } }}>
+            {routes.map(route => {
+              const isLocked = route.status === "Out for Delivery" || route.status === "Delivered";
+              return (
+                <div key={route.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : "border-gray-200"}`}
+                  onDragOver={e => { e.preventDefault(); if (dragOrder && !isLocked) {} }}
+                  onDrop={() => { if (dragOrder && !isLocked) { assignOrder(route.id, dragOrder.id); setDragOrder(null); } }}>
 
-                {editRouteId === route.id ? (
-                  <div className="px-4 py-3 border-b space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      {[{k:"lorry_plate",l:"Lorry Plate"},{k:"driver_name",l:"Driver"},{k:"area",l:"Area"},{k:"notes",l:"Notes"}].map(({k,l}) => (
-                        <div key={k}>
-                          <label className="text-xs text-gray-400">{l}</label>
-                          <input value={editRoute[k] || ""} onChange={e => setEditRoute(p => ({...p,[k]:e.target.value}))}
-                            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300" />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => setEditRouteId(null)} className="text-xs px-3 py-1 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
-                      <button onClick={() => updateRoute(route.id)} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 border-b bg-blue-50 rounded-t-xl">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-blue-800 text-sm">🚛 {route.lorry_plate || "No Plate"}</span>
-                          {route.driver_name && <span className="text-xs text-gray-600">👤 {route.driver_name}</span>}
-                          {route.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">📍 {route.area}</span>}
-                        </div>
-                        {route.notes && <p className="text-xs text-gray-500 mt-1">{route.notes}</p>}
-                        <p className="text-xs text-gray-400 mt-0.5">{route.orders?.length || 0} orders</p>
+                  {/* Route Header */}
+                  {editRouteId === route.id ? (
+                    <div className="px-4 py-3 border-b space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        {[{k:"lorry_plate",l:"Lorry Plate"},{k:"driver_name",l:"Driver"},{k:"area",l:"Area"},{k:"notes",l:"Notes"}].map(({k,l}) => (
+                          <div key={k}>
+                            <label className="text-xs text-gray-400">{l}</label>
+                            <input value={editRoute[k] || ""} onChange={e => setEditRoute(p => ({...p,[k]:e.target.value}))}
+                              className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                          </div>
+                        ))}
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <select value={route.status} onChange={e => updateStatus(route.id, e.target.value)}
-                          className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
-                          {["Pending","Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)}
-                        </select>
-                        <button onClick={() => { setEditRouteId(route.id); setEditRoute({ ...route }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
-                        <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
+                      <div className="flex gap-2 justify-end">
+                        <button onClick={() => setEditRouteId(null)} className="text-xs px-3 py-1 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
+                        <button onClick={() => updateRoute(route.id)} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
                       </div>
                     </div>
-                  </div>
-                )}
-
-                <div className="p-3 space-y-2 min-h-16">
-                  {(!route.orders || route.orders.length === 0) && (
-                    <p className="text-xs text-gray-300 text-center py-3">Drop orders here or use assign dropdown</p>
+                  ) : (
+                    <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : "bg-blue-50"}`}>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-blue-800 text-sm">🚛 {route.lorry_plate || "No Plate"}</span>
+                            {route.driver_name && <span className="text-xs text-gray-600">👤 {route.driver_name}</span>}
+                            {route.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">📍 {route.area}</span>}
+                            {isLocked && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium">🔒 Locked</span>}
+                          </div>
+                          {route.notes && <p className="text-xs text-gray-500 mt-1">{route.notes}</p>}
+                          <p className="text-xs text-gray-400 mt-0.5">{route.orders?.length || 0} orders</p>
+                          {isLocked && <p className="text-xs text-orange-500 mt-0.5">Route is locked because it is already out for delivery.</p>}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          <select value={route.status} onChange={e => updateStatus(route.id, e.target.value)}
+                            className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
+                            {isLocked
+                              ? ["Out for Delivery", "Delivered"].map(s => <option key={s}>{s}</option>)
+                              : ["Pending", "Out for Delivery", "Delivered"].map(s => <option key={s}>{s}</option>)}
+                          </select>
+                          {!isLocked && <>
+                            <button onClick={() => { setEditRouteId(route.id); setEditRoute({ ...route }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
+                            <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
+                          </>}
+                        </div>
+                      </div>
+                    </div>
                   )}
-                  {route.orders?.map(ro => (
-                    <AssignedOrderCard
-                      key={ro.id}
-                      ro={ro}
-                      routeId={route.id}
-                      onUnassign={unassignOrder}
-                      onSeqChange={updateSeq}
-                      onSaved={loadRoutes}
-                    />
-                  ))}
+
+                  {/* Assigned Orders */}
+                  <div className="p-3 space-y-2 min-h-16">
+                    {(!route.orders || route.orders.length === 0) && (
+                      <p className="text-xs text-gray-300 text-center py-3">
+                        {isLocked ? "No orders in this route." : "Drop orders here or use assign dropdown"}
+                      </p>
+                    )}
+                    {route.orders?.map((ro, index) => (
+                      <AssignedOrderCard
+                        key={ro.id}
+                        ro={ro}
+                        routeId={route.id}
+                        index={index}
+                        isLocked={isLocked}
+                        onUnassign={unassignOrder}
+                        onDragStart={(fromIndex) => handleAssignedDragStart(route.id, fromIndex)}
+                        onDragOver={handleAssignedDragOver}
+                        onDrop={(toIndex) => handleAssignedDrop(route.id, toIndex)}
+                        onSaved={loadRoutes}
+                      />
+                    ))}
                   </div>
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
