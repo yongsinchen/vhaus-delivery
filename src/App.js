@@ -64,6 +64,27 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
             </div>
           </div>
 
+          {/* Status Banner */}
+          <div className={`rounded-lg px-4 py-3 flex items-center gap-3 ${
+            o.status === "Delivered" ? "bg-green-50 border border-green-200" :
+            o.status === "Out for Delivery" ? "bg-blue-50 border border-blue-200" :
+            o.status === "Flagged" ? "bg-red-50 border border-red-200" :
+            o.status === "Serviced" ? "bg-purple-50 border border-purple-200" :
+            "bg-yellow-50 border border-yellow-200"
+          }`}>
+            <div className="flex-1">
+              <p className="text-xs text-gray-400 mb-0.5">Current Status</p>
+              <p className={`text-sm font-bold ${
+                o.status === "Delivered" ? "text-green-700" :
+                o.status === "Out for Delivery" ? "text-blue-700" :
+                o.status === "Flagged" ? "text-red-700" :
+                o.status === "Serviced" ? "text-purple-700" :
+                "text-yellow-700"
+              }`}>{o.status}</p>
+            </div>
+            <span className={`text-xs px-3 py-1 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
+          </div>
+
           {/* Delivery */}
           <div>
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery</p>
@@ -173,20 +194,38 @@ export default function App() {
     setSpLoading(false);
   };
 
-  const convertServicePending = async (id) => {
+  const [convertModal, setConvertModal] = useState(null); // { id, soNumber, note }
+  const [convertRemark, setConvertRemark] = useState("");
+  const [converting, setConverting] = useState(false);
+
+  const openConvertModal = (sp) => {
+    setConvertModal(sp);
+    setConvertRemark("");
+  };
+
+  const confirmConvert = async () => {
+    if (!convertModal || converting) return;
+    setConverting(true);
     try {
-      const res = await fetch(`${BACKEND}/service-pending/${id}/convert`, { method: "POST" });
+      const res = await fetch(`${BACKEND}/service-pending/${convertModal.id}/convert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ remark: convertRemark }),
+      });
       const data = await res.json();
       if (data.success) {
-        alert(`Converted to Service Order: ${data.svNumber}`);
+        setConvertModal(null);
+        setConvertRemark("");
         loadServicePending();
         loadOrders();
+        alert(`✅ Converted to Service Order: ${data.svNumber}`);
       } else {
         alert("Failed to convert: " + (data.error || "Unknown error"));
       }
     } catch (e) {
       alert("Error: " + e.message);
     }
+    setConverting(false);
   };
 
   const removeServicePending = async (id) => {
@@ -581,7 +620,7 @@ export default function App() {
                           🗑 Remove
                         </button>
                         <button
-                          onClick={() => convertServicePending(sp.id)}
+                          onClick={() => openConvertModal(sp)}
                           className="text-xs bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600"
                         >
                           → Convert to Service
@@ -948,6 +987,42 @@ export default function App() {
                 </div>
               ))}
               {!globalSearch && <div className="text-center py-8 text-gray-400 text-sm">Start typing to search...</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Convert Service Pending Modal */}
+      {convertModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full">
+            <h3 className="font-bold text-gray-800 mb-1">Convert to Service Order</h3>
+            <p className="text-sm text-gray-500 mb-4">SO <span className="font-semibold text-blue-700">{convertModal.so_number}</span> will be converted to a new Service Order with a SV number.</p>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 block mb-1">Remark (optional)</label>
+              <textarea
+                value={convertRemark}
+                onChange={e => setConvertRemark(e.target.value)}
+                placeholder="e.g. Missing 1 pillow, needs to be replaced"
+                rows={3}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none"
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setConvertModal(null); setConvertRemark(""); }}
+                disabled={converting}
+                className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmConvert}
+                disabled={converting}
+                className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2"
+              >
+                {converting ? "Converting..." : "✅ Confirm Convert"}
+              </button>
             </div>
           </div>
         </div>
