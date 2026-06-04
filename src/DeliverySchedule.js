@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
-const fmt = d => {
+const fmt = d => { // eslint-disable-line no-unused-vars
   if (!d) return "-";
   const date = new Date(d + "T00:00:00");
   return date.toLocaleDateString("en-MY");
