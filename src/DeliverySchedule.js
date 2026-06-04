@@ -320,7 +320,6 @@ export default function DeliverySchedule() {
   const [editRoute, setEditRoute] = useState({});
   const [dragOrder, setDragOrder] = useState(null); // for unassigned drag
   const [draggingAssigned, setDraggingAssigned] = useState(null); // { routeId, fromIndex }
-  const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const loadRoutes = useCallback(async () => {
     setLoading(true);
@@ -410,9 +409,7 @@ export default function DeliverySchedule() {
     setDraggingAssigned({ routeId, fromIndex });
   };
 
-  const handleAssignedDragOver = (index) => {
-    setDragOverIndex(index);
-  };
+  const handleAssignedDragOver = (_index) => {};
 
   const handleAssignedDrop = async (routeId, toIndex) => {
     if (!draggingAssigned || draggingAssigned.routeId !== routeId) return;
@@ -429,7 +426,6 @@ export default function DeliverySchedule() {
     // Optimistic update
     setRoutes(prev => prev.map(r => r.id === routeId ? { ...r, orders: newOrders } : r));
     setDraggingAssigned(null);
-    setDragOverIndex(null);
 
     // Persist sequence to backend
     await Promise.all(newOrders.map((ro, i) => updateSeq(routeId, ro.orders?.id || ro.order_id, i + 1)));
