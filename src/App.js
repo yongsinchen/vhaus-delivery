@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
+import DeliverySchedule from "./DeliverySchedule";
 
 const SUPABASE_URL = "https://lrfyjcupucpdqmbqqbbk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_eAA_n21UDdPrecDlwfa8xQ_3PmFAMkm";
