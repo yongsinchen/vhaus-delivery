@@ -1,508 +1,468 @@
-import { useState, useEffect, useCallback } from "react";
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
+const { createClient } = require("@supabase/supabase-js");
+const OpenAI = require("openai");
 
-const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
+const app = express();
 
-const fmt = d => { // eslint-disable-line no-unused-vars
-  if (!d) return "-";
-  const date = new Date(d + "T00:00:00");
-  return date.toLocaleDateString("en-MY");
+// ── CORS — must be before all routes ─────────────────────────────
+app.use(cors({
+  origin: ["https://vhaus-delivery.vercel.app", "http://localhost:3000"],
+  methods: ["GET","POST","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"]
+}));
+app.options("*", cors());
+app.use(express.json());
+
+// ── Clients ───────────────────────────────────────────────────────
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
+// ── Telegram Helpers ──────────────────────────────────────────────
+const sendMessage = async (chatId, text) => {
+  await axios.post(`${TELEGRAM_API}/sendMessage`, {
+    chat_id: chatId,
+    text,
+    parse_mode: "Markdown",
+  });
 };
-const statusColor = s => ({
-  "Pending": "bg-yellow-100 text-yellow-800",
-  "Out for Delivery": "bg-blue-100 text-blue-800",
-  "Delivered": "bg-green-100 text-green-800",
-}[s] || "bg-gray-100 text-gray-700");
 
-const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", status: "Active" };
-const EMPTY_ROUTE = { vehicle_id: "", lorry_plate: "", driver_name: "", area: "", notes: "" };
+const getFileUrl = async (fileId) => {
+  const res = await axios.get(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
+  const filePath = res.data.result.file_path;
+  return `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`;
+};
 
-// ── Vehicle Modal — defined OUTSIDE main component ────────────────
-function VehicleModal({ vehicles, onClose, onRefresh }) {
-  const [showAddVehicle, setShowAddVehicle] = useState(false);
-  const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
-  const [editVehicleId, setEditVehicleId] = useState(null);
-  const [editVehicle, setEditVehicle] = useState({});
+const downloadImageAsBase64 = async (url) => {
+  const res = await axios.get(url, { responseType: "arraybuffer" });
+  return Buffer.from(res.data).toString("base64");
+};
 
-  const createVehicle = async () => {
-    if (!newVehicle.driver_name && !newVehicle.vehicle_plate) return alert("Please enter driver name or vehicle plate.");
-    await fetch(`${API}/delivery/vehicles`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newVehicle)
-    });
-    setNewVehicle({ ...EMPTY_VEHICLE });
-    setShowAddVehicle(false);
-    onRefresh();
-  };
-
-  const saveVehicle = async (id) => {
-    await fetch(`${API}/delivery/vehicles/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editVehicle)
-    });
-    setEditVehicleId(null);
-    onRefresh();
-  };
-
-  const deleteVehicle = async (id) => {
-    if (!window.confirm("Delete this vehicle?")) return;
-    await fetch(`${API}/delivery/vehicles/${id}`, { method: "DELETE" });
-    onRefresh();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h3 className="font-bold text-gray-800 text-base">🚛 Manage Vehicles</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold">x</button>
-        </div>
-
-        <div className="px-6 py-4">
-          {showAddVehicle ? (
-            <div className="bg-blue-50 rounded-xl p-4 mb-4 border border-blue-200">
-              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3">Add New Vehicle</p>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { k: "driver_name", l: "Driver Name" },
-                  { k: "vehicle_plate", l: "Vehicle Plate" },
-                  { k: "vehicle_type", l: "Vehicle Type (e.g. Lorry, Van)", span: true }
-                ].map(({ k, l, span }) => (
-                  <div key={k} className={span ? "col-span-2" : ""}>
-                    <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
-                    <input
-                      value={newVehicle[k]}
-                      onChange={e => setNewVehicle(p => ({ ...p, [k]: e.target.value }))}
-                      className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                    />
-                  </div>
-                ))}
-                <div>
-                  <label className="text-xs text-gray-500 block mb-0.5">Status</label>
-                  <select
-                    value={newVehicle.status}
-                    onChange={e => setNewVehicle(p => ({ ...p, status: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-                    <option>Active</option><option>Inactive</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end mt-3">
-                <button onClick={() => setShowAddVehicle(false)} className="px-4 py-1.5 text-xs bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                <button onClick={createVehicle} className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Vehicle</button>
-              </div>
-            </div>
-          ) : (
-            <button onClick={() => setShowAddVehicle(true)} className="mb-4 text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700">+ Add Vehicle</button>
-          )}
-
-          <div className="space-y-2">
-            {vehicles.length === 0 && <p className="text-xs text-gray-400 text-center py-6">No vehicles added yet.</p>}
-            {vehicles.map(v => (
-              <div key={v.id} className="border border-gray-200 rounded-lg p-3">
-                {editVehicleId === v.id ? (
-                  <div>
-                    <div className="grid grid-cols-2 gap-2 mb-2">
-                      {[
-                        { k: "driver_name", l: "Driver Name" },
-                        { k: "vehicle_plate", l: "Vehicle Plate" },
-                        { k: "vehicle_type", l: "Vehicle Type" }
-                      ].map(({ k, l }) => (
-                        <div key={k}>
-                          <label className="text-xs text-gray-400 block mb-0.5">{l}</label>
-                          <input
-                            value={editVehicle[k] || ""}
-                            onChange={e => setEditVehicle(p => ({ ...p, [k]: e.target.value }))}
-                            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
-                          />
-                        </div>
-                      ))}
-                      <div>
-                        <label className="text-xs text-gray-400 block mb-0.5">Status</label>
-                        <select
-                          value={editVehicle.status || "Active"}
-                          onChange={e => setEditVehicle(p => ({ ...p, status: e.target.value }))}
-                          className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300">
-                          <option>Active</option><option>Inactive</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => setEditVehicleId(null)} className="px-3 py-1 text-xs bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
-                      <button onClick={() => saveVehicle(v.id)} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-sm text-gray-800">🚛 {v.vehicle_plate || "No Plate"}</span>
-                      {v.driver_name && <span className="text-xs text-gray-500">👤 {v.driver_name}</span>}
-                      {v.vehicle_type && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{v.vehicle_type}</span>}
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v.status === "Active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{v.status}</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => { setEditVehicleId(v.id); setEditVehicle({ ...v }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
-                      <button onClick={() => deleteVehicle(v.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="px-6 py-4 border-t flex justify-end">
-          <button onClick={onClose} className="px-5 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Add Route Modal — defined OUTSIDE main component ──────────────
-function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
-  const [newRoute, setNewRoute] = useState({ ...EMPTY_ROUTE });
-
-  const onVehicleSelect = (vehicleId) => {
-    const v = activeVehicles.find(v => String(v.id) === String(vehicleId));
-    if (v) {
-      setNewRoute(p => ({ ...p, vehicle_id: v.id, lorry_plate: v.vehicle_plate || "", driver_name: v.driver_name || "" }));
-    } else {
-      setNewRoute(p => ({ ...p, vehicle_id: "" }));
+// ── OpenAI Vision — Extract Sales Order ──────────────────────────
+const extractOrderFromImage = async (base64Image) => {
+  const prompt = `You are a sales order OCR assistant for V Haus Living (PG) Sdn Bhd, a furniture company in Penang, Malaysia.
+Extract all information from this handwritten sales order image.
+Return ONLY valid JSON with no extra text, no markdown, no explanation.
+Use this exact structure:
+{
+  "soNumber": "",
+  "customerName": "",
+  "address": "",
+  "contact": "",
+  "orderDate": "YYYY-MM-DD or empty",
+  "salesman": "",
+  "orderAmount": "",
+  "balance": "",
+  "deliveryDate": "YYYY-MM-DD or empty",
+  "timeSlot": "",
+  "plateNo": "",
+  "type": "Delivery",
+  "serviceNote": "",
+  "remark": "",
+  "status": "Pending",
+  "items": [
+    {
+      "itemCode": "",
+      "itemName": "",
+      "unit": "1",
+      "supplier": "",
+      "itemOrderDate": "",
+      "supplierSentDate": "",
+      "arrivalDate": ""
     }
-  };
-
-  const handleCreate = () => {
-    if (!newRoute.lorry_plate && !newRoute.driver_name) return alert("Please select a vehicle or enter lorry plate / driver name.");
-    onCreate(newRoute);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
-        <h3 className="font-bold text-gray-800 mb-4">Add New Route</h3>
-
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 block mb-0.5">Select Vehicle (Active only)</label>
-          <select
-            value={newRoute.vehicle_id}
-            onChange={e => onVehicleSelect(e.target.value)}
-            className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-            <option value="">-- Select Vehicle --</option>
-            {activeVehicles.map(v => (
-              <option key={v.id} value={v.id}>
-                {v.vehicle_plate ? `${v.vehicle_plate} — ` : ""}{v.driver_name || "Unknown driver"}{v.vehicle_type ? ` (${v.vehicle_type})` : ""}
-              </option>
-            ))}
-          </select>
-          {activeVehicles.length === 0 && (
-            <p className="text-xs text-orange-500 mt-1">
-              No active vehicles.{" "}
-              <button onClick={onGoToVehicles} className="underline">Add vehicle first</button>
-            </p>
-          )}
-        </div>
-
-        <p className="text-xs text-gray-400 mb-2">Or enter manually:</p>
-        <div className="space-y-2">
-          {[
-            { k: "lorry_plate", l: "Lorry Plate No" },
-            { k: "driver_name", l: "Driver Name" },
-            { k: "area", l: "Area / Zone" },
-            { k: "notes", l: "Notes" }
-          ].map(({ k, l }) => (
-            <div key={k}>
-              <label className="text-xs text-gray-500 block mb-0.5">{l}</label>
-              <input
-                value={newRoute[k]}
-                onChange={e => setNewRoute(p => ({ ...p, [k]: e.target.value }))}
-                className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-3 justify-end mt-4">
-          <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={handleCreate} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Create Route</button>
-        </div>
-      </div>
-    </div>
-  );
+  ]
 }
 
-// ── Main Component ────────────────────────────────────────────────
-export default function DeliverySchedule() {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [routes, setRoutes] = useState([]);
-  const [unassigned, setUnassigned] = useState([]);
-  const [vehicles, setVehicles] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [showAddRoute, setShowAddRoute] = useState(false);
-  const [showVehicleModal, setShowVehicleModal] = useState(false);
-  const [editRouteId, setEditRouteId] = useState(null);
-  const [editRoute, setEditRoute] = useState({});
-  const [dragOrder, setDragOrder] = useState(null);
+Rules:
+- soNumber: look for "SALES ORDER:" or "SO:" number, usually a 5-digit number like 31073
+- customerName: look for "NAME:" field
+- address: look for "ADDRESS:" field. If it says "SAME WITH XXXXX" keep that text as-is
+- contact: look for "H/P NO:" or "TEL:" or "CONTACT:" field. Leave empty if not found
+- orderDate: look for "ORDER DATE:". Convert to YYYY-MM-DD. Example: 1/6/2026 = 2026-06-01. Leave empty if not found
+- deliveryDate: look for "DELIVERY DATE:". Convert to YYYY-MM-DD format. If it says "ASAP" or is unclear, return the string "ASAP". Leave empty string only if delivery date field is completely blank
+- salesman: look for "SALES ASSISTANT:" or "ORDER BY:" field
+- orderAmount: look for "TOTAL" amount, numeric only, no RM symbol. Example: 5590
+- balance: look for "BALANCE" amount, numeric only, no RM symbol. Example: 3891
+- items: extract ALL item rows from the DESCRIPTION column. Each numbered row (1., 2., 3.) is a separate item. Sub-items with "-" under a main item should be combined into one item description
+- For FOC items (free of charge), include them as separate items with unit price 0
+- itemCode: the product code if shown (e.g. 5023). Leave empty if not shown
+- itemName: full description of the item including sub-components
+- unit: quantity from QTY column, default "1" if not shown
+- remark: extract from "REMARKS:" section at the bottom
+- type: always "Delivery" unless the order says "SERVICE"
+- status: always "Pending"
+- If a field cannot be found, use empty string`;
 
-  const loadRoutes = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [routeRes, unassignedRes] = await Promise.all([
-        fetch(`${API}/delivery/routes?date=${date}`),
-        fetch(`${API}/delivery/unassigned?date=${date}`)
-      ]);
-      const [routeData, unassignedData] = await Promise.all([routeRes.json(), unassignedRes.json()]);
-      setRoutes(Array.isArray(routeData) ? routeData : []);
-      setUnassigned(Array.isArray(unassignedData) ? unassignedData : []);
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  }, [date]);
+  const response = await openai.responses.create({
+    model: "gpt-4o",
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: prompt },
+          { type: "input_image", image_url: `data:image/jpeg;base64,${base64Image}` },
+        ],
+      },
+    ],
+  });
 
-  const loadVehicles = useCallback(async () => {
-    try {
-      const res = await fetch(`${API}/delivery/vehicles`);
-      const data = await res.json();
-      setVehicles(Array.isArray(data) ? data : []);
-    } catch (e) { console.error(e); }
-  }, []);
+  const raw = response.output_text.trim();
+  const clean = raw.replace(/^```json\n?/, "").replace(/\n?```$/, "").trim();
+  return JSON.parse(clean);
+};
 
-  useEffect(() => { loadRoutes(); }, [loadRoutes]);
-  useEffect(() => { loadVehicles(); }, [loadVehicles]);
+// ── Parse Delivery Date from natural text ─────────────────────────
+const parseDeliveryDate = (text) => {
+  const today = new Date();
+  const explicitDate = text.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+  if (explicitDate) {
+    const day = parseInt(explicitDate[1]);
+    const month = parseInt(explicitDate[2]) - 1;
+    const year = explicitDate[3]
+      ? (explicitDate[3].length === 2 ? 2000 + parseInt(explicitDate[3]) : parseInt(explicitDate[3]))
+      : today.getFullYear();
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) return date.toISOString().split("T")[0];
+  }
+  const lower = text.toLowerCase();
+  if (lower.includes("tmr") || lower.includes("tomorrow") || lower.includes("esok")) {
+    const tmr = new Date(today); tmr.setDate(today.getDate() + 1); return tmr.toISOString().split("T")[0];
+  }
+  if (lower.includes("today") || lower.includes("hari ini")) return today.toISOString().split("T")[0];
+  if (lower.includes("next week") || lower.includes("minggu depan")) {
+    const nw = new Date(today); nw.setDate(today.getDate() + 7); return nw.toISOString().split("T")[0];
+  }
+  return null;
+};
 
-  const activeVehicles = vehicles.filter(v => v.status === "Active");
+// ── Parse SO Update Message ───────────────────────────────────────
+const parseUpdateMessage = (text) => {
+  const soMatch = text.match(/SO\s*[:\-]?\s*(\S+)/i);
+  const dateMatch = text.match(/DELIVERY\s*DATE\s*[:\-]?\s*(.+)/i);
+  if (!soMatch || !dateMatch) return null;
+  const soNumber = soMatch[1].trim();
+  const dateText = dateMatch[1].trim();
+  const deliveryDate = parseDeliveryDate(dateText);
+  const lines = text.split("\n");
+  const dateLineIdx = lines.findIndex(l => /DELIVERY\s*DATE/i.test(l));
+  const remark = lines.slice(dateLineIdx + 1).join(" ").trim();
+  return { soNumber, deliveryDate, dateText, remark };
+};
 
-  const createRoute = async (newRoute) => {
-    await fetch(`${API}/delivery/routes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...newRoute, delivery_date: date })
+// ── Bot: /schedule command ────────────────────────────────────────
+const handleScheduleCommand = async (chatId, text) => {
+  const dateMatch = text.match(/\/schedule\s+(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/i);
+  if (!dateMatch) { await sendMessage(chatId, "Usage: `/schedule 15/7` or `/schedule 2026-07-15`"); return; }
+  const day = parseInt(dateMatch[1]);
+  const month = parseInt(dateMatch[2]) - 1;
+  const year = dateMatch[3]
+    ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3]))
+    : new Date().getFullYear();
+  const dateObj = new Date(year, month, day);
+  const dateStr = dateObj.toISOString().split("T")[0];
+  const dateLabel = dateObj.toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+  const { data: orders, error } = await supabase.from("orders").select("*").eq("delivery_date", dateStr);
+  if (error) { await sendMessage(chatId, `❌ Error: ${error.message}`); return; }
+  if (!orders || orders.length === 0) { await sendMessage(chatId, `📅 No orders found for *${dateLabel}*`); return; }
+
+  const grouped = {};
+  orders.forEach(o => {
+    const addr = (o.address || "").toUpperCase();
+    let area = "OTHER";
+    if (addr.includes("GEORGETOWN") || addr.includes("G.TOWN")) area = "GEORGETOWN";
+    else if (addr.includes("BUKIT MERTAJAM") || addr.includes("BM")) area = "BUKIT MERTAJAM";
+    else if (addr.includes("BUTTERWORTH")) area = "BUTTERWORTH";
+    else if (addr.includes("KEPALA BATAS")) area = "KEPALA BATAS";
+    else if (addr.includes("SIMPANG AMPAT")) area = "SIMPANG AMPAT";
+    else if (addr.includes("NIBONG TEBAL")) area = "NIBONG TEBAL";
+    else if (addr.includes("PERMATANG PAUH")) area = "PERMATANG PAUH";
+    else if (addr.includes("SEBERANG JAYA")) area = "SEBERANG JAYA";
+    if (!grouped[area]) grouped[area] = [];
+    grouped[area].push(o);
+  });
+
+  let reply = `📦 *Delivery Schedule — ${dateLabel}*\nTotal: *${orders.length} orders*\n\n*Suggested grouping by area:*\n━━━━━━━━━━━━━━━━━━━━\n`;
+  Object.entries(grouped).forEach(([area, areaOrders]) => {
+    reply += `\n📍 *${area}* (${areaOrders.length} orders)\n`;
+    areaOrders.forEach((o, i) => {
+      const items = typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || []);
+      const itemNames = items.map(it => it.itemName).filter(Boolean).join(", ");
+      reply += `  ${i + 1}. SO *${o.so_number}* — ${o.customer_name || "-"}\n`;
+      reply += `     📦 ${itemNames || "No items"}\n`;
+      if (o.time_slot) reply += `     ⏰ ${o.time_slot}\n`;
+      if (parseFloat(o.balance) > 0) reply += `     🔴 Balance: RM ${o.balance}\n`;
     });
-    setShowAddRoute(false);
-    loadRoutes();
-  };
+  });
+  reply += `\n━━━━━━━━━━━━━━━━━━━━\n_Open delivery sheet to assign lorries._`;
+  await sendMessage(chatId, reply);
+};
 
-  const updateRoute = async (id) => {
-    await fetch(`${API}/delivery/routes/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editRoute)
-    });
-    setEditRouteId(null);
-    loadRoutes();
-  };
+// ── Delivery Vehicle API ──────────────────────────────────────────
 
-  const deleteRoute = async (id) => {
-    if (!window.confirm("Delete this route? Assigned orders will be unassigned.")) return;
-    await fetch(`${API}/delivery/routes/${id}`, { method: "DELETE" });
-    loadRoutes();
-  };
+// GET /delivery/vehicles
+app.get("/delivery/vehicles", async (req, res) => {
+  const { data, error } = await supabase.from("delivery_vehicles").select("*").order("created_at");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-  const assignOrder = async (routeId, orderId) => {
-    const route = routes.find(r => r.id === routeId);
-    const seqNo = (route?.orders?.length || 0) + 1;
-    await fetch(`${API}/delivery/routes/${routeId}/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order_id: orderId, sequence_no: seqNo })
-    });
-    loadRoutes();
-  };
+// POST /delivery/vehicles
+app.post("/delivery/vehicles", async (req, res) => {
+  const { driver_name, vehicle_plate, vehicle_type, status } = req.body;
+  if (!driver_name && !vehicle_plate) return res.status(400).json({ error: "driver_name or vehicle_plate is required" });
+  const { data, error } = await supabase
+    .from("delivery_vehicles")
+    .insert({ driver_name, vehicle_plate, vehicle_type, status: status || "Active" })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-  const unassignOrder = async (routeId, orderId) => {
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
-    loadRoutes();
-  };
+// PATCH /delivery/vehicles/:id
+app.patch("/delivery/vehicles/:id", async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase.from("delivery_vehicles").update(req.body).eq("id", id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-  const updateStatus = async (routeId, status) => {
-    await fetch(`${API}/delivery/routes/${routeId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
-    });
-    // Reload everything so order statuses reflect the change
-    await loadRoutes();
-  };
+// DELETE /delivery/vehicles/:id
+app.delete("/delivery/vehicles/:id", async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from("delivery_vehicles").delete().eq("id", id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
 
-  const updateSeq = async (routeId, orderId, seq) => {
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sequence_no: parseInt(seq) })
-    });
-    loadRoutes();
-  };
+// ── Delivery Routes API ───────────────────────────────────────────
 
-  const parseItems = items => {
-    try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); }
-    catch { return []; }
-  };
+// GET /delivery/routes?date=2026-07-15
+app.get("/delivery/routes", async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: "date is required" });
+  const { data: routes, error: routeErr } = await supabase
+    .from("delivery_routes").select("*").eq("delivery_date", date).order("created_at");
+  if (routeErr) return res.status(500).json({ error: routeErr.message });
+  const routesWithOrders = await Promise.all(routes.map(async (route) => {
+    const { data: routeOrders } = await supabase
+      .from("delivery_route_orders")
+      .select("*, orders(*)")
+      .eq("route_id", route.id)
+      .order("sequence_no");
+    return { ...route, orders: routeOrders || [] };
+  }));
+  res.json(routesWithOrders);
+});
 
-  return (
-    <div className="max-w-7xl mx-auto px-4 py-4">
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <h2 className="text-base font-bold text-gray-700">🚚 Delivery Schedule</h2>
-        <div className="flex items-center gap-3 flex-wrap">
-          <input type="date" value={date} onChange={e => setDate(e.target.value)}
-            className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
-          <button onClick={loadRoutes} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">🔄 Refresh</button>
-          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>
-          <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>
-        </div>
-      </div>
+// GET /delivery/unassigned?date=2026-07-15
+app.get("/delivery/unassigned", async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: "date is required" });
+  const { data: orders, error: ordErr } = await supabase.from("orders").select("*").eq("delivery_date", date);
+  if (ordErr) return res.status(500).json({ error: ordErr.message });
+  const { data: assigned } = await supabase
+    .from("delivery_route_orders")
+    .select("order_id, delivery_routes!inner(delivery_date)")
+    .eq("delivery_routes.delivery_date", date);
+  const assignedIds = new Set((assigned || []).map(a => a.order_id));
+  res.json((orders || []).filter(o => !assignedIds.has(o.id)));
+});
 
-      {loading && <div className="text-center py-8 text-gray-400 text-sm">Loading...</div>}
+// POST /delivery/routes
+app.post("/delivery/routes", async (req, res) => {
+  const { delivery_date, lorry_plate, driver_name, area, notes, vehicle_id } = req.body;
+  if (!delivery_date) return res.status(400).json({ error: "delivery_date is required" });
+  const { data, error } = await supabase
+    .from("delivery_routes")
+    .insert({ delivery_date, lorry_plate, driver_name, area, notes, status: "Pending", ...(vehicle_id && { vehicle_id }) })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-      {showVehicleModal && (
-        <VehicleModal
-          vehicles={vehicles}
-          onClose={() => setShowVehicleModal(false)}
-          onRefresh={loadVehicles}
-        />
-      )}
+// PATCH /delivery/routes/:id
+app.patch("/delivery/routes/:id", async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase
+    .from("delivery_routes").update(req.body).eq("id", id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
 
-      {showAddRoute && (
-        <AddRouteModal
-          activeVehicles={activeVehicles}
-          onClose={() => setShowAddRoute(false)}
-          onCreate={createRoute}
-          onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }}
-        />
-      )}
+  // Auto update assigned orders when route status changes
+  if (req.body.status === "Out for Delivery" || req.body.status === "Delivered") {
+    const { data: routeOrders } = await supabase
+      .from("delivery_route_orders").select("order_id").eq("route_id", id);
+    if (routeOrders && routeOrders.length > 0) {
+      const orderIds = routeOrders.map(ro => ro.order_id);
+      const orderStatus = req.body.status === "Delivered" ? "Delivered" : "Out for Delivery";
+      await supabase.from("orders").update({ status: orderStatus }).in("id", orderIds);
+    }
+  }
+  res.json(data);
+});
 
-      <div className="flex flex-col xl:flex-row gap-4">
+// DELETE /delivery/routes/:id
+app.delete("/delivery/routes/:id", async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from("delivery_routes").delete().eq("id", id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
 
-        {/* Unassigned Orders */}
-        <div className="xl:w-72 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-            <div className="px-4 py-3 border-b bg-orange-50 rounded-t-xl">
-              <h3 className="text-sm font-bold text-orange-700">
-                📦 Unassigned
-                <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{unassigned.length}</span>
-              </h3>
-            </div>
-            <div className="p-3 space-y-2 max-h-screen overflow-y-auto">
-              {unassigned.length === 0
-                ? <p className="text-xs text-gray-400 text-center py-4">All orders assigned!</p>
-                : unassigned.map(o => {
-                  const items = parseItems(o.items);
-                  return (
-                    <div key={o.id} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
-                      draggable onDragStart={() => setDragOrder(o)}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-blue-700 text-xs">{o.so_number}</span>
-                        {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {o.balance}</span>}
-                      </div>
-                      <p className="text-xs font-medium text-gray-700">{o.customer_name}</p>
-                      <p className="text-xs text-gray-400 leading-tight">{o.address}</p>
-                      {o.time_slot && <p className="text-xs text-indigo-600 font-medium">{o.time_slot}</p>}
-                      <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                      {routes.length > 0 && (
-                        <select onChange={e => { if (e.target.value) assignOrder(e.target.value, o.id); }}
-                          className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                          <option value="">Assign to route...</option>
-                          {routes.map(r => <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        </div>
+// ── Delivery Route Orders API ─────────────────────────────────────
 
-        {/* Route Cards */}
-        <div className="flex-1 min-w-0">
-          {routes.length === 0 && !loading && (
-            <div className="text-center py-12 text-gray-400">
-              <div className="text-4xl mb-2">🚛</div>
-              <p className="text-sm">No routes created for this date.</p>
-              <p className="text-xs mt-1">Click "+ Add Route" to get started.</p>
-            </div>
-          )}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {routes.map(route => (
-              <div key={route.id} className="bg-white rounded-xl border border-gray-200 shadow-sm"
-                onDragOver={e => e.preventDefault()}
-                onDrop={() => { if (dragOrder) { assignOrder(route.id, dragOrder.id); setDragOrder(null); } }}>
+// POST /delivery/routes/:routeId/orders
+app.post("/delivery/routes/:routeId/orders", async (req, res) => {
+  const { routeId } = req.params;
+  const { order_id, sequence_no, scheduled_time_range, route_note } = req.body;
+  const { data, error } = await supabase
+    .from("delivery_route_orders")
+    .insert({
+      route_id: routeId,
+      order_id,
+      sequence_no: sequence_no || 1,
+      ...(scheduled_time_range && { scheduled_time_range }),
+      ...(route_note && { route_note })
+    })
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-                {editRouteId === route.id ? (
-                  <div className="px-4 py-3 border-b space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      {[{k:"lorry_plate",l:"Lorry Plate"},{k:"driver_name",l:"Driver"},{k:"area",l:"Area"},{k:"notes",l:"Notes"}].map(({k,l}) => (
-                        <div key={k}>
-                          <label className="text-xs text-gray-400">{l}</label>
-                          <input value={editRoute[k] || ""} onChange={e => setEditRoute(p => ({...p,[k]:e.target.value}))}
-                            className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300" />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2 justify-end">
-                      <button onClick={() => setEditRouteId(null)} className="text-xs px-3 py-1 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
-                      <button onClick={() => updateRoute(route.id)} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 border-b bg-blue-50 rounded-t-xl">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-blue-800 text-sm">🚛 {route.lorry_plate || "No Plate"}</span>
-                          {route.driver_name && <span className="text-xs text-gray-600">👤 {route.driver_name}</span>}
-                          {route.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">📍 {route.area}</span>}
-                        </div>
-                        {route.notes && <p className="text-xs text-gray-500 mt-1">{route.notes}</p>}
-                        <p className="text-xs text-gray-400 mt-0.5">{route.orders?.length || 0} orders</p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
-                        <select value={route.status} onChange={e => updateStatus(route.id, e.target.value)}
-                          className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
-                          {["Pending","Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)}
-                        </select>
-                        <button onClick={() => { setEditRouteId(route.id); setEditRoute({ ...route }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
-                        <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+// PATCH /delivery/routes/:routeId/orders/:orderId
+app.patch("/delivery/routes/:routeId/orders/:orderId", async (req, res) => {
+  const { routeId, orderId } = req.params;
+  const { sequence_no, scheduled_time_range, route_note } = req.body;
+  const updates = {};
+  if (sequence_no !== undefined) updates.sequence_no = sequence_no;
+  if (scheduled_time_range !== undefined) updates.scheduled_time_range = scheduled_time_range;
+  if (route_note !== undefined) updates.route_note = route_note;
+  const { data, error } = await supabase
+    .from("delivery_route_orders")
+    .update(updates)
+    .eq("route_id", routeId)
+    .eq("order_id", orderId)
+    .select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
 
-                <div className="p-3 space-y-2 min-h-16">
-                  {(!route.orders || route.orders.length === 0) && (
-                    <p className="text-xs text-gray-300 text-center py-3">Drop orders here or use assign dropdown</p>
-                  )}
-                  {route.orders?.map((ro) => {
-                    const o = ro.orders;
-                    if (!o) return null;
-                    const items = parseItems(o.items);
-                    return (
-                      <div key={ro.id} className="bg-gray-50 border border-gray-200 rounded-lg p-2">
-                        <div className="flex items-start gap-2">
-                          <input type="number" value={ro.sequence_no} min={1}
-                            onChange={e => updateSeq(route.id, o.id, e.target.value)}
-                            className="w-8 text-center border rounded text-xs py-0.5 font-bold text-blue-700 mt-0.5 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-blue-700 text-xs">{o.so_number}</span>
-                              <div className="flex items-center gap-1">
-                                {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs">RM {o.balance}</span>}
-                                <button onClick={() => unassignOrder(route.id, o.id)} className="text-gray-300 hover:text-red-500 text-xs ml-1">x</button>
-                              </div>
-                            </div>
-                            <p className="text-xs font-medium text-gray-700 truncate">{o.customer_name}</p>
-                            <p className="text-xs text-gray-400 truncate">{o.address}</p>
-                            {o.time_slot && <p className="text-xs text-indigo-600">{o.time_slot}</p>}
-                            <p className="text-xs text-gray-400 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// DELETE /delivery/routes/:routeId/orders/:orderId
+app.delete("/delivery/routes/:routeId/orders/:orderId", async (req, res) => {
+  const { routeId, orderId } = req.params;
+  const { error } = await supabase
+    .from("delivery_route_orders")
+    .delete()
+    .eq("route_id", routeId)
+    .eq("order_id", orderId);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── Telegram Webhook ──────────────────────────────────────────────
+app.post("/telegram/webhook", async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const message = req.body.message;
+    if (!message) return;
+    const chatId = message.chat.id;
+
+    // Handle /schedule command
+    if (message.text && message.text.startsWith("/schedule")) {
+      await handleScheduleCommand(chatId, message.text);
+      return;
+    }
+
+    // Handle text message — delivery date update
+    if (message.text) {
+      const parsed = parseUpdateMessage(message.text);
+      if (!parsed) return;
+      const { soNumber, deliveryDate, dateText, remark } = parsed;
+      const { data: existing, error: findErr } = await supabase
+        .from("orders").select("id, so_number, customer_name, delivery_date, remark")
+        .eq("so_number", soNumber).maybeSingle();
+      if (findErr) { await sendMessage(chatId, `❌ Database error: ${findErr.message}`); return; }
+      if (!existing) { await sendMessage(chatId, `❌ SO *${soNumber}* not found in the system.`); return; }
+      if (!deliveryDate) {
+        await sendMessage(chatId, `⚠️ Could not understand delivery date: *"${dateText}"*\nPlease use format like: \`2/6\` or \`tmr\` or \`3/6/2026\``);
+        return;
+      }
+      const updatedRemark = remark ? `${existing.remark ? existing.remark + " | " : ""}${remark}` : existing.remark;
+      const { error: updateErr } = await supabase
+        .from("orders")
+        .update({ delivery_date: deliveryDate, ...(updatedRemark && { remark: updatedRemark }) })
+        .eq("so_number", soNumber);
+      if (updateErr) { await sendMessage(chatId, `❌ Failed to update SO *${soNumber}*\nError: ${updateErr.message}`); return; }
+      const formattedDate = new Date(deliveryDate).toLocaleDateString("en-MY", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      await sendMessage(chatId,
+        `✅ *Delivery Date Updated*\n\n📋 *SO:* ${soNumber}\n👤 *Customer:* ${existing.customer_name || "-"}\n📅 *New Delivery Date:* ${formattedDate}\n📝 *Date Input:* "${dateText}"\n${remark ? `💬 *Remark:* ${remark}\n` : ""}\n_Delivery sheet has been updated._`
+      );
+      return;
+    }
+
+    // Handle photo — new sales order
+    if (!message.photo || message.photo.length === 0) return;
+    await sendMessage(chatId, "📷 Processing sales order image...");
+    const photo = message.photo[message.photo.length - 1];
+    const fileUrl = await getFileUrl(photo.file_id);
+    const base64Image = await downloadImageAsBase64(fileUrl);
+    await sendMessage(chatId, "🔍 Extracting order details with AI...");
+
+    let data;
+    try { data = await extractOrderFromImage(base64Image); }
+    catch (err) { await sendMessage(chatId, `❌ Failed to extract order data.\nError: ${err.message}`); return; }
+
+    // Handle ASAP delivery date
+    if (!data.deliveryDate || data.deliveryDate.toUpperCase() === "ASAP") {
+      const asapDate = new Date();
+      asapDate.setDate(asapDate.getDate() + 21);
+      data.deliveryDate = asapDate.toISOString().split("T")[0];
+      data._asapScheduled = true;
+    }
+
+    if (!data.soNumber) { await sendMessage(chatId, "❌ Could not find SO Number in the image. Please try again with a clearer image."); return; }
+
+    // Check duplicate
+    const { data: existing, error: checkErr } = await supabase
+      .from("orders").select("id").eq("so_number", data.soNumber).maybeSingle();
+    if (checkErr) { await sendMessage(chatId, `❌ Database error: ${checkErr.message}`); return; }
+    if (existing) { await sendMessage(chatId, `⚠️ SO *${data.soNumber}* already exists in the system. Skipping insert.`); return; }
+
+    // Insert into Supabase
+    const payload = {
+      so_number: data.soNumber, customer_name: data.customerName, address: data.address,
+      contact: data.contact, order_date: data.orderDate || null, salesman: data.salesman,
+      order_amount: data.orderAmount, balance: data.balance, delivery_date: data.deliveryDate || null,
+      time_slot: data.timeSlot, plate_no: data.plateNo, type: data.type || "Delivery",
+      service_note: data.serviceNote, remark: data.remark, status: "Pending",
+      items: JSON.stringify(data.items || []),
+    };
+    const { error: insertErr } = await supabase.from("orders").insert(payload);
+    if (insertErr) { await sendMessage(chatId, `❌ Failed to save order.\nError: ${insertErr.message}`); return; }
+
+    const itemsSummary = (data.items || [])
+      .map((item, i) => `  ${i + 1}. ${item.itemName || "Unknown item"} x${item.unit || 1}${item.supplier ? ` (${item.supplier})` : ""}`)
+      .join("\n");
+    const asapNote = data._asapScheduled ? `\n⚠️ _Delivery date was ASAP — auto scheduled 3 weeks from today_` : "";
+
+    await sendMessage(chatId,
+      `✅ *Order Added Successfully*\n\n📋 *SO:* ${data.soNumber}\n👤 *Customer:* ${data.customerName || "-"}\n📅 *Delivery Date:* ${data.deliveryDate || "-"}${asapNote}\n⏰ *Time Slot:* ${data.timeSlot || "-"}\n👨‍💼 *Salesman:* ${data.salesman || "-"}\n💰 *Amount:* RM ${data.orderAmount || "0"}\n🔴 *Balance:* RM ${data.balance || "0"}\n📦 *Type:* ${data.type || "Delivery"}\n\n*Items:*\n${itemsSummary || "  No items extracted"}\n\n_Order has been saved to the delivery sheet._`
+    );
+  } catch (err) {
+    console.error("Webhook error:", err);
+  }
+});
+
+// ── Health Check ──────────────────────────────────────────────────
+app.get("/", (req, res) => res.json({ status: "ok", message: "V Haus Telegram Bot Server" }));
+
+// ── Start Server ──────────────────────────────────────────────────
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
