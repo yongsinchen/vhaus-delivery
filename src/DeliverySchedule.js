@@ -181,7 +181,153 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
   );
 }
 
-// ── Vehicle Modal ─────────────────────────────────────────────────
+// ── Print CSS ─────────────────────────────────────────────────────
+const PRINT_STYLE = `
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+  @page { size: A4 landscape; margin: 8mm; }
+}
+`;
+
+// ── Route Print View ──────────────────────────────────────────────
+function RoutePrintView({ route, onClose }) {
+  const parseItemsSafe = items => {
+    try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); }
+    catch { return []; }
+  };
+
+  const handlePrint = () => {
+    setTimeout(() => window.print(), 300);
+    window.onafterprint = () => onClose();
+  };
+
+  const dateStr = route.delivery_date || "-";
+  const vehicleStr = [route.lorry_plate, route.driver_name, route.area].filter(Boolean).join(" / ");
+
+  // Build rows: each item = 1 row, rowspan for SO info
+  const allRows = [];
+  (route.orders || []).forEach(ro => {
+    const o = ro.orders;
+    if (!o) return;
+    const items = parseItemsSafe(o.items);
+    const displayItems = items.length > 0 ? items : [{}];
+    displayItems.forEach((item, idx) => {
+      allRows.push({ o, ro, item, idx, rowspan: displayItems.length, isFirst: idx === 0 });
+    });
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-start justify-center pt-6 px-4 pb-6 overflow-y-auto">
+      <style>{PRINT_STYLE}</style>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl">
+
+        {/* Screen controls — hidden on print */}
+        <div className="flex items-center justify-between px-6 py-3 border-b no-print">
+          <h3 className="font-bold text-gray-800">🖨️ Print Preview — {route.lorry_plate || "Route"}</h3>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+            <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">🖨️ Print</button>
+          </div>
+        </div>
+
+        {/* Print area */}
+        <div className="print-area p-4">
+
+          {/* Header */}
+          <div className="text-center mb-3">
+            <h1 style={{ fontSize: "14px", fontWeight: "bold", margin: 0 }}>V Haus Living (Pg) Delivery Schedule</h1>
+            <p style={{ fontSize: "11px", margin: "2px 0 0 0", color: "#444" }}>
+              Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}
+            </p>
+          </div>
+
+          {/* Table */}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "10px" }}>
+            <thead>
+              <tr style={{ backgroundColor: "#c6efce", textAlign: "center" }}>
+                {["SO Number / Customer","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Supplier Sent Out","JB Sent Out","Arrival PG","Remark"].map(h => (
+                  <th key={h} style={{ border: "1px solid #000", padding: "3px 4px", whiteSpace: "nowrap", fontWeight: "bold" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {allRows.length === 0 && (
+                <tr><td colSpan={14} style={{ border: "1px solid #000", padding: "6px", textAlign: "center", color: "#888" }}>No orders assigned.</td></tr>
+              )}
+              {allRows.map((row, i) => {
+                const { o, ro, item, idx, rowspan, isFirst } = row;
+                const hasBalance = parseFloat(o.balance) > 0;
+                return (
+                  <tr key={`${o.id}-${idx}`} style={{ verticalAlign: "top" }}>
+                    {/* SO Number — rowspan */}
+                    {isFirst && (
+                      <td rowSpan={rowspan} style={{ border: "1px solid #000", padding: "3px 4px", minWidth: "140px", verticalAlign: "top" }}>
+                        <div style={{ fontWeight: "bold" }}>{o.so_number}</div>
+                        <div>{o.customer_name}</div>
+                        {o.contact && <div style={{ color: "#555" }}>{o.contact}</div>}
+                        {o.address && <div style={{ color: "#555", fontSize: "9px" }}>{o.address}</div>}
+                        {o.salesman && <div style={{ color: "#555" }}>SA: {o.salesman}</div>}
+                        {o.order_amount && <div>RM {o.order_amount}</div>}
+                        {hasBalance && <div style={{ color: "red", fontWeight: "bold" }}>Bal: RM {o.balance}</div>}
+                        {ro.scheduled_time_range && <div style={{ color: "#1e40af", fontWeight: "bold" }}>⏰ {ro.scheduled_time_range}</div>}
+                      </td>
+                    )}
+                    {/* Check */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center", minWidth: "28px" }}></td>
+                    {/* Naik */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center", minWidth: "28px" }}></td>
+                    {/* Plate NO — rowspan */}
+                    {isFirst && (
+                      <td rowSpan={rowspan} style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center", verticalAlign: "top" }}>
+                        {route.lorry_plate || "-"}
+                      </td>
+                    )}
+                    {/* No. */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}>{idx + 1}</td>
+                    {/* Code */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px" }}>{item.itemCode || ""}</td>
+                    {/* Item */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", minWidth: "120px" }}>{item.itemName || ""}</td>
+                    {/* Unit */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}>{item.unit || ""}</td>
+                    {/* Supplier */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px" }}>{item.supplier || ""}</td>
+                    {/* Order Date */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}>{item.itemOrderDate || ""}</td>
+                    {/* Supplier Sent Out */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}>{item.supplierSentDate || ""}</td>
+                    {/* JB Sent Out */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}></td>
+                    {/* Arrival PG */}
+                    <td style={{ border: "1px solid #000", padding: "3px 4px", textAlign: "center" }}>
+                      {item.arrivalDate
+                        ? item.arrivalDate
+                        : <span style={{ color: "red", fontWeight: "bold" }}>No arrival date</span>}
+                    </td>
+                    {/* Remark — rowspan */}
+                    {isFirst && (
+                      <td rowSpan={rowspan} style={{ border: "1px solid #000", padding: "3px 4px", verticalAlign: "top", minWidth: "80px" }}>
+                        {o.remark && <div>{o.remark}</div>}
+                        {ro.route_note && <div style={{ color: "#555", fontStyle: "italic" }}>{ro.route_note}</div>}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {/* Footer */}
+          <div style={{ marginTop: "8px", fontSize: "9px", color: "#888", textAlign: "right" }}>
+            Printed: {new Date().toLocaleString("en-MY", { timeZone: "Asia/Kuala_Lumpur" })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function VehicleModal({ vehicles, onClose, onRefresh }) {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
@@ -350,7 +496,8 @@ export default function DeliverySchedule() {
   const [editRouteId, setEditRouteId] = useState(null);
   const [editRoute, setEditRoute] = useState({});
   const [dragOrder, setDragOrder] = useState(null); // for unassigned drag
-  const [draggingAssigned, setDraggingAssigned] = useState(null); // { routeId, fromIndex }
+  const [draggingAssigned, setDraggingAssigned] = useState(null);
+  const [printRoute, setPrintRoute] = useState(null);
 
   const loadRoutes = useCallback(async () => {
     setLoading(true);
@@ -480,6 +627,7 @@ export default function DeliverySchedule() {
 
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
       {showAddRoute && <AddRouteModal activeVehicles={activeVehicles} onClose={() => setShowAddRoute(false)} onCreate={createRoute} onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }} />}
+      {printRoute && <RoutePrintView route={printRoute} onClose={() => setPrintRoute(null)} />}
 
       <div className="flex flex-col xl:flex-row gap-4">
 
@@ -587,6 +735,7 @@ export default function DeliverySchedule() {
                             <p className="text-xs text-orange-400 text-right">Out for Delivery only available on delivery date.</p>
                           )}
                         </div>
+                          <button onClick={() => setPrintRoute(route)} className="text-gray-400 hover:text-gray-700 text-xs" title="Print route">🖨️</button>
                           {!isLocked && <>
                             <button onClick={() => { setEditRouteId(route.id); setEditRoute({ ...route }); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
                             <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
