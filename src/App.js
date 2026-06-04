@@ -37,9 +37,33 @@ const fromDb = o => ({
 
 const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "Add Order"];
 
-// ── Order View Modal ───testing───────────────────────────────────────────
+// ── Trip status color ────────────────────────────────────────────
+const tripStatusColor = s => ({
+  "Scheduled": "bg-yellow-100 text-yellow-700",
+  "Assigned": "bg-blue-100 text-blue-700",
+  "Out for Delivery": "bg-indigo-100 text-indigo-700",
+  "Completed": "bg-green-100 text-green-700",
+  "Cancelled": "bg-gray-100 text-gray-400",
+}[s] || "bg-gray-100 text-gray-500");
+
+const BACKEND_URL = "https://vhaus-bot-production.up.railway.app";
+
+// ── Order View Modal ──────────────────────────────────────────────
 const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
   const hasBalance = parseFloat(o.balance) > 0;
+  const [trips, setTrips] = useState([]);
+  const [tripsLoading, setTripsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!o.soNumber) return;
+    setTripsLoading(true);
+    fetch(`${BACKEND_URL}/order-trips/so/${o.soNumber}`)
+      .then(r => r.json())
+      .then(data => { setTrips(Array.isArray(data) ? data : []); })
+      .catch(() => setTrips([]))
+      .finally(() => setTripsLoading(false));
+  }, [o.soNumber]);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl">
@@ -142,6 +166,45 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
               </div>
             </div>
           )}
+
+          {/* Trips — show for multi-trip orders */}
+          {(tripsLoading || trips.length > 0) && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
+                🔄 Delivery Trips {trips.length > 0 && <span className="text-gray-400 font-normal">({trips.length} trips)</span>}
+              </p>
+              {tripsLoading ? (
+                <p className="text-xs text-gray-400">Loading trips...</p>
+              ) : (
+                <div className="space-y-2">
+                  {trips.map((trip, i) => (
+                    <div key={trip.id} className={`rounded-lg p-3 border flex items-center justify-between gap-3 flex-wrap ${
+                      trip.status === "Completed" ? "bg-green-50 border-green-200" :
+                      trip.status === "Cancelled" ? "bg-gray-50 border-gray-200 opacity-60" :
+                      trip.status === "Out for Delivery" ? "bg-indigo-50 border-indigo-200" :
+                      "bg-purple-50 border-purple-200"
+                    }`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${tripStatusColor(trip.status)}`}>{trip.status}</span>
+                        {trip.trip_no === 1 && <span className="text-xs text-green-600 font-medium">💰 Commission</span>}
+                        {trip.sv_number && <span className="text-xs text-purple-500 font-medium">{trip.sv_number}</span>}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-semibold text-gray-700">
+                          {trip.scheduled_date
+                            ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
+                            : <span className="text-gray-400 italic">Date TBC</span>}
+                        </p>
+                        {trip.driver && <p className="text-xs text-gray-400">🚛 {trip.driver}{trip.helper ? ` | ${trip.helper}` : ""}</p>}
+                        {trip.note && <p className="text-xs text-orange-600 mt-0.5">📝 {trip.note}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -180,7 +243,7 @@ export default function App() {
   const [servicePending, setServicePending] = useState([]);
   const [spLoading, setSpLoading] = useState(false);
 
-  const BACKEND = "https://vhaus-bot-production.up.railway.app";
+  const BACKEND = BACKEND_URL;
 
   const loadServicePending = async () => {
     setSpLoading(true);
