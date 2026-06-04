@@ -18,22 +18,26 @@ const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", st
 const EMPTY_ROUTE = { vehicle_id: "", lorry_plate: "", driver_name: "", area: "", notes: "" };
 
 // ── Assigned Order Card — OUTSIDE main component ──────────────────
-function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange }) {
+function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange, onSaved }) {
   const o = ro.orders;
   const [scheduledTime, setScheduledTime] = useState(ro.scheduled_time_range || "");
   const [routeNote, setRouteNote] = useState(ro.route_note || "");
+  const [showItems, setShowItems] = useState(false);
+  const [saving, setSaving] = useState(false);
   if (!o) return null;
 
   const items = parseItems(o.items);
   const preferredTime = o.time_slot || "";
 
-  const saveScheduledTime = async (val) => {
-    setScheduledTime(val);
+  const saveScheduledTime = async () => {
+    setSaving(true);
     await fetch(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scheduled_time_range: val })
+      body: JSON.stringify({ scheduled_time_range: scheduledTime })
     });
+    setSaving(false);
+    if (onSaved) onSaved();
   };
 
   const saveRouteNote = async (val) => {
@@ -45,71 +49,107 @@ function AssignedOrderCard({ ro, routeId, onUnassign, onSeqChange }) {
     });
   };
 
-  const usePreferred = async () => {
+  const usePreferred = () => {
     if (!preferredTime) return;
-    await saveScheduledTime(preferredTime);
+    setScheduledTime(preferredTime);
   };
 
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-2">
-      <div className="flex items-start gap-2">
+
+      {/* Row 1: Seq | SO | Customer | Balance | Unassign */}
+      <div className="flex items-center gap-2 mb-1.5">
         <input
           type="number"
           value={ro.sequence_no}
           min={1}
           onChange={e => onSeqChange(routeId, o.id, e.target.value)}
-          className="w-8 text-center border rounded text-xs py-0.5 font-bold text-blue-700 mt-0.5 flex-shrink-0"
+          className="w-8 text-center border rounded text-xs py-0.5 font-bold text-blue-700 flex-shrink-0"
         />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-1">
-            <span className="font-bold text-blue-700 text-xs">{o.so_number}</span>
-            <div className="flex items-center gap-1">
-              {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs">RM {o.balance}</span>}
-              <button onClick={() => onUnassign(routeId, o.id)} className="text-gray-300 hover:text-red-500 text-xs ml-1">x</button>
-            </div>
-          </div>
+        <span className="font-bold text-blue-700 text-xs">{o.so_number}</span>
+        <span className="text-xs font-medium text-gray-700 truncate flex-1">{o.customer_name}</span>
+        {parseFloat(o.balance) > 0 && (
+          <span className="text-red-500 text-xs font-medium flex-shrink-0">RM {o.balance}</span>
+        )}
+        <button
+          onClick={() => onUnassign(routeId, o.id)}
+          className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0"
+          title="Unassign">x</button>
+      </div>
 
-          <p className="text-xs font-medium text-gray-700 truncate">{o.customer_name}</p>
-          <p className="text-xs text-gray-400 truncate">{o.address}</p>
+      {/* Row 2: Address | Preferred Time | Scheduled Time */}
+      <div className="space-y-1.5 mb-1.5">
+        <p className="text-xs text-gray-400 truncate">{o.address}</p>
 
-          {/* Preferred Time */}
-          <div className="mt-1.5">
-            {preferredTime
-              ? <p className="text-xs font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5 inline-block">⏰ Preferred: {preferredTime}</p>
-              : <p className="text-xs text-gray-300">⏰ Preferred: -</p>}
-          </div>
-
-          {/* Scheduled Time */}
-          <div className="mt-1.5 flex items-center gap-1">
-            <input
-              value={scheduledTime}
-              onChange={e => setScheduledTime(e.target.value)}
-              onBlur={e => saveScheduledTime(e.target.value)}
-              placeholder={preferredTime ? `Use preferred: ${preferredTime}` : "e.g. 10:30am - 11:30am"}
-              className={`flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 ${scheduledTime ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500"}`}
-            />
-            {preferredTime && (
-              <button
-                onClick={usePreferred}
-                className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-1 rounded whitespace-nowrap flex-shrink-0"
-                title="Copy preferred time to scheduled">
-                Use
-              </button>
-            )}
-          </div>
-
-          {/* Route Note */}
-          <input
-            value={routeNote}
-            onChange={e => setRouteNote(e.target.value)}
-            onBlur={e => saveRouteNote(e.target.value)}
-            placeholder="Route note (optional)"
-            className="mt-1 w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
-          />
-
-          {/* Items */}
-          <p className="text-xs text-gray-400 truncate mt-1">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+        {/* Preferred Time */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-400 flex-shrink-0">Preferred:</span>
+          {preferredTime
+            ? <span className="text-xs font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">{preferredTime}</span>
+            : <span className="text-xs text-gray-300">-</span>}
         </div>
+
+        {/* Scheduled Time input + Save + Use Current */}
+        <div className="flex items-center gap-1">
+          <input
+            value={scheduledTime}
+            onChange={e => setScheduledTime(e.target.value)}
+            placeholder="Actual scheduled time..."
+            className={`flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 min-w-0 ${scheduledTime ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500"}`}
+          />
+          {preferredTime && (
+            <button
+              onClick={usePreferred}
+              className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-1 rounded whitespace-nowrap flex-shrink-0"
+              title="Copy preferred time">
+              Use
+            </button>
+          )}
+          <button
+            onClick={saveScheduledTime}
+            disabled={saving}
+            className="text-xs bg-blue-600 text-white hover:bg-blue-700 px-2 py-1 rounded flex-shrink-0 disabled:opacity-50">
+            {saving ? "..." : "Save"}
+          </button>
+        </div>
+      </div>
+
+      {/* Row 3: Eye button + Route Note */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowItems(p => !p)}
+            className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1"
+            title="Toggle items">
+            👁️ <span>{showItems ? "Hide Items" : "View Items"}</span>
+          </button>
+        </div>
+
+        {/* Items list */}
+        {showItems && (
+          <div className="bg-white border border-gray-100 rounded-lg p-2 mt-1 space-y-1.5">
+            {items.length === 0
+              ? <p className="text-xs text-gray-400">No items found.</p>
+              : items.map((item, i) => (
+                <div key={i} className="text-xs">
+                  <p className="font-medium text-gray-700">
+                    {i + 1}. {item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName || "-"} <span className="text-gray-400">x{item.unit || 1}</span>
+                  </p>
+                  {item.supplier && <p className="text-gray-400 ml-3">Supplier: {item.supplier}</p>}
+                  {item.arrivalDate && <p className="text-gray-400 ml-3">Arrival: {item.arrivalDate}</p>}
+                </div>
+              ))}
+          </div>
+        )}
+
+        {/* Route Note */}
+        <input
+          value={routeNote}
+          onChange={e => setRouteNote(e.target.value)}
+          onBlur={e => saveRouteNote(e.target.value)}
+          placeholder="Route note (optional)"
+          className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
+        />
       </div>
     </div>
   );
@@ -269,9 +309,12 @@ function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!newRoute.lorry_plate && !newRoute.driver_name) return alert("Please select a vehicle or enter lorry plate / driver name.");
-    onCreate(newRoute);
+    const res = await onCreate(newRoute);
+    if (res && res.error) {
+      alert(res.error);
+    }
   };
 
   return (
@@ -366,11 +409,13 @@ export default function DeliverySchedule() {
   const activeVehicles = vehicles.filter(v => v.status === "Active");
 
   const createRoute = async (newRoute) => {
-    await fetch(`${API}/delivery/routes`, {
+    const res = await fetch(`${API}/delivery/routes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...newRoute, delivery_date: date })
     });
+    const data = await res.json();
+    if (res.status === 409 || data.error) return { error: data.error };
     setShowAddRoute(false);
     loadRoutes();
   };
@@ -564,6 +609,7 @@ export default function DeliverySchedule() {
                       routeId={route.id}
                       onUnassign={unassignOrder}
                       onSeqChange={updateSeq}
+                      onSaved={loadRoutes}
                     />
                   ))}
                 </div>
