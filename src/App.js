@@ -309,9 +309,20 @@ export default function App() {
     if (err) setError("Failed to load orders: " + err.message);
     else setOrders((data || []).map(fromDb));
     setLoading(false);
+    // Also refresh trips
+    const { data: tripsData } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
+    if (tripsData) setAllTrips(tripsData);
   };
 
-  useEffect(() => { loadOrders(); loadServicePending(); }, []); // eslint-disable-line
+  const [allTrips, setAllTrips] = useState([]);
+  const loadAllTrips = async () => {
+    try {
+      const { data, error } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
+      if (!error) setAllTrips(data || []);
+    } catch (e) { console.error("Failed to load trips:", e); }
+  };
+
+  useEffect(() => { loadOrders(); loadServicePending(); loadAllTrips(); }, []); // eslint-disable-line
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -557,6 +568,71 @@ export default function App() {
                   </div>
                 ))}
               </div>
+
+              {/* Trips Overview — multi-trip orders */}
+              {allTrips.length > 0 && (() => {
+                // Group trips by SO number
+                const grouped = allTrips.reduce((acc, t) => {
+                  if (!acc[t.so_number]) acc[t.so_number] = [];
+                  acc[t.so_number].push(t);
+                  return acc;
+                }, {});
+                const multiTripSOs = Object.entries(grouped).filter(([so, trips]) => trips.length > 1 || trips[0]?.total_trips > 1);
+                if (multiTripSOs.length === 0) return null;
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-bold text-gray-700">🔄 Multi-Trip Orders</h3>
+                      <span className="text-xs text-gray-400">{multiTripSOs.length} order(s)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {multiTripSOs.map(([soNumber, trips]) => {
+                        const order = orders.find(o => o.soNumber === soNumber);
+                        const allDone = trips.every(t => t.status === "Completed" || t.status === "Cancelled");
+                        const activeTripIdx = trips.findIndex(t => t.status === "Out for Delivery" || t.status === "Assigned");
+                        return (
+                          <div key={soNumber} className="bg-white border border-purple-200 rounded-xl overflow-hidden shadow-sm">
+                            <div className="bg-purple-50 px-3 py-2 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => order && handleView(order)} className="font-bold text-blue-700 text-sm hover:underline">{soNumber}</button>
+                                {trips[0]?.sv_number && <span className="text-xs text-purple-500 font-medium">{trips[0].sv_number}</span>}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {allDone
+                                  ? <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">✅ Completed</span>
+                                  : <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">🔄 In Progress</span>
+                                }
+                              </div>
+                            </div>
+                            {order && <p className="text-xs text-gray-500 px-3 pt-1.5 truncate">{order.customerName}</p>}
+                            <div className="px-3 py-2 space-y-1.5">
+                              {trips.map(trip => (
+                                <div key={trip.id} className={`flex items-center justify-between gap-2 text-xs rounded-lg px-2 py-1.5 ${
+                                  trip.status === "Completed" ? "bg-green-50" :
+                                  trip.status === "Cancelled" ? "bg-gray-50 opacity-50" :
+                                  trip.status === "Out for Delivery" ? "bg-indigo-50" :
+                                  "bg-purple-50"
+                                }`}>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</span>
+                                    {trip.trip_no === 1 && <span className="text-green-600 text-xs">💰</span>}
+                                    <span className={`px-1.5 py-0.5 rounded-full font-medium ${tripStatusColor(trip.status)}`}>{trip.status}</span>
+                                  </div>
+                                  <span className={`font-medium ${trip.scheduled_date ? "text-gray-700" : "text-gray-400 italic"}`}>
+                                    {trip.scheduled_date
+                                      ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short" })
+                                      : "TBC"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Row 2: Calendar (full width) + Outstanding Balance (full width below) */}
               <div className="flex flex-col gap-4">
