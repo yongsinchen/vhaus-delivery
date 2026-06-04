@@ -589,7 +589,7 @@ export default function App() {
                       {multiTripSOs.map(([soNumber, trips]) => {
                         const order = orders.find(o => o.soNumber === soNumber);
                         const allDone = trips.every(t => t.status === "Completed" || t.status === "Cancelled");
-                        const activeTripIdx = trips.findIndex(t => t.status === "Out for Delivery" || t.status === "Assigned");
+
                         return (
                           <div key={soNumber} className="bg-white border border-purple-200 rounded-xl overflow-hidden shadow-sm">
                             <div className="bg-purple-50 px-3 py-2 flex items-center justify-between">
