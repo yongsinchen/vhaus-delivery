@@ -15,7 +15,7 @@ const monthLabel = ym => { const [y,m] = ym.split("-"); return new Date(y, m-1, 
 const now = new Date();
 const todayStr = now.toISOString().split("T")[0];
 const thisMonth = fmtMonth(todayStr);
-const statusColor = s => ({ "Pending": "bg-yellow-100 text-yellow-800", "Out for Delivery": "bg-blue-100 text-blue-800", "Delivered": "bg-green-100 text-green-800", "Serviced": "bg-purple-100 text-purple-800" }[s] || "bg-gray-100 text-gray-700");
+const statusColor = s => ({ "Pending": "bg-yellow-100 text-yellow-800", "Out for Delivery": "bg-blue-100 text-blue-800", "Delivered": "bg-green-100 text-green-800", "Serviced": "bg-purple-100 text-purple-800", "Flagged": "bg-red-100 text-red-800" }[s] || "bg-gray-100 text-gray-700");
 const prevMonth = ym => { const [y,m] = ym.split("-").map(Number); return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`; };
 const nextMonthYm = ym => { const [y,m] = ym.split("-").map(Number); return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`; };
 
@@ -35,7 +35,7 @@ const fromDb = o => ({
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
-const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "Add Order"];
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "Add Order"];
 
 // ── Order View Modal ───testing───────────────────────────────────────────
 const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
@@ -286,7 +286,7 @@ export default function App() {
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium">{fmt(o.deliveryDate)}</td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
                       <select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>
-                        {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+                        {["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
                       </select>
                     </td>
                     <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 max-w-32 align-top">{showService ? o.serviceNote : o.remark}</td>
@@ -339,6 +339,7 @@ export default function App() {
               <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.length}</div><div>Total</div></div>
               <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.filter(o => o.status === "Pending").length}</div><div>Pending</div></div>
               <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{serviceOrders.length}</div><div>Service</div></div>
+              <div className="bg-red-500 bg-opacity-80 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.filter(o => o.status === "Flagged").length}</div><div>Flagged</div></div>
             </div>
           </div>
         </div>
@@ -355,14 +356,14 @@ export default function App() {
         </div>
       </div>
 
-      {!["Add Order","Summary","Daily View"].includes(activeTab) && (
+      {!["Add Order","Summary","Daily View","🚨 Flagged"].includes(activeTab) && (
         <div className="max-w-7xl mx-auto px-4 pt-3 flex flex-wrap gap-2">
           <input placeholder="🔍 Search..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300" />
           <select value={filterSalesman} onChange={e => setFilterSalesman(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
             <option value="">All Salesmen</option>{salesmen.map(s => <option key={s}>{s}</option>)}
           </select>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
-            <option value="">All Statuses</option>{["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+            <option value="">All Statuses</option>{["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
           </select>
           {(search || filterSalesman || filterStatus) && <button onClick={() => { setSearch(""); setFilterSalesman(""); setFilterStatus(""); }} className="text-xs text-red-500 hover:underline">Clear</button>}
         </div>
@@ -493,6 +494,95 @@ export default function App() {
         )}
  {/* Delivery Schedule */}
 {activeTab === "Delivery Schedule" && <DeliverySchedule />}
+
+        {/* FLAGGED ORDERS */}
+        {activeTab === "🚨 Flagged" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-bold text-gray-700">🚨 Flagged Orders</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Orders reported by salesmen as having incorrect information. Edit and mark as Pending when fixed.</p>
+              </div>
+              <span className="bg-red-100 text-red-700 font-bold text-sm px-3 py-1 rounded-full">{orders.filter(o => o.status === "Flagged").length} flagged</span>
+            </div>
+            {orders.filter(o => o.status === "Flagged").length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">✅</div>
+                <div className="font-medium">No flagged orders</div>
+                <div className="text-xs mt-1">All orders are clean</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {orders.filter(o => o.status === "Flagged").map(o => {
+                  const flagMatch = o.remark?.match(/FLAGGED by (.+?) \((.+?)\): (.+?)(?= \||$)/);
+                  const flagNote = flagMatch ? flagMatch[3] : null;
+                  const flagBy = flagMatch ? flagMatch[1] : null;
+                  const flagTime = flagMatch ? flagMatch[2] : null;
+                  return (
+                    <div key={o.id} className="bg-white border-2 border-red-200 rounded-xl shadow-sm overflow-hidden">
+                      <div className="bg-red-50 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-red-500 text-lg">🚨</span>
+                          <div>
+                            <span className="font-bold text-blue-700 text-sm">{o.soNumber}</span>
+                            <span className="text-gray-500 text-xs ml-2">{o.customerName}</span>
+                          </div>
+                          <span className="text-xs bg-red-100 text-red-700 font-semibold px-2 py-0.5 rounded-full">Flagged</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleView(o)} className="text-xs bg-white border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-50">👁 View</button>
+                          <button onClick={() => handleEdit(o)} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">✏️ Edit & Fix</button>
+                        </div>
+                      </div>
+                      <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {flagNote && (
+                          <div className="sm:col-span-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-xs font-bold text-red-600 mb-1">⚠️ Issue Reported</p>
+                            <p className="text-sm text-gray-800">{flagNote}</p>
+                            {flagBy && <p className="text-xs text-gray-400 mt-1">by {flagBy}{flagTime ? ` · ${flagTime}` : ""}</p>}
+                          </div>
+                        )}
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Delivery Date</p>
+                          <p className="text-sm font-semibold">{fmt(o.deliveryDate)}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Salesman</p>
+                          <p className="text-sm font-semibold">{o.salesman || "-"}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Amount / Balance</p>
+                          <p className="text-sm font-semibold">RM {o.orderAmount} / <span className={parseFloat(o.balance) > 0 ? "text-red-600" : "text-green-600"}>RM {o.balance}</span></p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Items</p>
+                          <p className="text-sm text-gray-700">{o.items?.map(i => i.itemName).filter(Boolean).join(", ") || "-"}</p>
+                        </div>
+                        {o.remark && (
+                          <div className="sm:col-span-2 bg-gray-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-400 mb-1">Full Remark</p>
+                            <p className="text-xs text-gray-600 leading-relaxed">{o.remark}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
+                        <p className="text-xs text-gray-400">After editing, change status back to <strong>Pending</strong> to resolve this flag.</p>
+                        <button
+                          onClick={async () => {
+                            await updateStatus(o, "Pending");
+                          }}
+                          className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700"
+                        >
+                          ✅ Mark as Resolved
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         {/* MONTHLY VIEW */}
         {activeTab === "Monthly View" && (
           <div>
@@ -574,7 +664,7 @@ export default function App() {
                                 <td rowSpan={rowSpan} className={`border border-gray-200 px-2 py-1 whitespace-nowrap align-top font-medium ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-gray-700"}`}>RM {o.balance}</td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 whitespace-nowrap align-top">
                                   <select value={o.status} onChange={e => updateStatus(o, e.target.value)} className={`text-xs rounded px-1 py-0.5 border-0 font-medium cursor-pointer ${statusColor(o.status)}`}>
-                                    {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+                                    {["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
                                   </select>
                                 </td>
                                 <td rowSpan={rowSpan} className="border border-gray-200 px-2 py-1 align-top max-w-40">
@@ -631,7 +721,7 @@ export default function App() {
                   <div>
                     <label className="text-xs font-medium text-gray-600 block mb-0.5">Status</label>
                     <select value={form.status} onChange={e => setForm(p => ({...p,status:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-                      {["Pending","Out for Delivery","Delivered","Serviced"].map(s => <option key={s}>{s}</option>)}
+                      {["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
                     </select>
                   </div>
                   {form.type === "Service" && (
