@@ -31,39 +31,16 @@ const fromDb = o => ({
   address: o.address, contact: o.contact, orderDate: o.order_date, salesman: o.salesman,
   orderAmount: o.order_amount, balance: o.balance, deliveryDate: o.delivery_date,
   timeSlot: o.time_slot, plateNo: o.plate_no, type: o.type, serviceNote: o.service_note,
+  svNumber: o.sv_number,
   remark: o.remark, status: o.status,
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
 const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "Add Order"];
 
-// ── Trip status color ────────────────────────────────────────────
-const tripStatusColor = s => ({
-  "Scheduled": "bg-yellow-100 text-yellow-700",
-  "Assigned": "bg-blue-100 text-blue-700",
-  "Out for Delivery": "bg-indigo-100 text-indigo-700",
-  "Completed": "bg-green-100 text-green-700",
-  "Cancelled": "bg-gray-100 text-gray-400",
-}[s] || "bg-gray-100 text-gray-500");
-
-const BACKEND_URL = "https://vhaus-bot-production.up.railway.app";
-
-// ── Order View Modal ──────────────────────────────────────────────
+// ── Order View Modal ───testing───────────────────────────────────────────
 const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
   const hasBalance = parseFloat(o.balance) > 0;
-  const [trips, setTrips] = useState([]);
-  const [tripsLoading, setTripsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!o.soNumber) return;
-    setTripsLoading(true);
-    fetch(`${BACKEND_URL}/order-trips/so/${o.soNumber}`)
-      .then(r => r.json())
-      .then(data => { setTrips(Array.isArray(data) ? data : []); })
-      .catch(() => setTrips([]))
-      .finally(() => setTripsLoading(false));
-  }, [o.soNumber]);
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl">
@@ -166,45 +143,6 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
               </div>
             </div>
           )}
-
-          {/* Trips — show for multi-trip orders */}
-          {(tripsLoading || trips.length > 0) && (
-            <div>
-              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">
-                🔄 Delivery Trips {trips.length > 0 && <span className="text-gray-400 font-normal">({trips.length} trips)</span>}
-              </p>
-              {tripsLoading ? (
-                <p className="text-xs text-gray-400">Loading trips...</p>
-              ) : (
-                <div className="space-y-2">
-                  {trips.map((trip, i) => (
-                    <div key={trip.id} className={`rounded-lg p-3 border flex items-center justify-between gap-3 flex-wrap ${
-                      trip.status === "Completed" ? "bg-green-50 border-green-200" :
-                      trip.status === "Cancelled" ? "bg-gray-50 border-gray-200 opacity-60" :
-                      trip.status === "Out for Delivery" ? "bg-indigo-50 border-indigo-200" :
-                      "bg-purple-50 border-purple-200"
-                    }`}>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${tripStatusColor(trip.status)}`}>{trip.status}</span>
-                        {trip.trip_no === 1 && <span className="text-xs text-green-600 font-medium">💰 Commission</span>}
-                        {trip.sv_number && <span className="text-xs text-purple-500 font-medium">{trip.sv_number}</span>}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs font-semibold text-gray-700">
-                          {trip.scheduled_date
-                            ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
-                            : <span className="text-gray-400 italic">Date TBC</span>}
-                        </p>
-                        {trip.driver && <p className="text-xs text-gray-400">🚛 {trip.driver}{trip.helper ? ` | ${trip.helper}` : ""}</p>}
-                        {trip.note && <p className="text-xs text-orange-600 mt-0.5">📝 {trip.note}</p>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Footer */}
@@ -243,7 +181,7 @@ export default function App() {
   const [servicePending, setServicePending] = useState([]);
   const [spLoading, setSpLoading] = useState(false);
 
-  const BACKEND = BACKEND_URL;
+  const BACKEND = "https://vhaus-bot-production.up.railway.app";
 
   const loadServicePending = async () => {
     setSpLoading(true);
@@ -309,20 +247,9 @@ export default function App() {
     if (err) setError("Failed to load orders: " + err.message);
     else setOrders((data || []).map(fromDb));
     setLoading(false);
-    // Also refresh trips
-    const { data: tripsData } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
-    if (tripsData) setAllTrips(tripsData);
   };
 
-  const [allTrips, setAllTrips] = useState([]);
-  const loadAllTrips = async () => {
-    try {
-      const { data, error } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
-      if (!error) setAllTrips(data || []);
-    } catch (e) { console.error("Failed to load trips:", e); }
-  };
-
-  useEffect(() => { loadOrders(); loadServicePending(); loadAllTrips(); }, []); // eslint-disable-line
+  useEffect(() => { loadOrders(); loadServicePending(); }, []); // eslint-disable-line
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -336,14 +263,7 @@ export default function App() {
     return true;
   }), [orders, filterSalesman, filterStatus, search]);
 
-  const browseOrders = filtered.filter(o => {
-    // Include all orders where delivery date falls in browse month
-    if (o.deliveryDate && fmtMonth(o.deliveryDate) === browseMonth) return true;
-    // Also include Service orders with no date (TBC) - show in current browse month if order_date matches
-    if (o.type === "Service" && !o.deliveryDate && fmtMonth(o.orderDate) === browseMonth) return true;
-    return false;
-  });
-  const tbcOrders = filtered.filter(o => !o.deliveryDate || o.deliveryDate === "");
+  const browseOrders = filtered.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === browseMonth);
   const services = filtered.filter(o => o.type === "Service");
   const allDeliveryDates = [...new Set(orders.filter(o => o.deliveryDate).map(o => o.deliveryDate))].sort();
   const dailyOrders = selectedDate ? orders.filter(o => o.deliveryDate === selectedDate) : [];
@@ -480,7 +400,7 @@ export default function App() {
   const serviceOrders = orders.filter(o => o.type === "Service");
   const thisMonthOrders = orders.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === thisMonth);
   const nextMonthOrders = orders.filter(o => o.type === "Delivery" && fmtMonth(o.deliveryDate) === nm);
-  const noDateOrders = orders.filter(o => !o.deliveryDate || o.deliveryDate === "");
+  const afterOrders = orders.filter(o => o.type === "Delivery" && o.deliveryDate && fmtMonth(o.deliveryDate) > nm);
   const balanceOrders = orders.filter(o => parseFloat(o.balance) > 0).sort((a, b) => new Date(a.deliveryDate) - new Date(b.deliveryDate));
 
   const [y, m] = thisMonth.split("-").map(Number);
@@ -548,7 +468,7 @@ export default function App() {
                   { label: "🔧 Total Service", count: serviceOrders.length, color: "bg-green-500", border: "border-green-300", items: serviceOrders },
                   { label: `📅 ${monthLabel(thisMonth)}`, count: thisMonthOrders.length, color: "bg-blue-500", border: "border-blue-300", items: thisMonthOrders },
                   { label: `📅 ${monthLabel(nm)}`, count: nextMonthOrders.length, color: "bg-orange-400", border: "border-orange-300", items: nextMonthOrders },
-                  { label: "📦 TBC / No Date", count: noDateOrders.length, color: "bg-gray-500", border: "border-gray-300", items: noDateOrders },
+                  { label: `📅 After ${monthLabel(nm).split(" ")[0]}`, count: afterOrders.length, color: "bg-gray-500", border: "border-gray-300", items: afterOrders },
                 ].map(({ label, count, color, border, items }) => (
                   <div key={label} className={`rounded-xl border-2 ${border} overflow-hidden shadow-sm`}>
                     <div className={`${color} text-white px-4 py-2 flex items-center justify-between`}>
@@ -569,73 +489,8 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Trips Overview — multi-trip orders */}
-              {allTrips.length > 0 && (() => {
-                // Group trips by SO number
-                const grouped = allTrips.reduce((acc, t) => {
-                  if (!acc[t.so_number]) acc[t.so_number] = [];
-                  acc[t.so_number].push(t);
-                  return acc;
-                }, {});
-                const multiTripSOs = Object.entries(grouped).filter(([so, trips]) => trips.length > 1 || trips[0]?.total_trips > 1);
-                if (multiTripSOs.length === 0) return null;
-                return (
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-bold text-gray-700">🔄 Multi-Trip Orders</h3>
-                      <span className="text-xs text-gray-400">{multiTripSOs.length} order(s)</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                      {multiTripSOs.map(([soNumber, trips]) => {
-                        const order = orders.find(o => o.soNumber === soNumber);
-                        const allDone = trips.every(t => t.status === "Completed" || t.status === "Cancelled");
-
-                        return (
-                          <div key={soNumber} className="bg-white border border-purple-200 rounded-xl overflow-hidden shadow-sm">
-                            <div className="bg-purple-50 px-3 py-2 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => order && handleView(order)} className="font-bold text-blue-700 text-sm hover:underline">{soNumber}</button>
-                                {trips[0]?.sv_number && <span className="text-xs text-purple-500 font-medium">{trips[0].sv_number}</span>}
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                {allDone
-                                  ? <span className="text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">✅ Completed</span>
-                                  : <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">🔄 In Progress</span>
-                                }
-                              </div>
-                            </div>
-                            {order && <p className="text-xs text-gray-500 px-3 pt-1.5 truncate">{order.customerName}</p>}
-                            <div className="px-3 py-2 space-y-1.5">
-                              {trips.map(trip => (
-                                <div key={trip.id} className={`flex items-center justify-between gap-2 text-xs rounded-lg px-2 py-1.5 ${
-                                  trip.status === "Completed" ? "bg-green-50" :
-                                  trip.status === "Cancelled" ? "bg-gray-50 opacity-50" :
-                                  trip.status === "Out for Delivery" ? "bg-indigo-50" :
-                                  "bg-purple-50"
-                                }`}>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-semibold text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</span>
-                                    {trip.trip_no === 1 && <span className="text-green-600 text-xs">💰</span>}
-                                    <span className={`px-1.5 py-0.5 rounded-full font-medium ${tripStatusColor(trip.status)}`}>{trip.status}</span>
-                                  </div>
-                                  <span className={`font-medium ${trip.scheduled_date ? "text-gray-700" : "text-gray-400 italic"}`}>
-                                    {trip.scheduled_date
-                                      ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short" })
-                                      : "TBC"}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Row 2: Calendar (full width) + Outstanding Balance (full width below) */}
-              <div className="flex flex-col gap-4">
+              {/* Row 2: Calendar + Outstanding — fixed layout */}
+              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_420px] gap-4">
 
                 {/* Calendar */}
                 <div className="min-w-0 overflow-x-auto">
@@ -675,58 +530,46 @@ export default function App() {
                 </div>
 
                 {/* Outstanding Balance */}
-                <div className="min-w-0">
+                <div className="min-w-0 overflow-x-auto">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div className="px-3 py-2 bg-red-50 border-b border-red-100 flex items-center justify-between">
-                      <span className="text-xs font-bold text-red-700">💰 Outstanding Balances</span>
-                      <span className="text-xs text-red-500 font-medium">{balanceOrders.length} order(s)</span>
-                    </div>
-                    <div className="overflow-x-auto">
-                    <table className="text-xs border-collapse w-full" style={{minWidth:"700px"}}>
+                    <table className="min-w-[420px] text-xs border-collapse w-full">
                       <thead>
                         <tr className="bg-gray-100">
-                          {["No","SO No","Customer","Sales Person","Amount","Balance","Deliver Date","Aging (days)","Remark"].map(h => (
-                            <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap font-semibold">{h}</th>
+                          {["No","SO No","Sales Person","Amount","Balance","Deliver Date","Date Dif","Remark"].map(h => (
+                            <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {balanceOrders.length === 0
-                          ? <tr><td colSpan={9} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
+                          ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
                           : balanceOrders.map((o, i) => {
                             const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
                             const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
-                            const aging = dateDif !== null ? dateDif : null;
-                            const agingColor = aging === null ? "" : aging > 30 ? "text-red-700 font-bold" : aging > 14 ? "text-orange-600 font-semibold" : "text-gray-600";
                             return (
-                              <tr key={i} className="hover:bg-red-50">
-                                <td className="border border-gray-200 px-2 py-1.5 text-center text-gray-500">{i + 1}</td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-center">
-                                  <button onClick={() => handleView(o)} className="font-bold text-blue-700 hover:underline whitespace-nowrap">{o.soNumber}</button>
+                              <tr key={i} className="hover:bg-gray-50">
+                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">
+                                  <button onClick={() => handleView(o)} className="font-medium text-blue-700 hover:underline">{o.soNumber}</button>
                                 </td>
-                                <td className="border border-gray-200 px-2 py-1.5 whitespace-nowrap">
-                                  <div className="font-medium text-gray-800">{o.customerName || "-"}</div>
-                                  <div className="text-gray-400 text-xs">{o.contact || ""}</div>
-                                </td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap">{o.salesman || "-"}</td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-right whitespace-nowrap">RM {o.orderAmount}</td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-right whitespace-nowrap font-bold text-red-600">RM {o.balance}</td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap">{o.deliveryDate ? fmt(o.deliveryDate) : <span className="text-gray-400 italic">TBC</span>}</td>
-                                <td className={`border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap ${agingColor}`}>{aging !== null ? `${aging}d` : "-"}</td>
-                                <td className="border border-gray-200 px-2 py-1.5 text-gray-500 max-w-xs">{o.remark || "-"}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
+                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
                               </tr>
                             );
                           })}
                         {balanceOrders.length > 0 && (
-                          <tr className="bg-red-50 font-bold">
-                            <td colSpan={5} className="border border-gray-200 px-2 py-1.5 text-right text-gray-600">Total Outstanding:</td>
-                            <td className="border border-gray-200 px-2 py-1.5 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
+                          <tr className="bg-gray-50 font-bold">
+                            <td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td>
+                            <td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
                             <td colSpan={3} className="border border-gray-200"></td>
                           </tr>
                         )}
                       </tbody>
                     </table>
-                    </div>
                   </div>
                 </div>
 
@@ -914,36 +757,119 @@ export default function App() {
         {activeTab === "Monthly View" && (
           <div>
             <MonthNav />
-            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-              <h2 className="text-base font-bold text-gray-700">
-                📅 {monthLabel(browseMonth)}
-              </h2>
-              <div className="flex gap-2 flex-wrap">
-                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">🚚 {browseOrders.filter(o => o.type === "Delivery").length} Delivery</span>
-                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">🔧 {browseOrders.filter(o => o.type === "Service").length} Service</span>
-                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">Total: {browseOrders.length}</span>
-              </div>
-            </div>
+            <h2 className="text-base font-bold text-gray-700 mb-3">📅 {monthLabel(browseMonth)} <span className="text-sm font-normal text-gray-400">({browseOrders.length} orders)</span></h2>
             <OrderTable list={browseOrders} />
-            {/* TBC / No Date section */}
-            {tbcOrders.length > 0 && (
-              <div className="mt-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <h3 className="text-sm font-bold text-gray-600">📦 TBC / No Date Set</h3>
-                  <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{tbcOrders.length} orders</span>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">Orders without a confirmed delivery date. Salesman to update when customer arranges.</p>
-                <OrderTable list={tbcOrders} />
-              </div>
-            )}
           </div>
         )}
 
         {/* SERVICE */}
         {activeTab === "Service" && (
           <div>
-            <h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2>
-            <OrderTable list={services} showService />
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <h2 className="text-base font-bold text-gray-700">🔧 Service Orders</h2>
+              <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-3 py-1 rounded-full">{services.length} service order(s)</span>
+            </div>
+
+            {services.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">🔧</div>
+                <div className="font-medium">No service orders</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {services.map(o => {
+                  // Parse original SO from service_note (format: "11576 — issue text")
+                  const originalSoMatch = o.serviceNote?.match(/^(\d+)/);
+                  const originalSo = originalSoMatch ? originalSoMatch[1] : null;
+                  const originalOrder = originalSo ? orders.find(x => x.soNumber === originalSo && x.type === "Delivery") : null;
+                  const svNumber = o.svNumber || null;
+
+                  return (
+                    <div key={o.id} className="bg-white border border-purple-200 rounded-xl shadow-sm overflow-hidden">
+                      {/* Header */}
+                      <div className="bg-purple-50 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-purple-500 text-lg">🔧</span>
+                          <div>
+                            <button onClick={() => handleView(o)} className="font-bold text-blue-700 text-sm hover:underline">{o.soNumber}</button>
+                            {svNumber && <span className="text-xs text-purple-600 font-bold ml-2 bg-purple-100 px-2 py-0.5 rounded-full">{svNumber}</span>}
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
+                          {/* Link to original delivery SO */}
+                          {originalSo && (
+                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                              <span>↩ Original:</span>
+                              <button
+                                onClick={() => originalOrder && handleView(originalOrder)}
+                                className={`font-bold ${originalOrder ? "text-blue-600 hover:underline" : "text-gray-400"}`}
+                              >
+                                SO {originalSo}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => handleEdit(o)} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">✏️ Edit</button>
+                      </div>
+
+                      {/* Body */}
+                      <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Customer</p>
+                          <p className="text-sm font-semibold">{o.customerName || "-"}</p>
+                          <p className="text-xs text-gray-400">{o.contact || ""}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Salesman</p>
+                          <p className="text-sm font-semibold">{o.salesman || "-"}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Delivery Date</p>
+                          <p className="text-sm font-semibold">{o.deliveryDate ? fmt(o.deliveryDate) : <span className="text-gray-400 italic">TBC</span>}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Balance</p>
+                          <p className={`text-sm font-bold ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-green-600"}`}>RM {o.balance || "0"}</p>
+                        </div>
+                        {o.serviceNote && (
+                          <div className="col-span-2 sm:col-span-4 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                            <p className="text-xs font-bold text-purple-600 mb-1">📝 Service Note</p>
+                            <p className="text-sm text-gray-800">{o.serviceNote}</p>
+                          </div>
+                        )}
+                        {o.remark && (
+                          <div className="col-span-2 sm:col-span-4 bg-gray-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-400 mb-1">Remark</p>
+                            <p className="text-xs text-gray-600 leading-relaxed">{o.remark}</p>
+                          </div>
+                        )}
+                        {/* Items */}
+                        {o.items && o.items.length > 0 && (
+                          <div className="col-span-2 sm:col-span-4">
+                            <p className="text-xs text-gray-400 mb-1">Items</p>
+                            <div className="flex flex-wrap gap-1">
+                              {o.items.map((item, i) => (
+                                <span key={i} className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
+                                  {item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName} x{item.unit || 1}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Status update footer */}
+                      <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
+                        <p className="text-xs text-gray-400">Update status:</p>
+                        <select value={o.status} onChange={e => updateStatus(o, e.target.value)}
+                          className={`text-xs rounded px-2 py-1 border font-medium cursor-pointer ${statusColor(o.status)}`}>
+                          {["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
