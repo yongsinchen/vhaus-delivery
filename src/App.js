@@ -489,8 +489,8 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Row 2: Calendar + Outstanding — fixed layout */}
-              <div className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_420px] gap-4">
+              {/* Row 2: Calendar + Balance — full width stacked */}
+              <div className="flex flex-col gap-4">
 
                 {/* Calendar */}
                 <div className="min-w-0 overflow-x-auto">
@@ -530,46 +530,57 @@ export default function App() {
                 </div>
 
                 {/* Outstanding Balance */}
-                <div className="min-w-0 overflow-x-auto">
+                <div className="min-w-0">
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <table className="min-w-[420px] text-xs border-collapse w-full">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          {["No","SO No","Sales Person","Amount","Balance","Deliver Date","Date Dif","Remark"].map(h => (
-                            <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {balanceOrders.length === 0
-                          ? <tr><td colSpan={8} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
-                          : balanceOrders.map((o, i) => {
-                            const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
-                            const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
-                            return (
-                              <tr key={i} className="hover:bg-gray-50">
-                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{i + 1}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-center">
-                                  <button onClick={() => handleView(o)} className="font-medium text-blue-700 hover:underline">{o.soNumber}</button>
-                                </td>
-                                <td className="border border-gray-200 px-2 py-1 text-center">{o.salesman}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-right">RM {o.orderAmount}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-right font-medium text-red-600">RM {o.balance}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-center whitespace-nowrap">{fmt(o.deliveryDate)}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-center">{dateDif !== null ? `${dateDif}d` : "-"}</td>
-                                <td className="border border-gray-200 px-2 py-1 text-center text-gray-500">{o.remark || "-"}</td>
-                              </tr>
-                            );
-                          })}
-                        {balanceOrders.length > 0 && (
-                          <tr className="bg-gray-50 font-bold">
-                            <td colSpan={4} className="border border-gray-200 px-2 py-1 text-right">Total:</td>
-                            <td className="border border-gray-200 px-2 py-1 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
-                            <td colSpan={3} className="border border-gray-200"></td>
+                    <div className="px-3 py-2 bg-red-50 border-b border-red-100 flex items-center justify-between">
+                      <span className="text-xs font-bold text-red-700">💰 Outstanding Balances</span>
+                      <span className="text-xs text-red-500 font-medium">{balanceOrders.length} order(s)</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="text-xs border-collapse w-full" style={{minWidth:"800px"}}>
+                        <thead>
+                          <tr className="bg-gray-100">
+                            {["No","SO No","Customer","Sales Person","Amount","Balance","Deliver Date","Aging (days)","Remark"].map(h => (
+                              <th key={h} className="border border-gray-200 px-2 py-2 text-center whitespace-nowrap font-semibold">{h}</th>
+                            ))}
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {balanceOrders.length === 0
+                            ? <tr><td colSpan={9} className="text-center py-6 text-gray-400">No outstanding balances</td></tr>
+                            : balanceOrders.map((o, i) => {
+                              const delDate = o.deliveryDate ? new Date(o.deliveryDate) : null;
+                              const dateDif = delDate ? Math.floor((now - delDate) / (1000 * 60 * 60 * 24)) : null;
+                              const agingColor = dateDif === null ? "" : dateDif > 30 ? "text-red-700 font-bold" : dateDif > 14 ? "text-orange-600 font-semibold" : "text-gray-600";
+                              return (
+                                <tr key={i} className="hover:bg-red-50">
+                                  <td className="border border-gray-200 px-2 py-1.5 text-center text-gray-500">{i + 1}</td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-center">
+                                    <button onClick={() => handleView(o)} className="font-bold text-blue-700 hover:underline whitespace-nowrap">{o.soNumber}</button>
+                                  </td>
+                                  <td className="border border-gray-200 px-2 py-1.5 whitespace-nowrap">
+                                    <div className="font-medium text-gray-800">{o.customerName || "-"}</div>
+                                    <div className="text-gray-400 text-xs">{o.contact || ""}</div>
+                                  </td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap">{o.salesman || "-"}</td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-right whitespace-nowrap">RM {o.orderAmount}</td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-right whitespace-nowrap font-bold text-red-600">RM {o.balance}</td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap">{o.deliveryDate ? fmt(o.deliveryDate) : <span className="text-gray-400 italic">TBC</span>}</td>
+                                  <td className={`border border-gray-200 px-2 py-1.5 text-center whitespace-nowrap ${agingColor}`}>{dateDif !== null ? `${dateDif}d` : "-"}</td>
+                                  <td className="border border-gray-200 px-2 py-1.5 text-gray-500" style={{maxWidth:"200px"}}>{o.remark || "-"}</td>
+                                </tr>
+                              );
+                            })}
+                          {balanceOrders.length > 0 && (
+                            <tr className="bg-red-50 font-bold">
+                              <td colSpan={5} className="border border-gray-200 px-2 py-1.5 text-right text-gray-600">Total Outstanding:</td>
+                              <td className="border border-gray-200 px-2 py-1.5 text-right text-red-600">RM {balanceOrders.reduce((s, o) => s + parseFloat(o.balance || 0), 0).toLocaleString()}</td>
+                              <td colSpan={3} className="border border-gray-200"></td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
 
