@@ -4,8 +4,9 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 
 const statusColor = s => ({
   "Pending": "bg-yellow-100 text-yellow-800",
+  "Confirmed": "bg-green-100 text-green-800",
   "Out for Delivery": "bg-blue-100 text-blue-800",
-  "Delivered": "bg-green-100 text-green-800",
+  "Delivered": "bg-gray-100 text-gray-600",
   "In Progress": "bg-indigo-100 text-indigo-800",
 }[s] || "bg-gray-100 text-gray-700");
 
@@ -657,11 +658,12 @@ export default function DeliverySchedule() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {routes.map(route => {
               const isLocked = route.status === "Out for Delivery" || route.status === "Delivered";
+              const isConfirmed = route.status === "Confirmed";
               return (
-                <div key={route.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : "border-gray-200"}`}
+                <div key={route.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
                   onDragOver={e => { e.preventDefault(); }}
                   onDrop={() => {
-                    if (!dragOrder || isLocked) return;
+                    if (!dragOrder || isLocked || isConfirmed) return;
                     assignItem(route.id, dragOrder.id, dragOrder._type);
                     setDragOrder(null);
                   }}>
@@ -679,7 +681,7 @@ export default function DeliverySchedule() {
                       </div>
                     </div>
                   ) : (
-                    <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : "bg-blue-50"}`}>
+                    <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : isConfirmed ? "bg-green-50" : "bg-blue-50"}`}>
                       <div className="flex items-start justify-between">
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
@@ -697,15 +699,20 @@ export default function DeliverySchedule() {
                               className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
                               {isLocked
                                 ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
-                                : ["Pending"].concat(route.delivery_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
+                                : isConfirmed
+                                ? ["Confirmed","Pending"].concat(route.delivery_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
+                                : ["Pending","Confirmed"].concat(route.delivery_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
                               }
                             </select>
-                            {!isLocked && route.delivery_date !== todayMY && (
+                            {!isLocked && !isConfirmed && route.delivery_date !== todayMY && (
                               <p className="text-xs text-orange-400 text-right">Out for Delivery only on delivery date.</p>
+                            )}
+                            {isConfirmed && (
+                              <p className="text-xs text-green-600 text-right font-medium">🔒 Confirmed — set to Pending to edit</p>
                             )}
                           </div>
                           <button onClick={() => setPrintRoute(route)} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">🖨️</button>
-                          {!isLocked && <>
+                          {!isLocked && !isConfirmed && <>
                             <button onClick={() => { setEditRouteId(route.id); setEditRoute({...route}); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
                             <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
                           </>}
@@ -718,7 +725,7 @@ export default function DeliverySchedule() {
                   <div className="p-3 space-y-2 min-h-16">
                     {(!route.orders || route.orders.length === 0) && (
                       <p className="text-xs text-gray-300 text-center py-3">
-                        {isLocked ? "No orders in this route." : "Drop orders or trips here"}
+                        {isLocked ? "No orders in this route." : isConfirmed ? "Route confirmed — unlock to Pending to edit." : "Drop orders or trips here"}
                       </p>
                     )}
                     {route.orders?.map((ro, index) => {
