@@ -293,7 +293,8 @@ export default function App() {
   const updateStatus = async (o, status) => { setOrders(prev => prev.map(x => x.id === o.id ? { ...x, status } : x)); await supabase.from("orders").update({ status }).eq("id", o.id); };
 
   const handleSubmit = async () => {
-    if (!form.soNumber || !form.deliveryDate) return alert("SO Number and Delivery Date are required.");
+    if (!form.soNumber) return alert("SO Number is required.");
+    if (!form.deliveryDate && form.type === "Delivery") return alert("Delivery Date is required for Delivery orders.");
     setSaving(true);
     const payload = toDb(form);
     if (editId !== null) {
@@ -996,7 +997,7 @@ export default function App() {
               <div>
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Delivery Information</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[{k:"deliveryDate",l:"Delivery Date",t:"date",req:true},{k:"timeSlot",l:"Time Slot (e.g. 10.00 - 12.00)"},{k:"plateNo",l:"Plate No"}].map(({k,l,t,req}) => (
+                  {[{k:"deliveryDate",l:"Delivery Date",t:"date",req:form.type === "Delivery"},{k:"timeSlot",l:"Time Slot (e.g. 10.00 - 12.00)"},{k:"plateNo",l:"Plate No"}].map(({k,l,t,req}) => (
                     <div key={k}>
                       <label className="text-xs font-medium text-gray-600 block mb-0.5">{l}{req && <span className="text-red-500"> *</span>}</label>
                       <input type={t||"text"} value={form[k]} onChange={e => setForm(p => ({...p,[k]:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
