@@ -363,6 +363,12 @@ export default function App() {
     ));
   };
 
+  // Reload trips when needed
+  const reloadTrips = async () => {
+    const { data } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
+    if (data) setAllTrips(data);
+  };
+
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
   const handleDelete = async id => {
@@ -515,7 +521,7 @@ export default function App() {
       <div className="bg-white border-b shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex overflow-x-auto">
           {TABS.map(t => (
-            <button key={t} onClick={() => { setActiveTab(t); if (t !== "Add Order") { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); } }}
+            <button key={t} onClick={() => { setActiveTab(t); if (t !== "Add Order") { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); } if (t === "Service") reloadTrips(); }}
               className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === t ? "border-blue-600 text-blue-700 bg-blue-50" : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
               {t === "Add Order" ? (editId !== null ? "✏️ Edit Order" : "➕ Add Order") : t === "Monthly View" ? `📅 ${monthLabel(browseMonth)}` : t}
             </button>
