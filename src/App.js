@@ -922,8 +922,142 @@ export default function App() {
         {/* SERVICE */}
         {activeTab === "Service" && (
           <div>
-            <h2 className="text-base font-bold text-gray-700 mb-3">🔧 Service Orders</h2>
-            <OrderTable list={services} showService />
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <h2 className="text-base font-bold text-gray-700">🔧 Service Orders</h2>
+              <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-3 py-1 rounded-full">{services.length} service order(s)</span>
+            </div>
+            {services.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">🔧</div>
+                <div className="font-medium">No service orders</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {services.map(o => {
+                  const originalSoMatch = o.serviceNote?.match(/^(\d+)/);
+                  const originalSo = originalSoMatch ? originalSoMatch[1] : null;
+                  const originalOrder = originalSo ? orders.find(x => x.soNumber === originalSo && x.type === "Delivery") : null;
+                  const svNumber = o.svNumber || null;
+                  // Get trips linked to this SO from allTrips
+                  const soTrips = allTrips.filter(t => t.so_number === o.soNumber).sort((a, b) => a.trip_no - b.trip_no);
+                  const isMultiTrip = soTrips.length > 0;
+
+                  return (
+                    <div key={o.id} className="bg-white border border-purple-200 rounded-xl shadow-sm overflow-hidden">
+                      {/* Header */}
+                      <div className="bg-purple-50 px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-purple-500 text-lg">🔧</span>
+                          <div>
+                            <button onClick={() => handleView(o)} className="font-bold text-blue-700 text-sm hover:underline">{o.soNumber}</button>
+                            {svNumber && <span className="text-xs text-purple-600 font-bold ml-2 bg-purple-100 px-2 py-0.5 rounded-full">{svNumber}</span>}
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
+                          {originalSo && (
+                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                              <span>↩ Original:</span>
+                              <button onClick={() => originalOrder && handleView(originalOrder)} className={`font-bold ${originalOrder ? "text-blue-600 hover:underline" : "text-gray-400"}`}>
+                                SO {originalSo}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => handleEdit(o)} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">✏️ Edit</button>
+                      </div>
+
+                      {/* Body */}
+                      <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Customer</p>
+                          <p className="text-sm font-semibold">{o.customerName || "-"}</p>
+                          <p className="text-xs text-gray-400">{o.contact || ""}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Salesman</p>
+                          <p className="text-sm font-semibold">{o.salesman || "-"}</p>
+                        </div>
+
+                        {/* Single service — show delivery date */}
+                        {!isMultiTrip && (
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-400 mb-1">📅 Service Date</p>
+                            <p className={`text-sm font-semibold ${!o.deliveryDate ? "text-gray-400 italic" : ""}`}>
+                              {o.deliveryDate ? fmt(o.deliveryDate) : "TBC"}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-400 mb-1">Balance</p>
+                          <p className={`text-sm font-bold ${parseFloat(o.balance) > 0 ? "text-red-600" : "text-green-600"}`}>RM {o.balance || "0"}</p>
+                        </div>
+
+                        {/* Multi-trip service — show all trips */}
+                        {isMultiTrip && (
+                          <div className="col-span-2 sm:col-span-4">
+                            <p className="text-xs text-gray-400 mb-2">🔄 Service Trips</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {soTrips.map(trip => (
+                                <div key={trip.id} className={`rounded-lg px-3 py-2 border flex items-center justify-between gap-2 ${
+                                  trip.status === "Completed" ? "bg-green-50 border-green-200" :
+                                  trip.status === "Cancelled" ? "bg-gray-50 border-gray-200 opacity-50" :
+                                  trip.status === "Out for Delivery" ? "bg-indigo-50 border-indigo-200" :
+                                  "bg-purple-50 border-purple-200"
+                                }`}>
+                                  <div>
+                                    <p className="text-xs font-bold text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</p>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${tripStatusColor(trip.status)}`}>{trip.status}</span>
+                                  </div>
+                                  <p className={`text-xs font-semibold text-right ${!trip.scheduled_date ? "text-gray-400 italic" : "text-gray-700"}`}>
+                                    {trip.scheduled_date
+                                      ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })
+                                      : "TBC"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {o.serviceNote && (
+                          <div className="col-span-2 sm:col-span-4 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                            <p className="text-xs font-bold text-purple-600 mb-1">📝 Service Note</p>
+                            <p className="text-sm text-gray-800">{o.serviceNote}</p>
+                          </div>
+                        )}
+                        {o.remark && (
+                          <div className="col-span-2 sm:col-span-4 bg-gray-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-400 mb-1">Remark</p>
+                            <p className="text-xs text-gray-600 leading-relaxed">{o.remark}</p>
+                          </div>
+                        )}
+                        {o.items && o.items.filter(i => i.itemName).length > 0 && (
+                          <div className="col-span-2 sm:col-span-4">
+                            <p className="text-xs text-gray-400 mb-1">Items</p>
+                            <div className="flex flex-wrap gap-1">
+                              {o.items.filter(i => i.itemName).map((item, i) => (
+                                <span key={i} className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">
+                                  {item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName} x{item.unit || 1}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <div className="px-4 py-2 border-t bg-gray-50 flex items-center justify-between">
+                        <p className="text-xs text-gray-400">Update status:</p>
+                        <select value={o.status} onChange={e => updateStatus(o, e.target.value)}
+                          className={`text-xs rounded px-2 py-1 border font-medium cursor-pointer ${statusColor(o.status)}`}>
+                          {["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
