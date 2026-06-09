@@ -3,6 +3,7 @@ import DeliverySchedule from "./DeliverySchedule";
 import LoginPage from "./LoginPage";
 import UserManagement from "./UserManagement";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
+import ResetPasswordPage from "./ResetPasswordPage";
 
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
@@ -691,6 +692,10 @@ export default function App() {
 
   // Show login if not authenticated
   const { loading: authLoading } = useAuth();
+
+  // Handle password reset redirect
+  if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
+
   if (authLoading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center"><div className="text-4xl mb-3">⚡</div><div className="text-gray-600 font-medium">Loading...</div></div>

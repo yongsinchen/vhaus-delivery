@@ -99,7 +99,12 @@ export function AuthProvider({ children }) {
       setSession(session);
       loadUserProfile(session?.user ?? null);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        // Redirect to password reset page
+        window.location.href = "/reset-password";
+        return;
+      }
       setSession(session);
       loadUserProfile(session?.user ?? null);
     });
