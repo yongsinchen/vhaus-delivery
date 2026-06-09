@@ -254,7 +254,7 @@ function RoutePrintView({ route, onClose }) {
         </div>
         <div className="print-area p-4">
           <div className="text-center mb-3">
-            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>PulseOS — Delivery Schedule</h1>
+            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>V Haus Living (Pg) Delivery Schedule</h1>
             <p style={{ fontSize:"11px", margin:"2px 0 0 0", color:"#444" }}>Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}</p>
           </div>
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"10px" }}>
@@ -443,7 +443,223 @@ function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────
-export default function DeliverySchedule({ readOnly = false, companyId = null, isMaster = false, currentUser = null }) {
+
+// ── Auto Scheduler Modal ──────────────────────────────────────────
+function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
+  const API_URL = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
+  const [step, setStep] = useState("loading"); // loading | duration | preview | approving
+  const [orders, setOrders] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [settings, setSettings] = useState(null);
+  const [schedule, setSchedule] = useState(null);
+  const [error, setError] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    loadOrders();
+  }, []); // eslint-disable-line
+
+  const loadOrders = async () => {
+    setStep("loading");
+    try {
+      const res = await fetch(`${API_URL}/auto-schedule/orders?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
+      const data = await res.json();
+      if (data.error) { setError(data.error); setStep("error"); return; }
+      setOrders(data.orders.map(o => ({ ...o, estimatedDuration: o.estimatedDuration || o.suggestedDuration || 90 })));
+      setVehicles(data.vehicles);
+      setSettings(data.settings);
+      setStep(data.orders.length === 0 ? "empty" : "duration");
+    } catch (e) { setError(e.message); setStep("error"); }
+  };
+
+  const updateDuration = (soNumber, val) => {
+    setOrders(prev => prev.map(o => o.so_number === soNumber ? { ...o, estimatedDuration: parseInt(val) || 0 } : o));
+  };
+
+  const generateSchedule = async () => {
+    setGenerating(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_URL}/auto-schedule/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, company_id: companyId, orders, vehicles, settings }),
+      });
+      const data = await res.json();
+      if (!data.success) { setError(data.error || "Failed to generate schedule"); setGenerating(false); return; }
+      setSchedule(data.schedule);
+      setStep("preview");
+    } catch (e) { setError(e.message); }
+    setGenerating(false);
+  };
+
+  const approveSchedule = async () => {
+    setStep("approving");
+    try {
+      const durations = orders.map(o => ({
+        itemType: o.itemType,
+        itemKeywords: o.itemKeywords,
+        area: schedule?.vehicles?.flatMap(v => v.stops).find(s => s.so_number === o.so_number)?.area || "",
+        duration_minutes: o.estimatedDuration,
+      }));
+      const res = await fetch(`${API_URL}/auto-schedule/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, company_id: companyId, schedule, durations }),
+      });
+      const data = await res.json();
+      if (data.success) { onApproved(); onClose(); }
+      else { setError(data.error || "Failed to approve"); setStep("preview"); }
+    } catch (e) { setError(e.message); setStep("preview"); }
+  };
+
+  const timeColor = (type) => type === "Wardrobe" ? "text-orange-600" : type === "Service" ? "text-purple-600" : "text-blue-600";
+  const typeBadge = (type) => type === "Wardrobe" ? "bg-orange-100 text-orange-700" : type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700";
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center z-50 pt-6 px-4 pb-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-blue-500 rounded-t-2xl">
+          <div>
+            <h2 className="text-white font-bold text-base">⚡ Auto-Schedule</h2>
+            <p className="text-blue-100 text-xs mt-0.5">{date} · {vehicles.length} vehicle(s) available</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-blue-200 text-2xl font-bold leading-none">×</button>
+        </div>
+
+        <div className="px-6 py-5">
+          {/* Loading */}
+          {step === "loading" && <div className="text-center py-12 text-gray-400">Loading orders...</div>}
+
+          {/* Error */}
+          {step === "error" && <div className="text-center py-8"><p className="text-red-600 mb-4">{error}</p><button onClick={loadOrders} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg">Retry</button></div>}
+
+          {/* Empty */}
+          {step === "empty" && <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">📦</div><p>No unassigned orders for {date}.</p></div>}
+
+          {/* Step 1: Duration input */}
+          {step === "duration" && (
+            <div>
+              <p className="text-sm text-gray-500 mb-4">Set estimated duration for each order. AI will use this to build the optimal schedule.</p>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {orders.map(o => {
+                  const items = Array.isArray(o.items) ? o.items : [];
+                  return (
+                    <div key={o.so_number} className="border border-gray-200 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-blue-700 text-sm">{o.so_number}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadge(o.itemType)}`}>{o.itemType}</span>
+                          <span className="text-xs text-gray-500">{o.customer_name}</span>
+                        </div>
+                        {o.time_slot && <span className="text-xs text-indigo-600 font-medium">⏰ {o.time_slot}</span>}
+                      </div>
+                      <p className="text-xs text-gray-400 mb-1 truncate">📍 {o.address}</p>
+                      <p className="text-xs text-gray-400 mb-2 truncate">📦 {items.map(i => i.itemName).filter(Boolean).join(", ") || "-"}</p>
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Duration (min):</label>
+                        <input
+                          type="number"
+                          value={o.estimatedDuration}
+                          onChange={e => updateDuration(o.so_number, e.target.value)}
+                          min="15" max="480" step="15"
+                          className="w-24 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                        />
+                        <span className={`text-xs font-medium ${timeColor(o.itemType)}`}>
+                          ≈ {Math.floor(o.estimatedDuration / 60)}h {o.estimatedDuration % 60 > 0 ? `${o.estimatedDuration % 60}m` : ""}
+                          {o.suggestedDuration === o.estimatedDuration && " (AI suggested)"}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
+              <div className="flex gap-3 justify-end mt-4">
+                <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+                <button onClick={generateSchedule} disabled={generating || orders.some(o => !o.estimatedDuration)} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                  {generating ? "⏳ Generating..." : "⚡ Generate Schedule"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Preview */}
+          {step === "preview" && schedule && (
+            <div>
+              <p className="text-sm text-gray-500 mb-1">{schedule.summary}</p>
+              {schedule.overflow?.length > 0 && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                  <p className="text-xs font-bold text-orange-700 mb-1">⚠️ {schedule.overflow.length} order(s) cannot fit today:</p>
+                  {schedule.overflow.map(o => <p key={o.so_number} className="text-xs text-orange-600">• SO {o.so_number} — {o.reason}</p>)}
+                </div>
+              )}
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {schedule.vehicles?.map((v, vi) => (
+                  <div key={vi} className="border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-blue-800">🚛 {v.vehicle_plate || "Vehicle " + (vi+1)}</span>
+                        {v.driver_name && <span className="text-xs text-gray-500">👤 {v.driver_name}</span>}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {v.stops?.length} stops · Return: {v.return_time}
+                      </div>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {v.stops?.map((stop, si) => (
+                        <div key={si} className="px-4 py-2.5 flex items-start gap-3">
+                          <div className="text-xs text-blue-600 font-bold w-24 flex-shrink-0 pt-0.5">
+                            {stop.start_time} - {stop.end_time}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-gray-800">{stop.so_number}</span>
+                              <span className="text-xs text-gray-600">{stop.customer_name}</span>
+                              {stop.area && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">📍 {stop.area}</span>}
+                            </div>
+                            <p className="text-xs text-gray-400 truncate mt-0.5">{stop.address}</p>
+                            {stop.notes && <p className="text-xs text-orange-600 mt-0.5">📝 {stop.notes}</p>}
+                          </div>
+                          <div className="text-xs text-gray-400 flex-shrink-0">{stop.duration_minutes}min</div>
+                        </div>
+                      ))}
+                    </div>
+                    {v.warnings?.length > 0 && (
+                      <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-100">
+                        {v.warnings.map((w, wi) => <p key={wi} className="text-xs text-yellow-700">⚠️ {w}</p>)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
+              <div className="flex gap-3 justify-between mt-4">
+                <button onClick={() => setStep("duration")} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">← Adjust Durations</button>
+                <div className="flex gap-3">
+                  <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+                  <button onClick={approveSchedule} className="px-5 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">✅ Approve & Create Routes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Approving */}
+          {step === "approving" && (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-3">⚡</div>
+              <p className="text-gray-600 font-medium">Creating routes...</p>
+              <p className="text-xs text-gray-400 mt-1">Setting up delivery schedule and confirming routes.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function DeliverySchedule() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [routes, setRoutes] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
@@ -457,14 +673,15 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
   const [dragOrder, setDragOrder] = useState(null);
   const [draggingAssigned, setDraggingAssigned] = useState(null);
   const [printRoute, setPrintRoute] = useState(null);
+  const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [routeRes, unassignedRes, tripsRes] = await Promise.all([
-        fetch(`${API}/delivery/routes?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
-        fetch(`${API}/delivery/unassigned?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
-        fetch(`${API}/order-trips?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
+        fetch(`${API}/delivery/routes?date=${date}`),
+        fetch(`${API}/delivery/unassigned?date=${date}`),
+        fetch(`${API}/order-trips?date=${date}`),
       ]);
       const [routeData, unassignedData, tripsData] = await Promise.all([
         routeRes.json(), unassignedRes.json(), tripsRes.json()
@@ -474,7 +691,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
       setTrips(Array.isArray(tripsData) ? tripsData : []);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [date, companyId, isMaster]);
+  }, [date]);
 
   const loadVehicles = useCallback(async () => {
     try { const res = await fetch(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
@@ -589,8 +806,8 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
         <div className="flex items-center gap-3 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">🔄 Refresh</button>
-          {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>}
-          {!readOnly && <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>}
+          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>
+          <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>
         </div>
       </div>
 
@@ -598,6 +815,14 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
       {showAddRoute && <AddRouteModal activeVehicles={activeVehicles} onClose={() => setShowAddRoute(false)} onCreate={createRoute} onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }} />}
       {printRoute && <RoutePrintView route={printRoute} onClose={() => setPrintRoute(null)} />}
+      {showAutoScheduler && (
+        <AutoSchedulerModal
+          date={date}
+          companyId={companyId}
+          onClose={() => setShowAutoScheduler(false)}
+          onApproved={() => { loadData(); loadServiceOrders(); }}
+        />
+      )}
 
       <div className="flex flex-col xl:flex-row gap-4">
         {/* Unassigned Panel — mixed orders + trips */}
@@ -775,15 +1000,11 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
                     )}
                     {route.orders?.map((ro, index) => {
                       // Check if this is a multi-trip order
-                      const isMyOrder = currentUser?.role === "salesman" && currentUser?.salesman_name &&
-                        (ro.orders?.salesman || "").split("/").map(s => s.trim().toLowerCase())
-                          .includes(currentUser.salesman_name.toLowerCase());
                       const linkedTrip = trips.find(t => t.so_number === ro.orders?.so_number);
                       return (
                         <AssignedOrderCard
                           key={ro.id}
                           ro={linkedTrip ? { ...ro, ...linkedTrip, orders: ro.orders } : ro}
-                          isHighlighted={isMyOrder}
                           routeId={route.id}
                           index={index}
                           isLocked={isLocked}
