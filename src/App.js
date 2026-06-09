@@ -224,7 +224,10 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
 
 // ── DO Review Item (needs own state for linkSo input) ────────────
 function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
-  const [linkSo, setLinkSo] = useState("");
+  const [linkSo, setLinkSo] = useState(item.so_number || "");
+  const [selectedOrderId, setSelectedOrderId] = useState("");
+  const [selectedItemIdx, setSelectedItemIdx] = useState("");
+
   const reasonMap = {
     showroom: { icon: "🏷️", label: "Showroom / Display Stock", borderColor: "#bfdbfe", bg: "bg-blue-50", text: "text-blue-700" },
     no_so: { icon: "❓", label: "No SO Number Found", borderColor: "#e5e7eb", bg: "bg-gray-50", text: "text-gray-600" },
@@ -233,8 +236,27 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
     duplicate_arrival: { icon: "🔁", label: "Already Has Arrival Date", borderColor: "#d8b4fe", bg: "bg-purple-50", text: "text-purple-700" },
   };
   const r = reasonMap[item.reason] || { icon: "❓", label: item.reason, borderColor: "#e5e7eb", bg: "bg-gray-50", text: "text-gray-600" };
+
+  // For manual matching — find order by typed SO
+  const matchedOrder = orders.find(o => o.soNumber === linkSo.trim());
+  const matchedItems = matchedOrder?.items || [];
+
+  // needs manual matching for these reasons
+  const needsManualMatch = ["so_not_found", "no_so", "item_not_matched"].includes(item.reason);
+
+  const handleManualResolve = () => {
+    if (!linkSo.trim()) return alert("Please enter an SO number.");
+    if (!matchedOrder) return alert(`SO ${linkSo} not found in system. Please check the number.`);
+    // Use selected item index to get item code/name for matching
+    const targetItemCode = selectedItemIdx !== ""
+      ? (matchedItems[parseInt(selectedItemIdx)]?.itemCode || matchedItems[parseInt(selectedItemIdx)]?.itemName)
+      : item.item_code;
+    onResolve(item.id, linkSo.trim(), targetItemCode);
+  };
+
   return (
     <div className="bg-white border-2 rounded-xl shadow-sm overflow-hidden" style={{borderColor: r.borderColor}}>
+      {/* Header */}
       <div className={`px-4 py-3 flex items-center justify-between flex-wrap gap-2 ${r.bg} border-b`} style={{borderColor: r.borderColor}}>
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-lg">{r.icon}</span>
@@ -248,10 +270,14 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
           <button onClick={() => onDismiss(item.id)} className="text-xs bg-white border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Dismiss</button>
           {item.reason === "showroom"
             ? <button onClick={() => onResolve(item.id)} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">✅ Acknowledged</button>
-            : <button onClick={() => onResolve(item.id, item.so_number, item.item_code)} className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700">✅ Mark Resolved</button>
+            : !needsManualMatch
+              ? <button onClick={() => onResolve(item.id, item.so_number, item.item_code)} className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700">✅ Mark Resolved</button>
+              : null
           }
         </div>
       </div>
+
+      {/* Details */}
       <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Supplier</p><p className="text-sm font-semibold">{item.supplier || "-"}</p></div>
         <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">DO Number</p><p className="text-sm font-semibold">{item.do_number || "-"}</p></div>
@@ -259,21 +285,68 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
         <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Quantity</p><p className="text-sm font-semibold">{item.quantity || "-"}</p></div>
         {item.so_number && (
           <div className="bg-gray-50 rounded-lg p-3">
-            <p className="text-xs text-gray-400 mb-1">SO Number</p>
+            <p className="text-xs text-gray-400 mb-1">SO from DO</p>
             <button onClick={() => { const o = orders.find(x => x.soNumber === item.so_number); if (o) onView(o); }} className="text-sm font-bold text-blue-700 hover:underline">{item.so_number}</button>
           </div>
         )}
         <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Logged</p><p className="text-sm font-semibold">{item.created_at ? new Date(item.created_at).toLocaleDateString("en-MY") : "-"}</p></div>
-        {item.reason === "item_not_matched" && (
-          <div className="col-span-2 sm:col-span-4">
-            <p className="text-xs text-gray-400 mb-1">Manually link to SO:</p>
-            <div className="flex gap-2">
-              <input value={linkSo} onChange={e => setLinkSo(e.target.value)} placeholder="Enter SO number" className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-              <button onClick={() => { if (linkSo) onResolve(item.id, linkSo, item.item_code); }} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 whitespace-nowrap">Link & Resolve</button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Manual matching panel — for so_not_found, no_so, item_not_matched */}
+      {needsManualMatch && (
+        <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+          <p className="text-xs font-bold text-gray-600 mb-3">🔗 Match to Sales Order</p>
+          <div className="space-y-3">
+            {/* Step 1: Enter SO */}
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Step 1 — Enter SO Number</label>
+              <div className="flex gap-2">
+                <input
+                  value={linkSo}
+                  onChange={e => { setLinkSo(e.target.value); setSelectedItemIdx(""); }}
+                  placeholder="e.g. 11576"
+                  className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+                {matchedOrder && <span className="text-xs text-green-600 font-medium self-center whitespace-nowrap">✅ Found: {matchedOrder.customerName}</span>}
+                {linkSo && !matchedOrder && <span className="text-xs text-red-500 self-center whitespace-nowrap">❌ Not found</span>}
+              </div>
+            </div>
+
+            {/* Step 2: Select item from that order */}
+            {matchedOrder && matchedItems.length > 0 && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Step 2 — Select the matching item in SO {linkSo}</label>
+                <select
+                  value={selectedItemIdx}
+                  onChange={e => setSelectedItemIdx(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                >
+                  <option value="">-- Select item --</option>
+                  {matchedItems.map((oi, idx) => (
+                    <option key={idx} value={idx}>
+                      {idx + 1}. {oi.itemCode ? `[${oi.itemCode}] ` : ""}{oi.itemName} x{oi.unit || 1}
+                      {oi.arrivalDate ? ` (arrived: ${oi.arrivalDate})` : " (no arrival date)"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Resolve button */}
+            {matchedOrder && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleManualResolve}
+                  disabled={matchedItems.length > 0 && selectedItemIdx === ""}
+                  className="text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-40 font-medium"
+                >
+                  ✅ Set Arrival Date & Resolve
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
