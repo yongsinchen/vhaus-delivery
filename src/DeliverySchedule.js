@@ -481,20 +481,38 @@ export default function DeliverySchedule() {
     catch (e) { console.error(e); }
   }, []);
 
+  const [serviceOrders, setServiceOrders] = useState([]);
+
+  const loadServiceOrders = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/delivery/unassigned?date=${date}`);
+      const data = await res.json();
+      setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
+    } catch (e) { console.error("loadServiceOrders error:", e); }
+  }, [date]);
+
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
+  useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
 
   const activeVehicles = vehicles.filter(v => v.status === "Active");
 
-  // Build combined unassigned list: regular orders + scheduled trips mixed, sorted by time_slot
+  // Build combined unassigned list: regular orders + service orders + scheduled trips
   const combinedUnassigned = [
-    ...unassigned.filter(o => !o.is_multi_trip).map(o => ({ ...o, _type: "order" })),
+    ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service").map(o => ({ ...o, _type: "order" })),
+    ...serviceOrders.map(o => ({ ...o, _type: "service" })),
     ...trips.map(t => ({ ...t, _type: "trip" })),
   ].sort((a, b) => {
-    const aTime = a._type === "order" ? (a.time_slot || "") : (a.orders?.time_slot || "");
-    const bTime = b._type === "order" ? (b.time_slot || "") : (b.orders?.time_slot || "");
+    const aTime = (a._type === "order" || a._type === "service") ? (a.time_slot || "") : (a.orders?.time_slot || "");
+    const bTime = (b._type === "order" || b._type === "service") ? (b.time_slot || "") : (b.orders?.time_slot || "");
     return aTime.localeCompare(bTime);
   });
+
+  // Reload all data including service orders
+  const reloadAll = async () => {
+    await loadData();
+    await loadServiceOrders();
+  };
 
   const createRoute = async (newRoute) => {
     const res = await fetch(`${API}/delivery/routes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...newRoute, delivery_date: date }) });
@@ -597,9 +615,10 @@ export default function DeliverySchedule() {
                   📦 Unassigned <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{combinedUnassigned.length}</span>
                 </h3>
               </div>
-              <div className="flex gap-2 mt-1">
-                <span className="text-xs text-gray-500">🔵 Orders</span>
-                <span className="text-xs text-purple-600">🟣 Trips</span>
+              <div className="flex gap-2 mt-1 flex-wrap">
+                <span className="text-xs text-gray-500">🔵 Delivery</span>
+                <span className="text-xs text-purple-600">🟣 Service</span>
+                <span className="text-xs text-purple-400">🔷 Trips</span>
               </div>
             </div>
             <div className="p-3 space-y-2 max-h-screen overflow-y-auto">
@@ -617,7 +636,39 @@ export default function DeliverySchedule() {
                         />
                       );
                     }
-                    // Regular order card
+                    // Service order card
+                    if (item._type === "service") {
+                      const items = parseItems(item.items);
+                      return (
+                        <div key={`service-${item.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
+                          draggable onDragStart={() => setDragOrder({ ...item, _type: "order" })}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
+                              <span className="font-bold text-purple-700 text-xs">{item.so_number}</span>
+                              {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
+                            </div>
+                            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
+                          </div>
+                          <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
+                          <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
+                          {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
+                          {item.service_note && <p className="text-xs text-purple-600 mt-0.5 truncate">📝 {item.service_note}</p>}
+                          <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+                          {routes.length > 0 && (
+                            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
+                              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+                              <option value="">Assign to route...</option>
+                              {routes.filter(r => r.status === "Pending" || r.status === "Confirmed").map(r => (
+                                <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}{r.status === "Confirmed" ? " ✅" : ""}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Regular delivery order card
                     const items = parseItems(item.items);
                     return (
                       <div key={`order-${item.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
