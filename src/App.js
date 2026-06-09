@@ -225,7 +225,6 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
 // ── DO Review Item (needs own state for linkSo input) ────────────
 function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
   const [linkSo, setLinkSo] = useState(item.so_number || "");
-  const [selectedOrderId, setSelectedOrderId] = useState("");
   const [selectedItemIdx, setSelectedItemIdx] = useState("");
 
   const reasonMap = {
