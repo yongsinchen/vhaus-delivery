@@ -369,6 +369,20 @@ export default function App() {
     if (data) setAllTrips(data);
   };
 
+  const cancelRemainingTrips = async (soNumber, afterTripNo) => {
+    if (!window.confirm(`Cancel all remaining trips after Trip ${afterTripNo} for SO ${soNumber}?`)) return;
+    try {
+      const res = await fetch(`${BACKEND}/order-trips/so/${soNumber}/cancel-remaining`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ after_trip_no: afterTripNo }),
+      });
+      const data = await res.json();
+      if (data.success) { await reloadTrips(); alert("✅ Remaining trips cancelled."); }
+      else alert("Failed: " + (data.error || "Unknown error"));
+    } catch (e) { alert("Error: " + e.message); }
+  };
+
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
   const handleDelete = async id => {
@@ -621,9 +635,14 @@ export default function App() {
                                     {trip.trip_no === 1 && <span className="text-green-600">💰</span>}
                                     <span className={`px-1.5 py-0.5 rounded-full font-medium ${tripStatusColor(trip.status)}`}>{trip.status}</span>
                                   </div>
-                                  <span className={`font-medium ${trip.scheduled_date ? "text-gray-700" : "text-gray-400 italic"}`}>
-                                    {trip.scheduled_date ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short" }) : "TBC"}
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`text-xs font-medium ${trip.scheduled_date ? "text-gray-700" : "text-gray-400 italic"}`}>
+                                      {trip.scheduled_date ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short" }) : "TBC"}
+                                    </span>
+                                    {trip.status === "Scheduled" && (
+                                      <button onClick={() => cancelRemainingTrips(soNumber, trip.trip_no - 1)} className="text-xs text-red-400 hover:text-red-600" title="Cancel this and remaining trips">✕</button>
+                                    )}
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1025,11 +1044,16 @@ export default function App() {
                                     <p className="text-xs font-bold text-gray-700">Trip {trip.trip_no}/{trip.total_trips}</p>
                                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${tripStatusColor(trip.status)}`}>{trip.status}</span>
                                   </div>
-                                  <p className={`text-xs font-semibold text-right ${!trip.scheduled_date ? "text-gray-400 italic" : "text-gray-700"}`}>
-                                    {trip.scheduled_date
-                                      ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })
-                                      : "TBC"}
-                                  </p>
+                                  <div className="text-right">
+                                    <p className={`text-xs font-semibold ${!trip.scheduled_date ? "text-gray-400 italic" : "text-gray-700"}`}>
+                                      {trip.scheduled_date
+                                        ? new Date(trip.scheduled_date + "T00:00:00").toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })
+                                        : "TBC"}
+                                    </p>
+                                    {trip.status === "Scheduled" && (
+                                      <button onClick={() => cancelRemainingTrips(o.soNumber, trip.trip_no - 1)} className="text-xs text-red-400 hover:text-red-600 mt-0.5">Cancel trip</button>
+                                    )}
+                                  </div>
                                 </div>
                               ))}
                             </div>
