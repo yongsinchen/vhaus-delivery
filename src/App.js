@@ -3,7 +3,7 @@ import DeliverySchedule from "./DeliverySchedule";
 import LoginPage from "./LoginPage";
 import UserManagement from "./UserManagement";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
-import ResetPasswordPage from "./ResetPasswordPage";
+import ResetPasswordPage from "./ResetPassword";
 
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
