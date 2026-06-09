@@ -254,7 +254,7 @@ function RoutePrintView({ route, onClose }) {
         </div>
         <div className="print-area p-4">
           <div className="text-center mb-3">
-            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>V Haus Living (Pg) Delivery Schedule</h1>
+            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>PulseOS — Delivery Schedule</h1>
             <p style={{ fontSize:"11px", margin:"2px 0 0 0", color:"#444" }}>Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}</p>
           </div>
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"10px" }}>
@@ -443,7 +443,7 @@ function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────
-export default function DeliverySchedule() {
+export default function DeliverySchedule({ readOnly = false, companyId = null, isMaster = false, currentUser = null }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [routes, setRoutes] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
@@ -462,9 +462,9 @@ export default function DeliverySchedule() {
     setLoading(true);
     try {
       const [routeRes, unassignedRes, tripsRes] = await Promise.all([
-        fetch(`${API}/delivery/routes?date=${date}`),
-        fetch(`${API}/delivery/unassigned?date=${date}`),
-        fetch(`${API}/order-trips?date=${date}`),
+        fetch(`${API}/delivery/routes?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
+        fetch(`${API}/delivery/unassigned?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
+        fetch(`${API}/order-trips?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ''}`),
       ]);
       const [routeData, unassignedData, tripsData] = await Promise.all([
         routeRes.json(), unassignedRes.json(), tripsRes.json()
@@ -589,8 +589,8 @@ export default function DeliverySchedule() {
         <div className="flex items-center gap-3 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">🔄 Refresh</button>
-          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>
-          <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>
+          {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>}
+          {!readOnly && <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>}
         </div>
       </div>
 
@@ -775,11 +775,15 @@ export default function DeliverySchedule() {
                     )}
                     {route.orders?.map((ro, index) => {
                       // Check if this is a multi-trip order
+                      const isMyOrder = currentUser?.role === "salesman" && currentUser?.salesman_name &&
+                        (ro.orders?.salesman || "").split("/").map(s => s.trim().toLowerCase())
+                          .includes(currentUser.salesman_name.toLowerCase());
                       const linkedTrip = trips.find(t => t.so_number === ro.orders?.so_number);
                       return (
                         <AssignedOrderCard
                           key={ro.id}
                           ro={linkedTrip ? { ...ro, ...linkedTrip, orders: ro.orders } : ro}
+                          isHighlighted={isMyOrder}
                           routeId={route.id}
                           index={index}
                           isLocked={isLocked}

@@ -1,10 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { createClient } from "@supabase/supabase-js";
 import DeliverySchedule from "./DeliverySchedule";
-
-const SUPABASE_URL = "https://lrfyjcupucpdqmbqqbbk.supabase.co";
-const SUPABASE_KEY = "sb_publishable_eAA_n21UDdPrecDlwfa8xQ_3PmFAMkm";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import LoginPage from "./LoginPage";
+import UserManagement from "./UserManagement";
+import { supabase, useAuth, roleLabel, can as canRole } from "./AuthContext";
 
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
@@ -37,7 +35,7 @@ const fromDb = o => ({
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
-const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "📦 DO Review", "Add Order"];
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "📦 DO Review", "Add Order", "👥 Users"];
 
 // ── Trip status color ────────────────────────────────────────────
 const tripStatusColor = s => ({
@@ -351,6 +349,9 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
 }
 
 export default function App() {
+  const { user, signOut, can } = useAuth();
+  const companyId = user?.company_id;
+  const isMaster = user?.role === "master";
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -378,7 +379,8 @@ export default function App() {
   const loadServicePending = async () => {
     setSpLoading(true);
     try {
-      const res = await fetch(`${BACKEND}/service-pending`);
+      const url = companyId && !isMaster ? `${BACKEND}/service-pending?company_id=${companyId}` : `${BACKEND}/service-pending`;
+      const res = await fetch(url);
       const data = await res.json();
       setServicePending(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -479,12 +481,28 @@ export default function App() {
 
   const loadOrders = async () => {
     setLoading(true); setError(null);
-    const { data, error: err } = await supabase.from("orders").select("*").order("created_at", { ascending: true });
+    let query = supabase.from("orders").select("*").order("created_at", { ascending: true });
+    if (!isMaster && companyId) query = query.eq("company_id", companyId);
+    const { data, error: err } = await query;
     if (err) setError("Failed to load orders: " + err.message);
-    else setOrders((data || []).map(fromDb));
+    else {
+      // Salesman only sees their own orders
+      const allOrders = (data || []).map(fromDb);
+      if (user?.role === "salesman" && user?.salesman_name) {
+        const name = user.salesman_name.toLowerCase().trim();
+        setOrders(allOrders.filter(o => {
+          const salesmen = (o.salesman || "").split("/").map(s => s.trim().toLowerCase());
+          return salesmen.includes(name);
+        }));
+      } else {
+        setOrders(allOrders);
+      }
+    }
     setLoading(false);
     // Also refresh trips
-    const { data: tripsData } = await supabase.from("order_trips").select("*").order("so_number").order("trip_no");
+    let tripsQuery = supabase.from("order_trips").select("*").order("so_number").order("trip_no");
+    if (!isMaster && companyId) tripsQuery = tripsQuery.eq("company_id", companyId);
+    const { data: tripsData } = await tripsQuery;
     if (tripsData) setAllTrips(tripsData);
   };
 
@@ -546,6 +564,28 @@ export default function App() {
     } catch (e) { alert("Error: " + e.message); }
   };
 
+  const [paymentModal, setPaymentModal] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentSaving, setPaymentSaving] = useState(false);
+
+  const recordPayment = async () => {
+    if (!paymentModal || !paymentAmount) return;
+    const amount = parseFloat(paymentAmount);
+    if (isNaN(amount) || amount <= 0) return alert("Please enter a valid amount.");
+    const newBalance = Math.max(0, parseFloat(paymentModal.balance || 0) - amount).toFixed(2);
+    setPaymentSaving(true);
+    const { error } = await supabase.from("orders").update({
+      balance: newBalance,
+      remark: (paymentModal.remark ? paymentModal.remark + " | " : "") + `Payment RM${amount} recorded on ${new Date().toLocaleDateString("en-MY")}`,
+    }).eq("id", paymentModal.id);
+    if (error) { alert("Failed: " + error.message); setPaymentSaving(false); return; }
+    setOrders(prev => prev.map(o => o.id === paymentModal.id ? { ...o, balance: newBalance } : o));
+    setPaymentModal(null);
+    setPaymentAmount("");
+    setPaymentSaving(false);
+    alert(`✅ Payment of RM${amount} recorded. New balance: RM${newBalance}`);
+  };
+
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setActiveTab("Add Order"); };
   const handleDelete = async id => {
@@ -560,7 +600,7 @@ export default function App() {
     if (!form.soNumber) return alert("SO Number is required.");
     if (!form.deliveryDate && form.type === "Delivery") return alert("Delivery Date is required for Delivery orders.");
     setSaving(true);
-    const payload = toDb(form);
+    const payload = { ...toDb(form), company_id: companyId || null };
     if (editId !== null) {
       const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
       if (err) { alert("Error updating: " + err.message); setSaving(false); return; }
@@ -649,9 +689,18 @@ export default function App() {
     </div>
   );
 
+  // Show login if not authenticated
+  const { loading: authLoading } = useAuth();
+  if (authLoading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center"><div className="text-4xl mb-3">⚡</div><div className="text-gray-600 font-medium">Loading...</div></div>
+    </div>
+  );
+  if (!user) return <LoginPage />;
+
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center"><div className="text-4xl mb-3">🏠</div><div className="text-gray-600 font-medium">Loading V Haus Delivery Sheet...</div><div className="text-xs text-gray-400 mt-1">Connecting to database</div></div>
+      <div className="text-center"><div className="text-4xl mb-3">⚡</div><div className="text-gray-600 font-medium">Loading PulseOS...</div><div className="text-xs text-gray-400 mt-1">Connecting to database</div></div>
     </div>
   );
 
@@ -681,10 +730,14 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 font-sans">
       <div className="bg-gradient-to-r from-blue-700 to-blue-500 text-white px-4 py-3 shadow">
         <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-2">
-          <h1 className="text-lg font-bold tracking-wide">🏠 V Haus Living (Pg) Delivery Sheet</h1>
+          <div>
+            <h1 className="text-lg font-bold tracking-wide">{user?.companies?.name || "PulseOS"}</h1>
+            <p className="text-xs text-blue-200 mt-0.5">{user?.name} · {roleLabel(user?.role)}</p>
+          </div>
           <div className="flex items-center gap-3">
             <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white text-xs px-3 py-1.5 rounded-lg">🔍 Search SO</button>
             <button onClick={loadOrders} className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white text-xs px-3 py-1.5 rounded-lg">🔄 Refresh</button>
+            <button onClick={signOut} className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white text-xs px-3 py-1.5 rounded-lg">🚪 Sign Out</button>
             <div className="flex gap-3 text-center text-xs">
               <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.length}</div><div>Total</div></div>
               <div className="bg-white bg-opacity-20 rounded-lg px-3 py-1"><div className="font-bold text-lg">{orders.filter(o => o.status === "Pending").length}</div><div>Pending</div></div>
@@ -697,7 +750,18 @@ export default function App() {
 
       <div className="bg-white border-b shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto flex overflow-x-auto">
-          {TABS.map(t => (
+          {TABS.filter(t => {
+            if (t === "Monthly View") return can("viewMonthly");
+            if (t === "Service") return can("viewService");
+            if (t === "Daily View") return can("viewDaily");
+            if (t === "Delivery Schedule") return can("viewSchedule");
+            if (t === "🚨 Flagged") return can("viewFlagged");
+            if (t === "🔧 Service Pending") return can("viewServicePending");
+            if (t === "📦 DO Review") return can("viewDoReview");
+            if (t === "Add Order") return can("addOrder");
+            if (t === "👥 Users") return can("manageUsers");
+            return true;
+          }).map(t => (
             <button key={t} onClick={() => { setActiveTab(t); if (t !== "Add Order") { setEditId(null); setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); } if (t === "Service") reloadTrips(); }}
               className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === t ? "border-blue-600 text-blue-700 bg-blue-50" : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
               {t === "Add Order" ? (editId !== null ? "✏️ Edit Order" : "➕ Add Order") : t === "Monthly View" ? `📅 ${monthLabel(browseMonth)}` : t}
@@ -917,7 +981,7 @@ export default function App() {
           </div>
         )}
  {/* Delivery Schedule */}
-{activeTab === "Delivery Schedule" && <DeliverySchedule />}
+{activeTab === "Delivery Schedule" && <DeliverySchedule readOnly={!can("editSchedule")} companyId={companyId} isMaster={isMaster} currentUser={user} />}
 
         {/* SERVICE PENDING */}
         {activeTab === "🔧 Service Pending" && (
@@ -1388,6 +1452,11 @@ export default function App() {
           </div>
         )}
 
+        {/* USERS */}
+        {activeTab === "👥 Users" && can("manageUsers") && (
+          <UserManagement />
+        )}
+
         {/* ADD / EDIT ORDER */}
         {activeTab === "Add Order" && (
           <div className="max-w-3xl">
@@ -1558,6 +1627,34 @@ export default function App() {
                 className="px-4 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2"
               >
                 {converting ? "Converting..." : "✅ Confirm Convert"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Payment Modal */}
+      {paymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full">
+            <h3 className="font-bold text-gray-800 mb-1">💰 Record Payment</h3>
+            <p className="text-sm text-gray-500 mb-1">SO <span className="font-semibold text-blue-700">{paymentModal.soNumber}</span> — {paymentModal.customerName}</p>
+            <p className="text-sm text-gray-500 mb-4">Current balance: <span className="font-bold text-red-600">RM {paymentModal.balance}</span></p>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 block mb-1">Payment Amount (RM)</label>
+              <input
+                type="number"
+                value={paymentAmount}
+                onChange={e => setPaymentAmount(e.target.value)}
+                placeholder="e.g. 500"
+                autoFocus
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => { setPaymentModal(null); setPaymentAmount(""); }} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
+              <button onClick={recordPayment} disabled={paymentSaving} className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                {paymentSaving ? "Saving..." : "✅ Record Payment"}
               </button>
             </div>
           </div>
