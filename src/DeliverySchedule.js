@@ -474,7 +474,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
       setTrips(Array.isArray(tripsData) ? tripsData : []);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [date]);
+  }, [date, companyId, isMaster]);
 
   const loadVehicles = useCallback(async () => {
     try { const res = await fetch(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
