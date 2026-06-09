@@ -86,11 +86,21 @@ export function AuthProvider({ children }) {
     if (!authUser) { setUser(null); setLoading(false); return; }
     const { data, error } = await supabase
       .from("users")
-      .select("*, companies(id, name, code)")
+      .select("*")
       .eq("id", authUser.id)
       .single();
     if (error || !data) { setUser(null); setLoading(false); return; }
-    setUser({ ...data, email: authUser.email });
+    // Load company separately only if company_id exists
+    let company = null;
+    if (data.company_id) {
+      const { data: companyData } = await supabase
+        .from("companies")
+        .select("id, name, code")
+        .eq("id", data.company_id)
+        .single();
+      company = companyData || null;
+    }
+    setUser({ ...data, email: authUser.email, companies: company });
     setLoading(false);
   };
 
