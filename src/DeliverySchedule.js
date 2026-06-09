@@ -508,12 +508,6 @@ export default function DeliverySchedule() {
     return aTime.localeCompare(bTime);
   });
 
-  // Reload all data including service orders
-  const reloadAll = async () => {
-    await loadData();
-    await loadServiceOrders();
-  };
-
   const createRoute = async (newRoute) => {
     const res = await fetch(`${API}/delivery/routes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...newRoute, delivery_date: date }) });
     const data = await res.json();
