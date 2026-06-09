@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import DeliverySchedule from "./DeliverySchedule";
 import LoginPage from "./LoginPage";
 import UserManagement from "./UserManagement";
-import { supabase, useAuth, roleLabel } from "./AuthContext";
-import ResetPasswordPage from "./ResetPassword";
+import { supabase, useAuth, roleLabel } from "./Authcontext";
+import ResetPasswordPage from "./ResetPasswordPage";
 
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
@@ -485,7 +485,7 @@ export default function App() {
     let query = supabase.from("orders").select("*").order("created_at", { ascending: true });
     if (!isMaster && companyId) query = query.eq("company_id", companyId);
     const { data, error: err } = await query;
-    if (err) setError("Failed to load orders: " + err.message);
+    if (err) { console.error("loadOrders error:", err); setError("Failed to load orders: " + err.message); }
     else {
       // Salesman only sees their own orders
       const allOrders = (data || []).map(fromDb);

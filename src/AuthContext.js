@@ -89,15 +89,17 @@ export function AuthProvider({ children }) {
       .select("*")
       .eq("id", authUser.id)
       .single();
-    if (error || !data) { setUser(null); setLoading(false); return; }
+    if (error) { console.error("loadUserProfile error:", error); setUser(null); setLoading(false); return; }
+    if (!data) { console.warn("No user profile found for", authUser.id); setUser(null); setLoading(false); return; }
     // Load company separately only if company_id exists
     let company = null;
     if (data.company_id) {
-      const { data: companyData } = await supabase
+      const { data: companyData, error: compErr } = await supabase
         .from("companies")
         .select("id, name, code")
         .eq("id", data.company_id)
         .single();
+      if (compErr) console.error("loadCompany error:", compErr);
       company = companyData || null;
     }
     setUser({ ...data, email: authUser.email, companies: company });
