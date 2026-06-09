@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V Haus Living — System User Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #f8f7f4;
+    --white: #ffffff;
+    --navy: #1a2744;
+    --blue: #2563eb;
+    --blue-light: #eff6ff;
+    --orange: #f97316;
+    --orange-light: #fff7ed;
+    --green: #16a34a;
+    --green-light: #f0fdf4;
+    --purple: #7c3aed;
+    --purple-light: #f5f3ff;
+    --red: #dc2626;
+    --red-light: #fef2f2;
+    --gray: #6b7280;
+    --gray-light: #f3f4f6;
+    --border: #e5e7eb;
+    --text: #111827;
+    --text-muted: #6b7280;
+    --radius: 12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── Layout ── */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 240px;
+    height: 100vh;
+    background: var(--navy);
+    color: white;
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar-header {
+    padding: 24px 20px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .sidebar-logo {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: white;
+  }
+
+  .sidebar-sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    margin-top: 2px;
+  }
+
+  .sidebar-nav {
+    padding: 12px 0;
+    flex: 1;
+  }
+
+  .nav-section {
+    padding: 8px 20px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.35);
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.7);
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+
+  .nav-item:hover, .nav-item.active {
+    color: white;
+    background: rgba(255,255,255,0.07);
+    border-left-color: #60a5fa;
+  }
+
+  .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+
+  .main {
+    margin-left: 240px;
+    min-height: 100vh;
+    padding: 40px 48px;
+    max-width: calc(100% - 240px);
+  }
+
+  /* ── Sections ── */
+  .section {
+    display: none;
+  }
+  .section.active {
+    display: block;
+  }
+
+  .page-title {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 6px;
+  }
+
+  .page-subtitle {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h2 {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 32px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 20px 0 8px;
+  }
+
+  p { margin-bottom: 12px; color: var(--text); }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .feature-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .feature-card .icon {
+    font-size: 28px;
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .feature-card h3 {
+    margin: 0 0 6px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .feature-card p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .badge-blue { background: var(--blue-light); color: var(--blue); }
+  .badge-green { background: var(--green-light); color: var(--green); }
+  .badge-orange { background: var(--orange-light); color: var(--orange); }
+  .badge-purple { background: var(--purple-light); color: var(--purple); }
+  .badge-red { background: var(--red-light); color: var(--red); }
+  .badge-gray { background: var(--gray-light); color: var(--gray); }
+
+  /* ── Steps ── */
+  .steps {
+    counter-reset: step;
+    margin: 16px 0;
+  }
+
+  .step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: flex-start;
+  }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    background: var(--navy);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .step-content { flex: 1; }
+  .step-title { font-weight: 600; margin-bottom: 4px; font-size: 14px; }
+  .step-desc { color: var(--text-muted); font-size: 13px; }
+
+  /* ── Code / Chat blocks ── */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--gray-light);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 7px;
+    color: var(--navy);
+  }
+
+  .chat-block {
+    background: var(--gray-light);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin: 12px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .chat-user { color: var(--blue); font-weight: 600; }
+  .chat-bot { color: var(--green); font-weight: 600; }
+  .chat-note { color: var(--gray); font-style: italic; }
+
+  /* ── Table ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 13px;
+  }
+
+  th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--navy);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  th:first-child { border-radius: 8px 0 0 0; }
+  th:last-child { border-radius: 0 8px 0 0; }
+
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:hover td { background: var(--blue-light); }
+  tr:last-child td { border-bottom: none; }
+
+  .table-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin: 12px 0 20px;
+  }
+
+  /* ── Alerts ── */
+  .alert {
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 12px 0;
+    font-size: 13px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .alert-blue { background: var(--blue-light); border: 1px solid #bfdbfe; color: #1d4ed8; }
+  .alert-green { background: var(--green-light); border: 1px solid #bbf7d0; color: #15803d; }
+  .alert-orange { background: var(--orange-light); border: 1px solid #fed7aa; color: #c2410c; }
+  .alert-red { background: var(--red-light); border: 1px solid #fecaca; color: #b91c1c; }
+
+  /* ── Flow diagram ── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 16px 0;
+  }
+
+  .flow-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+
+  .flow-arrow {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 16px;
+    padding: 2px 0;
+  }
+
+  /* ── Template box ── */
+  .template-box {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    margin: 12px 0;
+  }
+
+  .template-key { color: #7dd3fc; }
+  .template-val { color: #86efac; }
+  .template-comment { color: #64748b; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 24px 20px; max-width: 100%; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 28px 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">🏠 V Haus Living</div>
+    <div class="sidebar-sub">System User Guide</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <a class="nav-item active" onclick="showSection('overview')"><span class="nav-icon">🗺️</span> How It Works</a>
+
+    <div class="nav-section">Telegram Bot</div>
+    <a class="nav-item" onclick="showSection('salesman')"><span class="nav-icon">📱</span> Salesman (Group A)</a>
+    <a class="nav-item" onclick="showSection('driver')"><span class="nav-icon">🚛</span> Driver (Group B)</a>
+    <a class="nav-item" onclick="showSection('admin-bot')"><span class="nav-icon">👤</span> Admin Commands</a>
+
+    <div class="nav-section">Web App</div>
+    <a class="nav-item" onclick="showSection('summary')"><span class="nav-icon">📊</span> Summary</a>
+    <a class="nav-item" onclick="showSection('monthly')"><span class="nav-icon">📅</span> Monthly View</a>
+    <a class="nav-item" onclick="showSection('service')"><span class="nav-icon">🔧</span> Service Orders</a>
+    <a class="nav-item" onclick="showSection('schedule')"><span class="nav-icon">🚚</span> Delivery Schedule</a>
+    <a class="nav-item" onclick="showSection('flagged')"><span class="nav-icon">🚨</span> Flagged Orders</a>
+    <a class="nav-item" onclick="showSection('service-pending')"><span class="nav-icon">⏳</span> Service Pending</a>
+    <a class="nav-item" onclick="showSection('add-order')"><span class="nav-icon">➕</span> Add / Edit Order</a>
+
+    <div class="nav-section">Reference</div>
+    <a class="nav-item" onclick="showSection('statuses')"><span class="nav-icon">🏷️</span> Order Statuses</a>
+    <a class="nav-item" onclick="showSection('tips')"><span class="nav-icon">💡</span> Tips & Notes</a>
+  </nav>
+</aside>
+
+<!-- Main Content -->
+<main class="main">
+
+  <!-- OVERVIEW -->
+  <section class="section active" id="overview">
+    <h1 class="page-title">How the System Works</h1>
+    <p class="page-subtitle">V Haus Living Delivery Management System — a complete guide for the whole team</p>
+
+    <div class="card-grid">
+      <div class="feature-card">
+        <span class="icon">📱</span>
+        <h3>Telegram Bot</h3>
+        <p>Salesmen submit orders, reschedule deliveries, and flag mistakes. Drivers report delivery results. Everything flows into the web app automatically.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🌐</span>
+        <h3>Web App</h3>
+        <p>Admin views all orders, plans daily delivery routes, assigns lorries, confirms schedules, and manages service orders — all in one place.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🗄️</span>
+        <h3>Live Database</h3>
+        <p>Everything is stored in real-time. Any update from the bot instantly appears in the web app and vice versa.</p>
+      </div>
+    </div>
+
+    <h2>🔄 Full System Flow</h2>
+    <div class="flow">
+      <div class="flow-item">📷 <strong>Salesman</strong> snaps sales order photo → sends to Telegram bot</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-item">🤖 <strong>AI</strong> reads the photo and extracts all order details automatically</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-item">✅ <strong>Salesman</strong> confirms or corrects the details → order saved</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-item">🗓️ <strong>Admin</strong> opens web app → assigns order to lorry route → confirms schedule</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-item">🚛 <strong>Driver</strong> sends delivery report via Telegram after each delivery</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-item">✅ Order marked Delivered — or service pending created if not settled</div>
+    </div>
+
+    <h2>👥 Who Uses What</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Role</th><th>Tool</th><th>Main Tasks</th></tr>
+        <tr><td><strong>Salesman</strong></td><td>Telegram Bot (Group A)</td><td>Submit SO photos, reschedule deliveries, flag wrong orders</td></tr>
+        <tr><td><strong>Driver</strong></td><td>Telegram Bot (Group B)</td><td>Report delivery results (settle / no settle) after each trip</td></tr>
+        <tr><td><strong>Admin</strong></td><td>Web App + Telegram</td><td>Plan routes, confirm schedules, manage service orders, approve reschedules</td></tr>
+        <tr><td><strong>Operation Manager</strong></td><td>Telegram</td><td>Approve or reject reschedule requests for confirmed routes</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SALESMAN BOT -->
+  <section class="section" id="salesman">
+    <h1 class="page-title">Salesman — Telegram Bot (Group A)</h1>
+    <p class="page-subtitle">Everything salesmen need to know about using the bot</p>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>Send any message to the bot to see the main menu. Type <code>cancel</code> at any step to go back.</div>
+    </div>
+
+    <h2>📋 Main Menu</h2>
+    <div class="chat-block">
+      <span class="chat-bot">Bot:</span> 👋 Hello! Welcome to V Haus Living (PG) Bot<br><br>
+      Reply with a number to get started:<br><br>
+      1️⃣ New Order — Send a sales order photo<br>
+      2️⃣ Reschedule — Change a delivery or service date<br>
+      3️⃣ Flag Wrong Order — Report incorrect order info<br>
+      4️⃣ Help — Show this menu
+    </div>
+
+    <div class="divider"></div>
+
+    <h2>1️⃣ Submitting a New Sales Order</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Type "1" or "new order"</div>
+          <div class="step-desc">Bot enters New Order mode and asks you to send a photo.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Take a clear photo of the sales order</div>
+          <div class="step-desc">Make sure the SO number, customer name, delivery date, and items are all visible. Good lighting, no shadows.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">AI extracts all details</div>
+          <div class="step-desc">Bot reads the photo and shows you a preview of what it found. Check all details carefully.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-title">If wardrobe or fitting detected — bot asks for trip count</div>
+          <div class="step-desc">Bot will ask: "How many trips are needed?" Reply with a number (e.g. 3). This sets up multiple delivery trips automatically.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+          <div class="step-title">Confirm or correct</div>
+          <div class="step-desc">Reply <strong>YES</strong> to save, <strong>CANCEL</strong> to discard, or describe what needs changing.</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>How to correct details naturally</h3>
+    <div class="chat-block">
+      <span class="chat-note">// Just type what needs changing — no special format needed</span><br>
+      <span class="chat-user">You:</span> delivery date is 15/7<br>
+      <span class="chat-user">You:</span> balance is 3840<br>
+      <span class="chat-user">You:</span> item 2 is queen size<br>
+      <span class="chat-user">You:</span> remove item 3<br>
+      <span class="chat-user">You:</span> add dining table 6 seater
+    </div>
+
+    <h3>Delivery date formats the bot understands</h3>
+    <div class="table-wrap">
+      <table>
+        <tr><th>You type</th><th>Bot reads as</th></tr>
+        <tr><td><code>15/7</code> or <code>15/7/2026</code></td><td>15 July 2026</td></tr>
+        <tr><td><code>TMR</code> or <code>Tomorrow</code></td><td>Next day</td></tr>
+        <tr><td><code>ASAP</code></td><td>21 days from order date</td></tr>
+        <tr><td><code>August</code> or <code>Aug</code></td><td>1 August (guideline date)</td></tr>
+        <tr><td><code>Aug - Sept</code></td><td>1 August (earliest in range)</td></tr>
+        <tr><td><code>TBC</code> or <code>TBD</code></td><td>No date — appears in TBC group</td></tr>
+      </table>
+    </div>
+
+    <div class="divider"></div>
+
+    <h2>2️⃣ Rescheduling a Delivery</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Type "2" or "reschedule"</div>
+          <div class="step-desc">Bot asks which SO you want to reschedule.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Enter the SO number</div>
+          <div class="step-desc">For a single delivery: just type the SO number, e.g. <code>11576</code><br>
+          For a multi-trip order: include the trip number, e.g. <code>11576 Trip 2</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Bot shows current scheduled date</div>
+          <div class="step-desc">Confirm you have the right order before entering the new date.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-title">Enter the new date</div>
+          <div class="step-desc">Formats accepted: <code>15/7</code>, <code>15/7/2026</code>, <code>tmr</code>, <code>TBC</code></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-orange">
+      <span class="alert-icon">⚠️</span>
+      <div><strong>2-day rule:</strong> If you reschedule to a date that is within the next 2 working days AND the route is already confirmed, the system will send an approval request to the Operation Manager. You will be notified once approved or rejected.</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <h2>3️⃣ Flagging a Wrong Order</h2>
+    <p>Use this when you realise an order was saved with incorrect information (wrong balance, wrong customer name, wrong items, etc.)</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Type "3" or "flag"</div>
+          <div class="step-desc">Bot asks which SO has wrong information.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Enter the SO number</div>
+          <div class="step-desc">e.g. <code>11576</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Describe what is wrong</div>
+          <div class="step-desc">e.g. "balance should be 3840 not 1650" or "wrong customer name, should be Rebecca Tan"</div>
+        </div>
+      </div>
+    </div>
+
+    <p>Admin will be notified immediately and will fix the order in the web app.</p>
+  </section>
+
+  <!-- DRIVER BOT -->
+  <section class="section" id="driver">
+    <h1 class="page-title">Driver — Telegram Bot (Group B)</h1>
+    <p class="page-subtitle">How drivers report delivery results after each trip</p>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>All messages in Group B <strong>must start with the word DELIVERY</strong> — anything else will be ignored by the bot.</div>
+    </div>
+
+    <h2>📋 Template Format</h2>
+    <div class="template-box">
+      <span class="template-key">DELIVERY</span><br>
+      <span class="template-key">SO:</span> <span class="template-val">11576</span><br>
+      <span class="template-key">Driver:</span> <span class="template-val">Seng</span><br>
+      <span class="template-key">Kelindan:</span> <span class="template-val">San</span><br>
+      <span class="template-key">Status:</span> <span class="template-val">settle</span><br>
+      <span class="template-val">9/6/2026</span><br>
+      <span class="template-comment">optional note here</span>
+    </div>
+
+    <h2>✅ Status Options</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Status</th><th>What it means</th><th>What happens</th></tr>
+        <tr>
+          <td><span class="badge badge-green">settle</span></td>
+          <td>Delivery completed successfully</td>
+          <td>Order marked Delivered. If multi-trip, remaining trips are cancelled.</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-orange">no settle</span></td>
+          <td>Delivery not completed (e.g. item issue, customer not home)</td>
+          <td>Service Pending created. Admin notified. For multi-trip: next trip stays scheduled.</td>
+        </tr>
+      </table>
+    </div>
+
+    <h2>📝 Examples</h2>
+
+    <h3>Settled delivery</h3>
+    <div class="template-box">
+      DELIVERY<br>
+      SO: 31074<br>
+      Driver: Jian<br>
+      Kelindan: Min<br>
+      Status: settle<br>
+      9/6/2026
+    </div>
+
+    <h3>Not settled — with a note</h3>
+    <div class="template-box">
+      DELIVERY<br>
+      SO: 11576<br>
+      Driver: Seng<br>
+      Kelindan: San<br>
+      Status: no settle<br>
+      9/6/2026<br>
+      <span class="template-comment">衣橱未完成安装，需要下次再来</span>
+    </div>
+
+    <div class="alert alert-orange">
+      <span class="alert-icon">⚠️</span>
+      <div><strong>Common mistakes:</strong><br>
+      • Status must be exactly <code>settle</code> or <code>no settle</code><br>
+      • SO number must match what is in the system<br>
+      • Date format: <code>9/6</code> or <code>9/6/2026</code><br>
+      • First line must be <code>DELIVERY</code></div>
+    </div>
+
+    <h2>🔄 Multi-Trip Orders</h2>
+    <p>For wardrobe and large fitting orders that need multiple visits, the bot tracks each trip automatically.</p>
+
+    <div class="table-wrap">
+      <table>
+        <tr><th>Situation</th><th>What bot does</th></tr>
+        <tr><td>Trip 1 — no settle, more trips remaining</td><td>Trip 1 marked Completed. Next trip stays Scheduled.</td></tr>
+        <tr><td>Last trip — no settle</td><td>Auto-creates one more trip (e.g. Trip 4). Admin notified to schedule it.</td></tr>
+        <tr><td>Any trip — settle</td><td>Order marked Delivered. All remaining trips cancelled.</td></tr>
+      </table>
+    </div>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div><strong>Commission note:</strong> Only Trip 1 counts for delivery commission. Trips 2, 3, etc. are follow-up visits and do not earn additional commission.</div>
+    </div>
+  </section>
+
+  <!-- ADMIN BOT COMMANDS -->
+  <section class="section" id="admin-bot">
+    <h1 class="page-title">Admin — Telegram Commands</h1>
+    <p class="page-subtitle">Commands available to admin and operation manager in Telegram</p>
+
+    <h2>🔐 Operation Manager Only</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Command</th><th>What it does</th></tr>
+        <tr><td><code>/approve 11576</code></td><td>Approve a salesman's reschedule request for SO 11576</td></tr>
+        <tr><td><code>/reject 11576</code></td><td>Reject a reschedule request. Salesman is notified to choose another date.</td></tr>
+      </table>
+    </div>
+
+    <p>These commands are sent in the same chat where approval notifications arrive. Only the Operation Manager's Telegram account can use them.</p>
+
+    <h2>📅 Schedule Check</h2>
+    <div class="chat-block">
+      <span class="chat-user">You:</span> /schedule 15/7<br><br>
+      <span class="chat-bot">Bot:</span> 📦 Delivery Schedule — Wednesday, 15 July 2026<br>
+      Total: 4 orders<br><br>
+      📍 BUKIT MERTAJAM (2 orders)<br>
+      &nbsp;&nbsp;1. SO 31074 — Rebecca<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;📦 Dreamite Queen Mattress<br>
+      &nbsp;&nbsp;2. SO 11576 — Chong Inn Jie<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;📦 Wardrobe 3 door<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;🔴 Balance: RM 1,200<br>
+      ...<br>
+    </div>
+  </section>
+
+  <!-- WEB APP — SUMMARY -->
+  <section class="section" id="summary">
+    <h1 class="page-title">Web App — Summary</h1>
+    <p class="page-subtitle">The main dashboard — your daily overview of everything</p>
+
+    <h2>📊 Summary Cards</h2>
+    <div class="card-grid">
+      <div class="feature-card">
+        <span class="icon">🔧</span>
+        <h3>Total Service</h3>
+        <p>All service orders in the system. Click any SO number to view details.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📅</span>
+        <h3>This Month</h3>
+        <p>All delivery orders scheduled for the current month.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📅</span>
+        <h3>Next Month</h3>
+        <p>Orders scheduled for next month — for planning ahead.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📦</span>
+        <h3>TBC / No Date</h3>
+        <p>Orders with no confirmed delivery date. Follow up with salesman to arrange.</p>
+      </div>
+    </div>
+
+    <h2>🔄 Multi-Trip Orders</h2>
+    <p>Below the summary cards, all multi-trip orders (wardrobe/fitting jobs) are shown with their trip progress — each trip's status and scheduled date at a glance.</p>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>Click the ✕ button next to a Scheduled trip to cancel it and all remaining trips. Use this when a job is completed early.</div>
+    </div>
+
+    <h2>📆 Calendar</h2>
+    <p>Shows all deliveries for the current month. Green = service order, Blue = delivery order. Click any SO number to open the order details.</p>
+
+    <h2>💰 Outstanding Balances</h2>
+    <p>All orders with unpaid balances, sorted by delivery date. Aging is colour-coded:</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Colour</th><th>Meaning</th></tr>
+        <tr><td><span style="color:#dc2626;font-weight:700">Red bold</span></td><td>Outstanding for more than 30 days — urgent follow up</td></tr>
+        <tr><td><span style="color:#ea580c;font-weight:600">Orange</span></td><td>Outstanding for 14–30 days</td></tr>
+        <tr><td style="color:#374151">Normal</td><td>Outstanding for less than 14 days</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- MONTHLY VIEW -->
+  <section class="section" id="monthly">
+    <h1 class="page-title">Web App — Monthly View</h1>
+    <p class="page-subtitle">Browse all orders for any month</p>
+
+    <p>Use the Prev / Next buttons or the month picker to navigate between months. The table shows both Delivery and Service orders for the selected month.</p>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>At the bottom of the monthly view, a <strong>TBC / No Date Set</strong> section shows all orders without a confirmed delivery date — regardless of which month you're viewing.</div>
+    </div>
+
+    <h2>🔍 Filters</h2>
+    <p>Use the filters at the top of the page to narrow down by:</p>
+    <ul style="margin-left:20px;margin-bottom:12px;color:var(--text-muted);">
+      <li>Search — SO number, customer name, item name</li>
+      <li>Salesman — filter by who placed the order</li>
+      <li>Status — Pending, Out for Delivery, Delivered, etc.</li>
+    </ul>
+
+    <h2>✏️ Quick Edit</h2>
+    <p>Click the ✏️ icon next to any SO number to jump directly to the edit form for that order.</p>
+  </section>
+
+  <!-- SERVICE -->
+  <section class="section" id="service">
+    <h1 class="page-title">Web App — Service Orders</h1>
+    <p class="page-subtitle">Manage all service and follow-up visits</p>
+
+    <p>Service orders are created when a delivery is not settled and converted from Service Pending. Each card shows:</p>
+    <ul style="margin-left:20px;margin-bottom:16px;color:var(--text-muted);">
+      <li><strong>SV number</strong> (e.g. SV-001) — the service order reference</li>
+      <li><strong>↩ Original SO</strong> — link back to the original delivery order</li>
+      <li><strong>Service Date</strong> — when the service visit is scheduled (TBC if not yet set)</li>
+      <li><strong>Service Note</strong> — what needs to be done</li>
+      <li><strong>Service Trips</strong> — for multi-visit jobs, shows each trip with status and date</li>
+    </ul>
+
+    <h2>📅 Setting a Service Date</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Click ✏️ Edit on the service order card</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Set the Delivery Date field</div>
+          <div class="step-desc">This is the service visit date. Once set, the order will appear in the Delivery Schedule unassigned panel for that date.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Save</div>
+          <div class="step-desc">The service order is now ready to assign to a route.</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>🏷️ Status Options for Service Orders</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Status</th><th>Meaning</th></tr>
+        <tr><td><span class="badge badge-orange">Pending</span></td><td>Service scheduled but not yet done</td></tr>
+        <tr><td><span class="badge badge-blue">Out for Delivery</span></td><td>Team is at customer's place</td></tr>
+        <tr><td><span class="badge badge-purple">Serviced</span></td><td>Service completed successfully</td></tr>
+        <tr><td><span class="badge badge-green">Delivered</span></td><td>Also used when service is done and confirmed</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- DELIVERY SCHEDULE -->
+  <section class="section" id="schedule">
+    <h1 class="page-title">Web App — Delivery Schedule</h1>
+    <p class="page-subtitle">Plan daily lorry routes and assign orders to vehicles</p>
+
+    <h2>🗓️ Daily Workflow</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Select the date</div>
+          <div class="step-desc">Use the date picker at the top to choose the delivery date you want to plan.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Add a route</div>
+          <div class="step-desc">Click "+ Add Route". Select a vehicle from the list or enter lorry plate and driver name manually.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Assign orders to the route</div>
+          <div class="step-desc">Drag orders from the unassigned panel (left side) onto a route card. Or use the "Assign to route" dropdown on each order card.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <div class="step-title">Set scheduled times</div>
+          <div class="step-desc">For each order in the route, set the scheduled time (e.g. 10:00 - 12:00). Click "Use" to copy from the customer's preferred time.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-content">
+          <div class="step-title">Confirm the route</div>
+          <div class="step-desc">Change route status from Pending → <strong>Confirmed</strong>. This locks the route. Contact customers with their delivery times.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-content">
+          <div class="step-title">On delivery day — mark Out for Delivery</div>
+          <div class="step-desc">This can only be done on the actual delivery date. Updates all orders in the route to "Out for Delivery".</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>🔒 Route Status & Locking</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Status</th><th>Can edit?</th><th>When to use</th></tr>
+        <tr><td><span class="badge badge-orange">Pending</span></td><td>✅ Full access</td><td>While still planning and adjusting</td></tr>
+        <tr><td><span class="badge badge-green">Confirmed</span></td><td>❌ Locked (revert to Pending to edit)</td><td>After contacting customers with delivery time</td></tr>
+        <tr><td><span class="badge badge-blue">Out for Delivery</span></td><td>❌ Fully locked</td><td>On the day when lorry departs</td></tr>
+        <tr><td><span class="badge badge-gray">Delivered</span></td><td>❌ Fully locked</td><td>After all deliveries completed</td></tr>
+      </table>
+    </div>
+
+    <div class="alert alert-orange">
+      <span class="alert-icon">⚠️</span>
+      <div>To unlock a Confirmed route, change the status back to <strong>Pending</strong>. Remember to re-confirm and re-contact customers if you make changes.</div>
+    </div>
+
+    <h2>📦 Unassigned Panel</h2>
+    <p>The left panel shows all unassigned items for the selected date:</p>
+    <ul style="margin-left:20px;margin-bottom:12px;color:var(--text-muted);">
+      <li>🔵 <strong>Orange cards</strong> — regular delivery orders</li>
+      <li>🟣 <strong>Purple SVC cards</strong> — service orders</li>
+      <li>🔷 <strong>Purple Trip cards</strong> — trips from multi-trip delivery orders</li>
+    </ul>
+
+    <h2>🖨️ Print Route Sheet</h2>
+    <p>Click the 🖨️ icon on any route card to open the print preview. This generates a formatted A4 delivery sheet with all order details, items, and arrival status.</p>
+  </section>
+
+  <!-- FLAGGED -->
+  <section class="section" id="flagged">
+    <h1 class="page-title">Web App — Flagged Orders</h1>
+    <p class="page-subtitle">Orders reported by salesmen as having incorrect information</p>
+
+    <p>When a salesman flags an order via bot, it appears here with:</p>
+    <ul style="margin-left:20px;margin-bottom:16px;color:var(--text-muted);">
+      <li>The issue reported and who reported it</li>
+      <li>Order details for reference</li>
+      <li>Edit & Fix button to correct the order</li>
+      <li>Mark as Resolved button once fixed</li>
+    </ul>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Read the flagged issue</div>
+          <div class="step-desc">The orange box shows exactly what the salesman reported as wrong.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Click ✏️ Edit & Fix</div>
+          <div class="step-desc">Opens the full edit form. Make the corrections.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Change status back to Pending</div>
+          <div class="step-desc">Either in the edit form or using the ✅ Mark as Resolved button. This removes it from the Flagged list.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICE PENDING -->
+  <section class="section" id="service-pending">
+    <h1 class="page-title">Web App — Service Pending</h1>
+    <p class="page-subtitle">Deliveries that were not settled — awaiting follow-up action</p>
+
+    <p>When a driver reports <code>no settle</code> for a single-trip order, it creates a Service Pending record here. Admin reviews each one and decides what to do.</p>
+
+    <h2>🔄 Options</h2>
+    <div class="card-grid">
+      <div class="feature-card">
+        <span class="icon">✅</span>
+        <h3>Convert to Service Order</h3>
+        <p>Creates a new Service Order with an SV number (SV-001, SV-002…). The order moves to the Service tab where admin can schedule the follow-up visit.</p>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🗑️</span>
+        <h3>Remove</h3>
+        <p>Dismiss the record if the issue was resolved directly (e.g. customer came to collect the item) or is not applicable.</p>
+      </div>
+    </div>
+
+    <h2>Converting to Service Order</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Click "→ Convert to Service"</div>
+          <div class="step-desc">A confirmation dialog appears.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Add an admin remark (optional)</div>
+          <div class="step-desc">e.g. "Missing 1 pillow — need to replace" or "Wardrobe door hinge broken"</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Click ✅ Confirm Convert</div>
+          <div class="step-desc">Service order created with SV number. Go to the Service tab to set the visit date and schedule it.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>The Convert button is disabled while processing to prevent creating duplicate service orders.</div>
+    </div>
+  </section>
+
+  <!-- ADD ORDER -->
+  <section class="section" id="add-order">
+    <h1 class="page-title">Web App — Add / Edit Order</h1>
+    <p class="page-subtitle">Manually create or edit orders in the web app</p>
+
+    <div class="alert alert-blue">
+      <span class="alert-icon">💡</span>
+      <div>Orders are normally created via the Telegram bot. Use this form for manual entry, corrections, or to set service dates.</div>
+    </div>
+
+    <h2>📋 Required Fields</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Field</th><th>Required?</th><th>Notes</th></tr>
+        <tr><td>SO Number</td><td>✅ Always</td><td>Must be unique in the system</td></tr>
+        <tr><td>Customer Name</td><td>✅ Always</td><td></td></tr>
+        <tr><td>Delivery Date</td><td>✅ For Delivery type only</td><td>Leave blank for TBC. Not required for Service orders.</td></tr>
+        <tr><td>Type</td><td>✅ Always</td><td>Delivery or Service</td></tr>
+        <tr><td>Service Note</td><td>Only for Service</td><td>Describe what needs to be done</td></tr>
+      </table>
+    </div>
+
+    <h2>✏️ Editing an Existing Order</h2>
+    <p>Click the ✏️ icon next to any SO number anywhere in the app. This opens the same form pre-filled with the order's current data. Make changes and click Update Order.</p>
+
+    <div class="alert alert-orange">
+      <span class="alert-icon">⚠️</span>
+      <div>Editing an order does <strong>not</strong> automatically update the route it's assigned to. If you change the delivery date, also update the route in Delivery Schedule.</div>
+    </div>
+  </section>
+
+  <!-- STATUSES -->
+  <section class="section" id="statuses">
+    <h1 class="page-title">Order Status Reference</h1>
+    <p class="page-subtitle">What every status means and when it is used</p>
+
+    <div class="table-wrap">
+      <table>
+        <tr><th>Status</th><th>Who sets it</th><th>Meaning</th></tr>
+        <tr>
+          <td><span class="badge badge-orange">Pending</span></td>
+          <td>Bot (on save) or Admin</td>
+          <td>Order received, not yet delivered</td>
+        </tr>
+        <tr>
+          <td><span class="badge" style="background:#e0e7ff;color:#4338ca">In Progress</span></td>
+          <td>System (automatic)</td>
+          <td>Multi-trip order — first trip done, more trips remaining</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-blue">Out for Delivery</span></td>
+          <td>Admin (Delivery Schedule) or Driver bot</td>
+          <td>Lorry has left, order being delivered today</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">Delivered</span></td>
+          <td>Driver bot (settle) or Admin</td>
+          <td>Delivery completed and confirmed by driver</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-purple">Serviced</span></td>
+          <td>Admin</td>
+          <td>Service visit completed successfully</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-red">Flagged</span></td>
+          <td>Salesman (bot flag command)</td>
+          <td>Order has wrong information — pending admin correction</td>
+        </tr>
+      </table>
+    </div>
+
+    <h2>🔄 Trip Status Reference</h2>
+    <div class="table-wrap">
+      <table>
+        <tr><th>Status</th><th>Meaning</th></tr>
+        <tr><td><span class="badge badge-orange">Scheduled</span></td><td>Trip created, not yet assigned to a route</td></tr>
+        <tr><td><span class="badge badge-blue">Assigned</span></td><td>Trip added to a delivery route</td></tr>
+        <tr><td><span class="badge" style="background:#e0e7ff;color:#4338ca">Out for Delivery</span></td><td>Lorry is on the way</td></tr>
+        <tr><td><span class="badge badge-green">Completed</span></td><td>Trip done (driver reported settle or no settle)</td></tr>
+        <tr><td><span class="badge badge-gray">Cancelled</span></td><td>Trip cancelled (job finished early or admin cancelled)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- TIPS -->
+  <section class="section" id="tips">
+    <h1 class="page-title">Tips & Important Notes</h1>
+    <p class="page-subtitle">Things to know for smooth day-to-day use</p>
+
+    <h2>📷 Photo Tips (Salesmen)</h2>
+    <div class="card">
+      <ul style="margin-left:16px;line-height:2;">
+        <li>Place the order flat on a surface — avoid holding it in the air</li>
+        <li>Good lighting — avoid shadows covering the SO number or delivery date</li>
+        <li>Make sure the whole order is in frame including REMARKS section</li>
+        <li>One order per photo — do not combine multiple orders in one image</li>
+        <li>If AI extracts wrong info, just correct it by replying naturally — no need to resend the photo</li>
+      </ul>
+    </div>
+
+    <h2>🔁 One Draft at a Time</h2>
+    <div class="alert alert-orange">
+      <span class="alert-icon">⚠️</span>
+      <div>After sending an SO photo, you must confirm YES or CANCEL before sending another photo. If you send a second photo while a draft is active, your text replies will go to the active draft instead.</div>
+    </div>
+
+    <h2>🔒 Duplicate SO Numbers</h2>
+    <div class="alert alert-red">
+      <span class="alert-icon">⚠️</span>
+      <div>The system will not allow saving an order if the SO number already exists. If the bot says "SO already exists", do not resend — instead check with admin whether the order was already saved.</div>
+    </div>
+
+    <h2>📅 Working Days Rule</h2>
+    <div class="card">
+      <p style="margin:0">Saturday counts as a working day. Sunday is the only rest day. The 2-day approval rule applies to reschedules within the next 2 working days (Mon–Sat) when a route is already confirmed.</p>
+    </div>
+
+    <h2>💰 Commission Tracking</h2>
+    <div class="card">
+      <p style="margin:0">For multi-trip orders, only <strong>Trip 1</strong> earns delivery commission. This is recorded as the first delivery date in the system. Trips 2, 3, etc. are follow-up visits with no additional commission.</p>
+    </div>
+
+    <h2>🔄 Refreshing Data</h2>
+    <div class="card">
+      <p style="margin:0">The web app does not auto-refresh. Click the 🔄 Refresh button in the header or on individual tabs to load the latest data after any changes.</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.currentTarget.classList.add('active');
+  window.scrollTo(0, 0);
+}
+</script>
+
+</body>
+</html>

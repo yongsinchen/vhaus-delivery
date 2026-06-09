@@ -37,7 +37,7 @@ const fromDb = o => ({
   items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
 });
 
-const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "Add Order"];
+const TABS = ["Summary", "Monthly View", "Service", "Daily View", "Delivery Schedule", "🚨 Flagged", "🔧 Service Pending", "📦 DO Review", "Add Order"];
 
 // ── Trip status color ────────────────────────────────────────────
 const tripStatusColor = s => ({
@@ -222,6 +222,62 @@ const OrderViewModal = ({ order: o, onClose, onEdit, onDelete }) => {
   );
 };
 
+// ── DO Review Item (needs own state for linkSo input) ────────────
+function DoReviewItem({ item, orders, onResolve, onDismiss, onView, fmt }) {
+  const [linkSo, setLinkSo] = useState("");
+  const reasonMap = {
+    showroom: { icon: "🏷️", label: "Showroom / Display Stock", borderColor: "#bfdbfe", bg: "bg-blue-50", text: "text-blue-700" },
+    no_so: { icon: "❓", label: "No SO Number Found", borderColor: "#e5e7eb", bg: "bg-gray-50", text: "text-gray-600" },
+    so_not_found: { icon: "🔍", label: "SO Not in System", borderColor: "#fed7aa", bg: "bg-orange-50", text: "text-orange-700" },
+    item_not_matched: { icon: "⚠️", label: "Item Not Matched in Order", borderColor: "#fde68a", bg: "bg-yellow-50", text: "text-yellow-700" },
+    duplicate_arrival: { icon: "🔁", label: "Already Has Arrival Date", borderColor: "#d8b4fe", bg: "bg-purple-50", text: "text-purple-700" },
+  };
+  const r = reasonMap[item.reason] || { icon: "❓", label: item.reason, borderColor: "#e5e7eb", bg: "bg-gray-50", text: "text-gray-600" };
+  return (
+    <div className="bg-white border-2 rounded-xl shadow-sm overflow-hidden" style={{borderColor: r.borderColor}}>
+      <div className={`px-4 py-3 flex items-center justify-between flex-wrap gap-2 ${r.bg} border-b`} style={{borderColor: r.borderColor}}>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-lg">{r.icon}</span>
+          <div>
+            <span className="font-bold text-gray-800 text-sm">{item.item_name || "-"}</span>
+            {item.item_code && <span className="text-xs text-gray-500 ml-2">[{item.item_code}]</span>}
+          </div>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full bg-white border ${r.text}`}>{r.label}</span>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => onDismiss(item.id)} className="text-xs bg-white border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Dismiss</button>
+          {item.reason === "showroom"
+            ? <button onClick={() => onResolve(item.id)} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">✅ Acknowledged</button>
+            : <button onClick={() => onResolve(item.id, item.so_number, item.item_code)} className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700">✅ Mark Resolved</button>
+          }
+        </div>
+      </div>
+      <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Supplier</p><p className="text-sm font-semibold">{item.supplier || "-"}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">DO Number</p><p className="text-sm font-semibold">{item.do_number || "-"}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">DO Date</p><p className="text-sm font-semibold">{item.do_date ? fmt(item.do_date) : "-"}</p></div>
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Quantity</p><p className="text-sm font-semibold">{item.quantity || "-"}</p></div>
+        {item.so_number && (
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-xs text-gray-400 mb-1">SO Number</p>
+            <button onClick={() => { const o = orders.find(x => x.soNumber === item.so_number); if (o) onView(o); }} className="text-sm font-bold text-blue-700 hover:underline">{item.so_number}</button>
+          </div>
+        )}
+        <div className="bg-gray-50 rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Logged</p><p className="text-sm font-semibold">{item.created_at ? new Date(item.created_at).toLocaleDateString("en-MY") : "-"}</p></div>
+        {item.reason === "item_not_matched" && (
+          <div className="col-span-2 sm:col-span-4">
+            <p className="text-xs text-gray-400 mb-1">Manually link to SO:</p>
+            <div className="flex gap-2">
+              <input value={linkSo} onChange={e => setLinkSo(e.target.value)} placeholder="Enter SO number" className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              <button onClick={() => { if (linkSo) onResolve(item.id, linkSo, item.item_code); }} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 whitespace-nowrap">Link & Resolve</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -257,6 +313,41 @@ export default function App() {
       console.error("Failed to load service pending:", e);
     }
     setSpLoading(false);
+  };
+
+  const [doReview, setDoReview] = useState([]);
+  const [doReviewLoading, setDoReviewLoading] = useState(false);
+
+  const loadDoReview = async () => {
+    setDoReviewLoading(true);
+    try {
+      const res = await fetch(`${BACKEND}/do-review`);
+      const data = await res.json();
+      setDoReview(Array.isArray(data) ? data : []);
+    } catch (e) { console.error("Failed to load DO review:", e); }
+    setDoReviewLoading(false);
+  };
+
+  const resolveDoReview = async (id, soNumber = null, itemCode = null) => {
+    try {
+      const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ so_number: soNumber, item_code: itemCode }),
+      });
+      const data = await res.json();
+      if (data.success) { loadDoReview(); loadOrders(); }
+      else alert("Failed: " + (data.error || "Unknown error"));
+    } catch (e) { alert("Error: " + e.message); }
+  };
+
+  const dismissDoReview = async (id) => {
+    if (!window.confirm("Dismiss this item? It will be marked as not applicable.")) return;
+    try {
+      const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method: "PATCH" });
+      const data = await res.json();
+      if (data.success) loadDoReview();
+    } catch (e) { alert("Error: " + e.message); }
   };
 
   const [convertModal, setConvertModal] = useState(null); // { id, soNumber, note }
@@ -325,7 +416,7 @@ export default function App() {
     if (tripsData) setAllTrips(tripsData);
   };
 
-  useEffect(() => { loadOrders(); loadServicePending(); loadAllTrips(); }, []); // eslint-disable-line
+  useEffect(() => { loadOrders(); loadServicePending(); loadAllTrips(); loadDoReview(); }, []); // eslint-disable-line
 
   const salesmen = useMemo(() => [...new Set(orders.map(o => o.salesman).filter(Boolean))], [orders]);
 
@@ -543,7 +634,7 @@ export default function App() {
         </div>
       </div>
 
-      {!["Add Order","Summary","Daily View","🚨 Flagged","🔧 Service Pending"].includes(activeTab) && (
+      {!["Add Order","Summary","Daily View","🚨 Flagged","🔧 Service Pending","📦 DO Review"].includes(activeTab) && (
         <div className="max-w-7xl mx-auto px-4 pt-3 flex flex-wrap gap-2">
           <input placeholder="🔍 Search..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs w-56 focus:outline-none focus:ring-2 focus:ring-blue-300" />
           <select value={filterSalesman} onChange={e => setFilterSalesman(e.target.value)} className="border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300">
@@ -1182,6 +1273,46 @@ export default function App() {
                 </div>
               </>
             ) : <p className="text-xs text-gray-400">Select a date to view orders.</p>}
+          </div>
+        )}
+
+        {/* DO REVIEW */}
+        {activeTab === "📦 DO Review" && (
+          <div>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+              <div>
+                <h2 className="text-base font-bold text-gray-700">📦 DO Review</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Items from supplier DOs that need admin attention — unmatched, duplicate arrivals, or showroom stock.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="bg-orange-100 text-orange-700 font-bold text-sm px-3 py-1 rounded-full">{doReview.length} pending</span>
+                <button onClick={loadDoReview} className="text-xs bg-white border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">🔄 Refresh</button>
+              </div>
+            </div>
+
+            {doReviewLoading ? (
+              <div className="text-center py-12 text-gray-400 text-sm">Loading...</div>
+            ) : doReview.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">✅</div>
+                <div className="font-medium">No items pending review</div>
+                <div className="text-xs mt-1">All DO items matched successfully</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {doReview.map(item => (
+                  <DoReviewItem
+                    key={item.id}
+                    item={item}
+                    orders={orders}
+                    onResolve={resolveDoReview}
+                    onDismiss={dismissDoReview}
+                    onView={handleView}
+                    fmt={fmt}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
