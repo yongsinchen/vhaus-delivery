@@ -659,7 +659,7 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   );
 }
 
-export default function DeliverySchedule() {
+export default function DeliverySchedule({ readOnly = false, companyId = null, isMaster = false, currentUser = null }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [routes, setRoutes] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
