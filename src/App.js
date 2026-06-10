@@ -16,9 +16,6 @@ const fmtMonth = d => d ? `${new Date(d).getFullYear()}-${String(new Date(d).get
 const now = new Date();
 const todayStr = now.toISOString().split("T")[0];
 const thisMonth = fmtMonth(todayStr);
-const monthLabel = ym => { const [y,m] = ym.split("-"); return new Date(y, m-1, 1).toLocaleString("en-MY", { month: "long", year: "numeric" }); };
-const prevMonthYm = ym => { const [y,m] = ym.split("-").map(Number); return m===1?`${y-1}-12`:`${y}-${String(m-1).padStart(2,"0")}`; };
-const nextMonthYm = ym => { const [y,m] = ym.split("-").map(Number); return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`; };
 
 const toDb = o => ({
   so_number: o.soNumber, customer_name: o.customerName, address: o.address, contact: o.contact,
@@ -326,8 +323,6 @@ export default function App() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalResults, setGlobalResults] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [allTrips, setAllTrips] = useState([]);
-  const [browseMonth, setBrowseMonth] = useState(thisMonth);
 
   // Orders filters
   const [filterStatus, setFilterStatus] = useState("");
@@ -361,10 +356,7 @@ export default function App() {
       setOrders(all.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name)));
     } else { setOrders(all); }
     setLoading(false);
-    let tq = supabase.from("order_trips").select("*").order("so_number").order("trip_no");
-    if (!isMaster && companyId) tq = tq.eq("company_id", companyId);
-    const { data: td } = await tq;
-    if (td) setAllTrips(td);
+
   };
 
   const loadServicePending = async () => {
@@ -421,13 +413,6 @@ export default function App() {
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
   const handleDelete = async id => { await supabase.from("orders").delete().eq("id", id); setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null); };
-  const updateStatus = async (o, status) => { setOrders(p => p.map(x => x.id===o.id ? {...x,status} : x)); await supabase.from("orders").update({ status }).eq("id", o.id); };
-  const cancelTrips = async (soNumber, afterTripNo) => {
-    if (!window.confirm(`Cancel trips after trip ${afterTripNo}?`)) return;
-    const res = await fetch(`${BACKEND}/order-trips/so/${soNumber}/cancel-remaining`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ after_trip_no: afterTripNo }) }).then(r => r.json());
-    if (res.success) { const { data } = await supabase.from("order_trips").select("*").order("trip_no"); if(data) setAllTrips(data); }
-  };
-
   const handleSubmit = async () => {
     if (!form.soNumber) return alert("SO Number required.");
     setSaving(true);
@@ -537,11 +522,8 @@ export default function App() {
   );
 
   // ── Page content ────────────────────────────────────────────────
-  const nm = nextMonthYm(thisMonth);
-  const noDateOrders = orders.filter(o => !o.deliveryDate);
   const balanceOrders = orders.filter(o => parseFloat(o.balance) > 0).sort((a,b) => new Date(a.deliveryDate)-new Date(b.deliveryDate));
   const flaggedOrders = orders.filter(o => o.status === "Flagged");
-  const serviceOrders = orders.filter(o => o.type === "Service");
 
   const renderPage = () => {
     // OVERVIEW
@@ -601,8 +583,7 @@ export default function App() {
               const d = new Date(now); d.setDate(d.getDate()+offset);
               const ds = d.toISOString().split("T")[0];
               const dayOrders = orders.filter(o => o.deliveryDate === ds);
-              const allArrived = dayOrders.length > 0 && dayOrders.every(o => o.items?.every(i => i.arrivalDate));
-              const someNotArrived = dayOrders.some(o => o.items?.some(i => !i.arrivalDate));
+                  const someNotArrived = dayOrders.some(o => o.items?.some(i => !i.arrivalDate));
               return (
                 <div key={ds} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <div className="flex items-center justify-between mb-2">
