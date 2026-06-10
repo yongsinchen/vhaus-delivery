@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import DeliverySchedule from "./DeliverySchedule";
 import LoginPage from "./LoginPage";
 import UserManagement from "./UserManagement";
-import { supabase, useAuth, roleLabel } from "./Authcontext";
-import ResetPasswordPage from "./ResetPasswordPage";
+import { supabase, useAuth, roleLabel } from "./AuthContext";
+import ResetPasswordPage from "./ResetPassword";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
