@@ -341,6 +341,7 @@ export default function App() {
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
+  const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");
 
   // ── Data loading ────────────────────────────────────────────────
   const loadOrders = async () => {
@@ -616,7 +617,7 @@ export default function App() {
         {/* Monthly Calendar */}
         {(() => {
           const [calYear, calMonth] = calMonthStr.split("-").map(Number);
-          const firstDow = (new Date(calYear, calMonth - 1, 1).getDay() + 6) % 7; // Mon=0
+          const firstDow = (new Date(calYear, calMonth - 1, 1).getDay() + 6) % 7;
           const lastDay = new Date(calYear, calMonth, 0).getDate();
           const cells = [];
           for (let i = 0; i < firstDow; i++) cells.push(null);
@@ -625,11 +626,29 @@ export default function App() {
           const weeks = [];
           for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
           const getDs = d => d ? `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
-          const ordersOnDay = d => { const ds = getDs(d); return ds ? orders.filter(o => o.deliveryDate === ds) : []; };
+          const calSalesmen = [...new Set(orders.map(o => o.salesman).filter(Boolean))].sort();
+          // Always show ALL orders — salesman filter only highlights
+          const ordersOnDay = d => {
+            const ds = getDs(d);
+            return ds ? orders.filter(o => o.deliveryDate === ds) : [];
+          };
+          const isMyOrder = o => {
+            if (!calSalesman) return false;
+            return (o.salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(calSalesman.toLowerCase());
+          };
           return (
             <div>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <h2 className="font-bold text-gray-800">Monthly Overview</h2>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="font-bold text-gray-800">Monthly Overview</h2>
+                  {!isSalesman && (
+                    <select value={calSalesman} onChange={e => setCalSalesman(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                      <option value="">All salesmen</option>
+                      {calSalesmen.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  )}
+                  {calSalesman && <span className="text-xs text-violet-600 font-medium">Highlighting: {calSalesman}</span>}
+                </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const pm = m===1?12:m-1; const py = m===1?y-1:y; setCalMonthStr(`${py}-${String(pm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">‹</button>
                   <span className="text-sm font-semibold text-gray-700 min-w-32 text-center">{new Date(calYear, calMonth-1, 1).toLocaleString("en-MY",{month:"long",year:"numeric"})}</span>
@@ -671,11 +690,20 @@ export default function App() {
                               {isEmpty && <div className="mt-1 text-center"><span className="text-xs text-gray-200">—</span></div>}
                               {deliveries.length > 0 && (
                                 <div className="space-y-0.5">
-                                  {deliveries.slice(0,3).map(o => (
-                                    <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}} className={`text-xs px-1 py-0.5 rounded font-medium truncate leading-tight hover:opacity-80 ${o.status==="Delivered"?"bg-emerald-100 text-emerald-700":o.status==="Flagged"?"bg-red-100 text-red-600":"bg-violet-100 text-violet-700"}`}>
-                                      {o.soNumber}
-                                    </div>
-                                  ))}
+                                  {deliveries.slice(0,3).map(o => {
+                                    const mine = isMyOrder(o);
+                                    const highlight = calSalesman ? mine : true;
+                                    return (
+                                      <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}}
+                                        className={`text-xs px-1 py-0.5 rounded font-medium truncate leading-tight transition-opacity hover:opacity-80 ${
+                                          o.status==="Delivered" ? (highlight?"bg-emerald-100 text-emerald-700":"bg-emerald-50 text-emerald-300")
+                                          : o.status==="Flagged" ? (highlight?"bg-red-100 text-red-600":"bg-red-50 text-red-300")
+                                          : highlight ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"
+                                        } ${!highlight?"opacity-50":""}`}>
+                                        {mine && calSalesman && <span className="mr-0.5">★</span>}{o.soNumber}
+                                      </div>
+                                    );
+                                  })}
                                   {deliveries.length > 3 && <div className="text-xs text-gray-400 px-1">+{deliveries.length - 3} more</div>}
                                 </div>
                               )}
@@ -702,7 +730,7 @@ export default function App() {
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-violet-100"></div><span className="text-xs text-gray-400">Pending delivery</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-100"></div><span className="text-xs text-gray-400">Delivered</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-indigo-100"></div><span className="text-xs text-gray-400">Service</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-100"></div><span className="text-xs text-gray-400">Has pending</span></div>
+                {calSalesman && <div className="flex items-center gap-1.5"><span className="text-xs text-violet-600">★</span><span className="text-xs text-gray-400">{calSalesman}'s orders · others dimmed</span></div>}
                 <span className="text-xs text-gray-300">· Click any date to see orders</span>
               </div>
             </div>
