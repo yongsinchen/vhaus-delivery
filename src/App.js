@@ -448,7 +448,14 @@ export default function App() {
     setSupplierDOsLoading(false);
   };
 
-  useEffect(() => { loadOrders(); loadServicePending(); loadDoReview(); loadServices(); }, []); // eslint-disable-line
+  // Load data once user is authenticated and profile is loaded
+  useEffect(() => {
+    if (!user) return; // wait for auth
+    loadOrders();
+    loadServicePending();
+    loadDoReview();
+    loadServices();
+  }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
   const areas = useMemo(() => {
