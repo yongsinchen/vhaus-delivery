@@ -28,7 +28,9 @@ const fromDb = o => ({
   orderAmount: o.order_amount, balance: o.balance, deliveryDate: o.delivery_date,
   timeSlot: o.time_slot, plateNo: o.plate_no, type: o.type, serviceNote: o.service_note,
   svNumber: o.sv_number, remark: o.remark, status: o.status,
-  items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || [])
+  items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || []),
+  photoUrl: o.photo_url || null,
+  linkedSo: o.linked_so || null,
 });
 
 // ── Design tokens ─────────────────────────────────────────────────
@@ -55,6 +57,7 @@ const NAV = [
   { id: "orders",     label: "Orders",           icon: "◫",  canKey: "viewMonthly" },
   { id: "deliveries", label: "Deliveries",       icon: "⬡",  canKey: "viewSchedule" },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
+  { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
 ];
@@ -117,7 +120,7 @@ function OrderCard({ o, onView, onEdit, isSalesman }) {
 }
 
 // ── Order View Modal ──────────────────────────────────────────────
-function OrderViewModal({ order: o, onClose, onEdit, onDelete }) {
+function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orders, handleView }) {
   const hasBalance = parseFloat(o.balance) > 0;
   const [trips, setTrips] = useState([]);
   const [tripsLoading, setTripsLoading] = useState(false);
@@ -189,6 +192,28 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete }) {
               </div>
             </div>
           )}
+          {/* Linked SO for service orders */}
+          {o.type === "Service" && (o.svNumber || o.linkedSo) && (
+            <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 flex items-center gap-3">
+              <span className="text-2xl">🔧</span>
+              <div>
+                {o.svNumber && <p className="font-bold text-violet-700">{o.svNumber}</p>}
+                {o.linkedSo && <p className="text-sm text-gray-600">Linked to: <button onClick={() => { const orig = orders?.find(x => x.soNumber === o.linkedSo); if(orig) { onClose(); setTimeout(() => handleView(orig), 100); }}} className="font-semibold text-violet-600 hover:underline">{o.linkedSo}</button></p>}
+              </div>
+            </div>
+          )}
+
+          {/* SO Photo */}
+          {o.photoUrl && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Sales Order Photo</p>
+              <button onClick={() => onViewPhoto(o.photoUrl)} className="block w-full overflow-hidden rounded-2xl border-2 border-violet-100 hover:border-violet-300 transition-colors">
+                <img src={o.photoUrl} alt="Sales order" className="w-full object-cover max-h-48" />
+                <p className="text-xs text-center text-violet-600 py-2 bg-violet-50">Tap to view full size</p>
+              </button>
+            </div>
+          )}
+
           {(o.remark || o.serviceNote) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {o.remark && <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400 mb-1">Remark</p><p className="text-sm text-gray-700">{o.remark}</p></div>}
@@ -342,6 +367,15 @@ export default function App() {
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
   const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [supplierDOs, setSupplierDOs] = useState([]);
+  const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [doDateFrom, setDoDateFrom] = useState("");
+  const [doDateTo, setDoDateTo] = useState("");
+  const [viewPhoto, setViewPhoto] = useState(null);
+  const [convertDate, setConvertDate] = useState("");
 
   // ── Data loading ────────────────────────────────────────────────
   const loadOrders = async () => {
@@ -374,7 +408,33 @@ export default function App() {
     catch(e) {} setDoReviewLoading(false);
   };
 
-  useEffect(() => { loadOrders(); loadServicePending(); loadDoReview(); }, []); // eslint-disable-line
+  const loadServices = async () => {
+    setServicesLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (companyId && !isMaster) params.set("company_id", companyId);
+      if (isSalesman && user?.salesman_name) params.set("salesman", user.salesman_name);
+      const d = await fetch(`${BACKEND}/services?${params}`).then(r => r.json());
+      setServices(Array.isArray(d) ? d.map(fromDb) : []);
+    } catch(e) { console.error(e); }
+    setServicesLoading(false);
+  };
+
+  const loadSupplierDOs = async () => {
+    setSupplierDOsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (companyId && !isMaster) params.set("company_id", companyId);
+      if (supplierFilter) params.set("supplier", supplierFilter);
+      if (doDateFrom) params.set("from_date", doDateFrom);
+      if (doDateTo) params.set("to_date", doDateTo);
+      const d = await fetch(`${BACKEND}/supplier-deliveries?${params}`).then(r => r.json());
+      setSupplierDOs(Array.isArray(d) ? d : []);
+    } catch(e) { console.error(e); }
+    setSupplierDOsLoading(false);
+  };
+
+  useEffect(() => { loadOrders(); loadServicePending(); loadDoReview(); loadServices(); }, []); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
   const areas = useMemo(() => {
@@ -441,8 +501,8 @@ export default function App() {
   const confirmConvert = async () => {
     if (!convertModal || converting) return;
     setConverting(true);
-    const d = await fetch(`${BACKEND}/service-pending/${convertModal.id}/convert`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ remark: convertRemark }) }).then(r=>r.json());
-    if (d.success) { setConvertModal(null); setConvertRemark(""); loadServicePending(); loadOrders(); alert(`Converted: ${d.svNumber}`); }
+    const d = await fetch(`${BACKEND}/service-pending/${convertModal.id}/convert`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ remark: convertRemark, delivery_date: convertDate||null }) }).then(r=>r.json());
+    if (d.success) { setConvertModal(null); setConvertRemark(""); setConvertDate(""); loadServicePending(); loadOrders(); alert(`Converted: ${d.svNumber}`); }
     else alert("Failed: "+(d.error||"Unknown"));
     setConverting(false);
   };
@@ -941,6 +1001,7 @@ export default function App() {
         <div className="flex gap-2">
           {can("viewServicePending") && <button onClick={()=>setOpsTab("service_pending")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${opsTab==="service_pending"?"bg-violet-600 text-white":"bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>🔧 Service Pending {servicePending.length>0&&<span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{servicePending.length}</span>}</button>}
           {can("viewDoReview") && <button onClick={()=>setOpsTab("do_review")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${opsTab==="do_review"?"bg-violet-600 text-white":"bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>📦 DO Review {doReview.length>0&&<span className="ml-1 bg-orange-100 text-orange-700 text-xs font-bold px-1.5 rounded-full">{doReview.length}</span>}</button>}
+          <button onClick={()=>{ setOpsTab("supplier_do"); loadSupplierDOs(); }} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${opsTab==="supplier_do"?"bg-violet-600 text-white":"bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>🚚 Supplier DOs</button>
         </div>
 
         {opsTab === "service_pending" && (
@@ -971,6 +1032,42 @@ export default function App() {
           </div>
         )}
 
+        {opsTab === "supplier_do" && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <input value={supplierFilter} onChange={e=>setSupplierFilter(e.target.value)} placeholder="Supplier name..." className="col-span-2 sm:col-span-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                <input type="date" value={doDateFrom} onChange={e=>setDoDateFrom(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                <input type="date" value={doDateTo} onChange={e=>setDoDateTo(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                <button onClick={loadSupplierDOs} className="bg-violet-600 text-white rounded-xl px-4 py-2 text-sm font-medium hover:bg-violet-700">Search</button>
+              </div>
+            </div>
+            {supplierDOsLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
+            : supplierDOs.length === 0
+            ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">📦</div><p className="font-medium">No supplier DOs found</p><p className="text-sm mt-1">DOs are logged automatically when warehouse scans them in Telegram</p></div>
+            : <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-gray-50 border-b border-gray-100">{["Supplier","DO #","DO Date","Reference","Review Status","Photo","Logged"].map(h=><th key={h} className="px-4 py-3 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>)}</tr></thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {supplierDOs.map((d,i)=>(
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-semibold text-gray-800">{d.supplier||"-"}</td>
+                          <td className="px-4 py-3 text-violet-700 font-medium">{d.do_number||"-"}</td>
+                          <td className="px-4 py-3 text-gray-600">{d.do_date?fmt(d.do_date):"-"}</td>
+                          <td className="px-4 py-3 text-gray-500">{d.supplier_reference||"-"}</td>
+                          <td className="px-4 py-3">{doReview.filter(r=>r.do_number===d.do_number).length>0?<Badge color="amber">{doReview.filter(r=>r.do_number===d.do_number).length} pending</Badge>:<Badge color="emerald">All matched</Badge>}</td>
+                          <td className="px-4 py-3">{d.photo_url?<button onClick={()=>setViewPhoto(d.photo_url)} className="text-violet-600 hover:underline font-medium">View 📷</button>:<span className="text-gray-300">-</span>}</td>
+                          <td className="px-4 py-3 text-gray-400">{d.created_at?new Date(d.created_at).toLocaleDateString("en-MY"):"-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>}
+          </div>
+        )}
+
         {opsTab === "do_review" && (
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -983,6 +1080,47 @@ export default function App() {
             : <div className="space-y-3">{doReview.map(item => <DoReviewItem key={item.id} item={item} orders={orders} onResolve={resolveDoReview} onDismiss={dismissDoReview} onView={handleView} />)}</div>}
           </div>
         )}
+      </div>
+    );
+
+    // SERVICES
+    if (page === "services") return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Services</h1>
+            <p className="text-sm text-gray-400 mt-0.5">{services.length} service orders</p>
+          </div>
+          <button onClick={loadServices} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">🔄 Refresh</button>
+        </div>
+        {servicesLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
+        : services.length === 0
+        ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">🔧</div><p className="font-medium">No service orders yet</p></div>
+        : <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {services.map(o => (
+              <div key={o.id} className="bg-white rounded-2xl border-2 border-violet-100 shadow-sm overflow-hidden cursor-pointer hover:border-violet-300 transition-colors" onClick={() => handleView(o)}>
+                <div className="px-4 pt-4 pb-3">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {o.svNumber && <span className="font-bold text-violet-700 text-sm">{o.svNumber}</span>}
+                        <span className="text-xs text-gray-400">SO: {o.soNumber}</span>
+                        {o.linkedSo && o.linkedSo !== o.soNumber && <span className="text-xs bg-violet-50 text-violet-600 px-1.5 py-0.5 rounded-lg">linked to {o.linkedSo}</span>}
+                      </div>
+                      <p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${statusColor(o.status)}`}>{o.status}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 truncate mb-2">{o.address || "-"}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {o.deliveryDate ? <Badge color="blue">📅 {fmt(o.deliveryDate)}</Badge> : <Badge color="gray">📅 TBC</Badge>}
+                    {o.salesman && <Badge color="gray">👤 {o.salesman}</Badge>}
+                  </div>
+                  {o.serviceNote && <div className="mt-2 bg-violet-50 rounded-xl p-2"><p className="text-xs text-violet-700">📝 {o.serviceNote}</p></div>}
+                </div>
+              </div>
+            ))}
+          </div>}
       </div>
     );
 
@@ -1058,7 +1196,7 @@ export default function App() {
       {/* ── Modals ────────────────────────────────────────────────── */}
 
       {/* Order view */}
-      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }} onDelete={handleDelete} />}
+      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} />}
 
       {/* Add/Edit Order form */}
       {showForm && (
@@ -1144,13 +1282,27 @@ export default function App() {
         </div>
       )}
 
+      {/* Photo lightbox */}
+      {viewPhoto && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4" onClick={()=>setViewPhoto(null)}>
+          <div className="relative max-w-4xl w-full">
+            <img src={viewPhoto} alt="Document" className="w-full h-auto rounded-2xl shadow-2xl max-h-[85vh] object-contain" />
+            <button onClick={()=>setViewPhoto(null)} className="absolute top-3 right-3 w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white text-xl hover:bg-black/70">×</button>
+            <a href={viewPhoto} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} className="absolute bottom-3 right-3 bg-violet-600 text-white text-xs px-3 py-2 rounded-xl hover:bg-violet-700">Open full ↗</a>
+          </div>
+        </div>
+      )}
+
       {/* Convert service pending modal */}
       {convertModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full">
             <h3 className="font-bold text-gray-900 mb-1">Convert to Service Order</h3>
-            <p className="text-sm text-gray-500 mb-4">SO <span className="font-semibold text-violet-700">{convertModal.so_number}</span> will become a Service Order with a SV number.</p>
-            <textarea value={convertRemark} onChange={e=>setConvertRemark(e.target.value)} placeholder="Optional remark..." rows={3} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none mb-4" />
+            <p className="text-sm text-gray-500 mb-4">A new service order will be created linked to <span className="font-semibold text-violet-700">SO {convertModal.so_number}</span>. Original delivery order stays intact.</p>
+            <div className="space-y-3 mb-4">
+              <div><label className="text-xs font-medium text-gray-600 block mb-1">Service Date (optional)</label><input type="date" value={convertDate} onChange={e=>setConvertDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" /></div>
+              <div><label className="text-xs font-medium text-gray-600 block mb-1">Admin Remark (optional)</label><textarea value={convertRemark} onChange={e=>setConvertRemark(e.target.value)} placeholder="Notes for this service..." rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" /></div>
+            </div>
             <div className="flex gap-3 justify-end">
               <button onClick={()=>{setConvertModal(null);setConvertRemark("");}} disabled={converting} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50">Cancel</button>
               <button onClick={confirmConvert} disabled={converting} className="px-4 py-2 text-sm bg-amber-500 text-white rounded-xl hover:bg-amber-600 disabled:opacity-50">{converting?"Converting...":"Confirm Convert"}</button>
