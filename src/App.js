@@ -376,6 +376,20 @@ export default function App() {
   const [doDateTo, setDoDateTo] = useState("");
   const [viewPhoto, setViewPhoto] = useState(null);
   const [convertDate, setConvertDate] = useState("");
+  const [serviceDateModal, setServiceDateModal] = useState(null); // { id, soNumber, svNumber, customerName }
+  const [serviceDateValue, setServiceDateValue] = useState("");
+  const [serviceDateSaving, setServiceDateSaving] = useState(false);
+
+  const saveServiceDate = async () => {
+    if (!serviceDateModal || !serviceDateValue) return;
+    setServiceDateSaving(true);
+    const { error } = await supabase.from("orders")
+      .update({ delivery_date: serviceDateValue })
+      .eq("id", serviceDateModal.id);
+    if (error) { alert("Failed: " + error.message); setServiceDateSaving(false); return; }
+    setServices(prev => prev.map(o => o.id === serviceDateModal.id ? { ...o, deliveryDate: serviceDateValue } : o));
+    setServiceDateModal(null); setServiceDateValue(""); setServiceDateSaving(false);
+  };
 
   // ── Data loading ────────────────────────────────────────────────
   const loadOrders = async () => {
@@ -1117,6 +1131,20 @@ export default function App() {
                     {o.salesman && <Badge color="gray">👤 {o.salesman}</Badge>}
                   </div>
                   {o.serviceNote && <div className="mt-2 bg-violet-50 rounded-xl p-2"><p className="text-xs text-violet-700">📝 {o.serviceNote}</p></div>}
+                  {can("editSchedule") && (
+                    <div className="mt-3 pt-3 border-t border-gray-50 flex gap-2">
+                      <button onClick={e => { e.stopPropagation(); setServiceDateModal(o); setServiceDateValue(o.deliveryDate || ""); }}
+                        className="flex-1 text-xs bg-violet-600 text-white py-1.5 rounded-xl hover:bg-violet-700">
+                        {o.deliveryDate ? `📅 ${fmt(o.deliveryDate)}` : "Set Service Date"}
+                      </button>
+                      {o.deliveryDate && (
+                        <button onClick={e => { e.stopPropagation(); setPage("deliveries"); }}
+                          className="text-xs bg-white border border-violet-200 text-violet-600 px-3 py-1.5 rounded-xl hover:bg-violet-50">
+                          View Route
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -1277,6 +1305,39 @@ export default function App() {
                 </div>
               ))}
               {!globalSearch && <div className="text-center py-8 text-gray-400 text-sm">Start typing...</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Service Date Modal */}
+      {serviceDateModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
+            <h3 className="font-bold text-gray-900 mb-1">Set Service Date</h3>
+            <p className="text-sm text-gray-500 mb-1">
+              {serviceDateModal.svNumber && <span className="font-bold text-violet-700">{serviceDateModal.svNumber} </span>}
+              {serviceDateModal.customerName}
+            </p>
+            <p className="text-xs text-gray-400 mb-4">SO: {serviceDateModal.soNumber}</p>
+            <div className="mb-4">
+              <label className="text-xs font-medium text-gray-600 block mb-1">Service Date</label>
+              <input type="date" value={serviceDateValue} onChange={e => setServiceDateValue(e.target.value)}
+                autoFocus className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+            </div>
+            {serviceDateValue && (
+              <div className="bg-violet-50 rounded-xl p-3 mb-4 text-xs text-violet-700">
+                <p>📅 Service scheduled for <span className="font-bold">{fmt(serviceDateValue)}</span></p>
+                <p className="mt-0.5 text-gray-500">This order will appear in Delivery Schedule on that date.</p>
+              </div>
+            )}
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => { setServiceDateModal(null); setServiceDateValue(""); }} disabled={serviceDateSaving}
+                className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
+              <button onClick={saveServiceDate} disabled={!serviceDateValue || serviceDateSaving}
+                className="px-4 py-2 text-sm bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50">
+                {serviceDateSaving ? "Saving..." : "Confirm Date"}
+              </button>
             </div>
           </div>
         </div>

@@ -699,14 +699,21 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
   }, []);
 
   const [serviceOrders, setServiceOrders] = useState([]);
+  const [unscheduledServices, setUnscheduledServices] = useState([]);
 
   const loadServiceOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/delivery/unassigned?date=${date}`);
+      // Services scheduled for this date (already have delivery_date set)
+      const res = await fetch(`${API}/delivery/unassigned?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
+
+      // All service orders with no date yet — shown separately so admin can schedule them
+      const res2 = await fetch(`${API}/services/unscheduled${companyId && !isMaster ? `?company_id=${companyId}` : ""}`);
+      const data2 = await res2.json();
+      setUnscheduledServices(Array.isArray(data2) ? data2 : []);
     } catch (e) { console.error("loadServiceOrders error:", e); }
-  }, [date]);
+  }, [date, companyId, isMaster]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
@@ -745,9 +752,21 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
     loadData();
   };
 
-  const assignItem = async (routeId, id, type) => {
+  const assignItem = async (routeId, id, type, setDateOnAssign = false) => {
     const route = routes.find(r => r.id === routeId);
     const seqNo = (route?.orders?.length || 0) + 1;
+
+    // If assigning an unscheduled service order, set its delivery_date to current date
+    if (setDateOnAssign && type === "order") {
+      await fetch(`${API}/orders/${id}/set-date`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delivery_date: date }),
+      }).catch(() => {});
+      // Direct Supabase update via API — use the existing order update endpoint
+      // We'll handle this via the backend endpoint we'll add
+    }
+
     if (type === "trip") {
       // Assign trip — update trip status to Assigned + set scheduled_date
       await fetch(`${API}/order-trips/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Assigned", scheduled_date: date }) });
@@ -916,6 +935,56 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
           </div>
         </div>
 
+        {/* Unscheduled Services Panel */}
+        {unscheduledServices.length > 0 && (
+          <div className="xl:w-72 flex-shrink-0">
+            <div className="bg-white rounded-xl border border-violet-200 shadow-sm">
+              <div className="px-4 py-3 border-b bg-violet-50 rounded-t-xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-violet-700">
+                    🔧 Unscheduled Services <span className="ml-1 bg-violet-200 text-violet-800 text-xs px-2 py-0.5 rounded-full">{unscheduledServices.length}</span>
+                  </h3>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">Drag to route — date auto-set to {date}</p>
+              </div>
+              <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
+                {unscheduledServices.map(item => {
+                  const items = typeof item.items === "string" ? JSON.parse(item.items || "[]") : (item.items || []);
+                  return (
+                    <div key={`usvc-${item.id}`}
+                      className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
+                      draggable
+                      onDragStart={() => setDragOrder({ ...item, _type: "order", _setDate: true })}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
+                          <span className="font-bold text-violet-700 text-xs">{item.so_number}</span>
+                          {item.sv_number && <span className="text-xs text-violet-400">{item.sv_number}</span>}
+                        </div>
+                        {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
+                      </div>
+                      <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
+                      <p className="text-xs text-gray-400 leading-tight truncate">{item.address}</p>
+                      {item.service_note && <p className="text-xs text-violet-600 mt-0.5 truncate">📝 {item.service_note}</p>}
+                      <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+                      {routes.length > 0 && (
+                        <select
+                          onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order", true); }}
+                          className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+                          <option value="">Schedule to route...</option>
+                          {routes.filter(r => r.status === "Pending" || r.status === "Confirmed").map(r => (
+                            <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Route Cards */}
         <div className="flex-1 min-w-0">
           {routes.length === 0 && !loading && (
@@ -934,7 +1003,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
                   onDragOver={e => { e.preventDefault(); }}
                   onDrop={() => {
                     if (!dragOrder || isLocked || isConfirmed) return;
-                    assignItem(route.id, dragOrder.id, dragOrder._type);
+                    assignItem(route.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
                     setDragOrder(null);
                   }}>
                   {/* Route Header */}
