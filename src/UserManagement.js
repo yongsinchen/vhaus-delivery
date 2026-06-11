@@ -7,7 +7,6 @@ const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", compan
 export default function UserManagement() {
   const { user: currentUser } = useAuth();
   const isMaster = currentUser?.role === "master";
-  const isManager = currentUser?.role === "manager";
 
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
