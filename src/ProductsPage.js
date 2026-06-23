@@ -221,8 +221,6 @@ export default function ProductsPage() {
   const totalPages = Math.ceil(total / 50);
 
   // ── Render ────────────────────────────────────────────────────────
-  const supplierName = (id) => suppliers.find(s => s.id === id)?.name || "";
-  const categoryName = (id) => categories.find(c => c.id === id)?.name || "";
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
