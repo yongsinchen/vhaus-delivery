@@ -49,6 +49,8 @@ export default function ProductsPage() {
   const [importSupplier, setImportSupplier] = useState("");
   const [importCategory, setImportCategory] = useState("");
   const [importRows, setImportRows] = useState([]);
+  const [importCostMode, setImportCostMode] = useState("catalogue"); // catalogue | derive
+  const [importCostDivisor, setImportCostDivisor] = useState("3");
   const [importJobId, setImportJobId] = useState(null);
   const [importError, setImportError] = useState("");
   const [importResult, setImportResult] = useState(null);
@@ -164,10 +166,29 @@ export default function ProductsPage() {
     setImportSupplier("");
     setImportCategory("");
     setImportRows([]);
+    setImportCostMode("catalogue");
+    setImportCostDivisor("3");
     setImportJobId(null);
     setImportError("");
     setImportResult(null);
   };
+
+  // When picking the import supplier, prefill its saved costing rule
+  const onImportSupplierChange = (id) => {
+    setImportSupplier(id);
+    const sup = suppliers.find(s => String(s.id) === String(id));
+    if (sup && sup.cost_divisor) {
+      setImportCostMode("derive");
+      setImportCostDivisor(String(sup.cost_divisor));
+    } else {
+      setImportCostMode("catalogue");
+      setImportCostDivisor("3");
+    }
+  };
+
+  // The divisor in effect for live cost calculation, or null when off
+  const activeCostDivisor = importCostMode === "derive" && Number(importCostDivisor) > 0
+    ? Number(importCostDivisor) : null;
 
   const pollJob = useCallback(async (jobId) => {
     const headers = await authHeaders();
@@ -199,6 +220,8 @@ export default function ProductsPage() {
     fd.append("file", importFile);
     if (importSupplier) fd.append("supplier_id", importSupplier);
     if (importCategory) fd.append("category_id", importCategory);
+    // "" tells the server to use the catalogue cost as-is (and clears any saved rule)
+    fd.append("cost_divisor", importCostMode === "derive" ? importCostDivisor : "");
     const res = await fetch(`${API}/catalogue-import/upload`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
@@ -217,8 +240,19 @@ export default function ProductsPage() {
   };
 
   const updateImportRow = (idx, field, value) => {
-    setImportRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+    setImportRows(prev => prev.map((r, i) => {
+      if (i !== idx) return r;
+      const next = { ...r, [field]: value };
+      // Keep cost in sync with price when costing is derived from the price
+      if (field === "unit_price" && activeCostDivisor) {
+        next.unit_cost = value == null ? null : Math.round((Number(value) / activeCostDivisor) * 100) / 100;
+      }
+      return next;
+    }));
   };
+
+  // Reload suppliers after upload so a newly-saved costing rule is reflected
+  useEffect(() => { if (importStep === "review") loadSuppliers(); }, [importStep, loadSuppliers]);
 
   const commitImport = async () => {
     setCommitting(true);
@@ -436,7 +470,7 @@ export default function ProductsPage() {
 
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Supplier (optional)</label>
-                    <select value={importSupplier} onChange={e => setImportSupplier(e.target.value)}
+                    <select value={importSupplier} onChange={e => onImportSupplierChange(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                       <option value="">None</option>
                       {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -450,6 +484,32 @@ export default function ProductsPage() {
                       <option value="">None</option>
                       {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                  </div>
+
+                  {/* Costing rule */}
+                  <div className="rounded-xl border border-gray-200 p-3 space-y-2 bg-gray-50/50">
+                    <label className="block text-xs font-medium text-gray-500">Cost</label>
+                    <select value={importCostMode} onChange={e => setImportCostMode(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                      <option value="catalogue">Use cost from catalogue</option>
+                      <option value="derive">Calculate from price</option>
+                    </select>
+                    {importCostMode === "derive" && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <span>Cost = Price ÷</span>
+                          <input type="number" min="0" step="any" value={importCostDivisor}
+                            onChange={e => setImportCostDivisor(e.target.value)}
+                            className="w-20 px-2 py-1 text-sm rounded-lg border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
+                        </div>
+                        {activeCostDivisor && (
+                          <p className="text-xs text-gray-400">e.g. price 2000 → cost {(2000 / activeCostDivisor).toFixed(2)}</p>
+                        )}
+                        {importSupplier && (
+                          <p className="text-xs text-gray-400">Saved on this supplier for future imports.</p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:border-violet-300 transition-colors">
@@ -506,6 +566,11 @@ export default function ProductsPage() {
               {importStep === "review" && (
                 <div className="space-y-4">
                   <p className="text-sm text-gray-500">{importRows.length} product{importRows.length !== 1 ? "s" : ""} found. Review and edit before committing.</p>
+                  {activeCostDivisor && (
+                    <div className="bg-violet-50 text-violet-700 text-xs px-3 py-2 rounded-xl">
+                      Cost calculated as price ÷ {activeCostDivisor}. Editing a price updates its cost; you can still override any cost manually.
+                    </div>
+                  )}
                   <div className="overflow-x-auto border border-gray-100 rounded-xl">
                     <table className="w-full text-xs">
                       <thead>
