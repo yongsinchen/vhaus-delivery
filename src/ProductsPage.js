@@ -44,7 +44,7 @@ export default function ProductsPage() {
 
   // Catalogue import drawer
   const [importOpen, setImportOpen] = useState(false);
-  const [importStep, setImportStep] = useState("upload"); // upload | processing | review | done
+  const [importStep, setImportStep] = useState("upload"); // upload | processing | review | done | failed
   const [importFile, setImportFile] = useState(null);
   const [importSupplier, setImportSupplier] = useState("");
   const [importCategory, setImportCategory] = useState("");
@@ -184,7 +184,7 @@ export default function ProductsPage() {
     } else if (job.status === "failed") {
       setImportProgress(null);
       setImportError(job.error_message || "Processing failed");
-      setImportStep("upload");
+      setImportStep("failed");
     }
   }, []);
 
@@ -481,6 +481,20 @@ export default function ProductsPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Step: Failed */}
+              {importStep === "failed" && (
+                <div className="py-8 text-center space-y-3">
+                  <div className="text-4xl">⚠️</div>
+                  <p className="text-lg font-bold text-gray-900">Processing Failed</p>
+                  <p className="text-sm text-red-600">{importError}</p>
+                  <p className="text-xs text-gray-400">Tip: For large or scanned catalogues, try exporting to Excel (.xlsx) first for faster, more reliable imports.</p>
+                  <button onClick={() => { setImportStep("upload"); setImportFile(null); setImportError(""); }}
+                    className="mt-4 px-6 py-2.5 rounded-xl text-sm font-medium text-white hover:opacity-90 transition-opacity" style={{ background: "#7C3AED" }}>
+                    Try Again
+                  </button>
                 </div>
               )}
 
