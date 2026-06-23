@@ -4,6 +4,7 @@ import LoginPage from "./LoginPage";
 import UserManagement from "./UserManagement";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import ResetPasswordPage from "./ResetPassword";
+import ProductsPage from "./ProductsPage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -59,6 +60,7 @@ const NAV = [
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
+  { id: "products",   label: "Products",         icon: "📦", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
 ];
 
@@ -560,6 +562,7 @@ export default function App() {
   const visibleNav = NAV.filter(n => {
     if (n.id === "operations") return can("viewServicePending") || can("viewDoReview");
     if (n.id === "team") return can("manageUsers");
+    if (n.manageOnly) return ["master","manager","company_admin"].includes(user?.role);
     if (n.canKey) return can(n.canKey);
     return true;
   });
@@ -1163,6 +1166,9 @@ export default function App() {
     if (page === "team") return (
       <div><h1 className="text-xl font-bold text-gray-900 mb-4">Team</h1><UserManagement /></div>
     );
+
+    // PRODUCTS
+    if (page === "products") return <ProductsPage />;
 
     return null;
   };
