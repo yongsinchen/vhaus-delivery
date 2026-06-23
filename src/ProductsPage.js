@@ -54,6 +54,7 @@ export default function ProductsPage() {
   const [importResult, setImportResult] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [importProgress, setImportProgress] = useState(null); // { pages_processed, pages_total }
 
   // New supplier/category inline add
   const [newSupplier, setNewSupplier] = useState("");
@@ -168,10 +169,30 @@ export default function ProductsPage() {
     setImportResult(null);
   };
 
+  const pollJob = useCallback(async (jobId) => {
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/catalogue-import/${jobId}`, { headers });
+    if (!res.ok) return;
+    const { job } = await res.json();
+    if (job.status === "processing") {
+      setImportProgress({ pages_processed: job.pages_processed || 0, pages_total: job.pages_total || 0 });
+      setTimeout(() => pollJob(jobId), 3000);
+    } else if (job.status === "review") {
+      setImportProgress(null);
+      setImportRows((job.catalogue_import_rows || []).map(r => ({ ...r, _action: r.action })));
+      setImportStep("review");
+    } else if (job.status === "failed") {
+      setImportProgress(null);
+      setImportError(job.error_message || "Processing failed");
+      setImportStep("upload");
+    }
+  }, []);
+
   const uploadCatalogue = async () => {
     if (!importFile) return;
     setUploading(true);
     setImportError("");
+    setImportProgress(null);
     setImportStep("processing");
     const token = await getToken();
     const fd = new FormData();
@@ -187,8 +208,12 @@ export default function ProductsPage() {
     setUploading(false);
     if (!res.ok) { setImportError(d.error || "Upload failed"); setImportStep("upload"); return; }
     setImportJobId(d.job_id);
-    setImportRows((d.rows || []).map(r => ({ ...r, _action: r.action })));
-    setImportStep("review");
+    if (d.status === "review") {
+      setImportRows((d.rows || []).map(r => ({ ...r, _action: r.action })));
+      setImportStep("review");
+    } else {
+      pollJob(d.job_id);
+    }
   };
 
   const updateImportRow = (idx, field, value) => {
@@ -445,6 +470,17 @@ export default function ProductsPage() {
                 <div className="py-12 text-center">
                   <div className="animate-spin w-10 h-10 border-4 border-violet-200 border-t-violet-600 rounded-full mx-auto mb-4" />
                   <p className="text-sm text-gray-600">Parsing catalogue… This may take a moment for PDF/images.</p>
+                  {importProgress && importProgress.pages_total > 0 && (
+                    <div className="mt-4 max-w-xs mx-auto">
+                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <span>Page {importProgress.pages_processed} of {importProgress.pages_total}</span>
+                        <span>{Math.round((importProgress.pages_processed / importProgress.pages_total) * 100)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="bg-violet-600 h-2 rounded-full transition-all" style={{ width: `${(importProgress.pages_processed / importProgress.pages_total) * 100}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
