@@ -648,16 +648,10 @@ export default function OrdersPage() {
                   <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
                   <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
                 </div>
-                {(Number(form.gst_rate) || 0) > 0 && (
+                {gstRate > 0 && (
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500 flex items-center gap-2">
-                      {form.gst_waived ? <s>GST ({form.gst_rate}%)</s> : `GST (${gstRate}%)`}
-                      <button type="button" onClick={() => setForm(f => ({ ...f, gst_waived: !f.gst_waived }))}
-                        className={`text-xs px-2 py-0.5 rounded-full ${form.gst_waived ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500 hover:bg-amber-50"}`}>
-                        {form.gst_waived ? "Waived" : "Waive"}
-                      </button>
-                    </span>
-                    <span className={`text-gray-700 ${form.gst_waived ? "line-through text-gray-400" : ""}`}>{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span className="text-gray-500">GST ({gstRate}%)</span>
+                    <span className="text-gray-700">{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between text-sm">
@@ -689,6 +683,21 @@ export default function OrdersPage() {
               </div>
               <Field label="Order Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
               <Field label="Remark" value={form.remark} onChange={v => setForm(f => ({ ...f, remark: v }))} />
+
+              {(Number(form.gst_rate) || 0) > 0 && !form.gst_waived && (
+                <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+                  <input type="checkbox" checked={form.gst_waived} onChange={e => setForm(f => ({ ...f, gst_waived: e.target.checked }))}
+                    className="rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
+                  Waive GST for this order
+                </label>
+              )}
+              {form.gst_waived && (
+                <label className="flex items-center gap-2 text-xs text-amber-600 cursor-pointer">
+                  <input type="checkbox" checked={form.gst_waived} onChange={e => setForm(f => ({ ...f, gst_waived: e.target.checked }))}
+                    className="rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
+                  GST waived for this order
+                </label>
+              )}
 
               <button onClick={saveOrder} disabled={saving}
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
