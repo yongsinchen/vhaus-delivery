@@ -343,7 +343,13 @@ export default function WarehousePage() {
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-gray-700">Package Found</h3>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${scanResult.status === "received" ? "bg-emerald-100 text-emerald-700" : scanResult.status === "picked" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{scanResult.status}</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  scanResult.status === "received" ? "bg-emerald-100 text-emerald-700" :
+                  scanResult.status === "stored" ? "bg-blue-100 text-blue-700" :
+                  scanResult.status === "picked" ? "bg-indigo-100 text-indigo-700" :
+                  scanResult.status === "delivered" ? "bg-gray-100 text-gray-500" :
+                  "bg-amber-100 text-amber-700"
+                }`}>{scanResult.status}</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div><span className="text-gray-400">Product:</span> <b>{scanResult.product_code} {scanResult.product_name}</b></div>
@@ -351,20 +357,53 @@ export default function WarehousePage() {
                 {scanResult.so_number && <div><span className="text-gray-400">SO:</span> <b>{scanResult.so_number}</b></div>}
                 {scanResult.location_code && <div><span className="text-gray-400">Location:</span> <b className="text-violet-700">{scanResult.location_code}</b></div>}
               </div>
-              <div className="flex gap-2 pt-2">
-                {scanResult.status === "pending" && (
+
+              {/* Assign warehouse + location */}
+              {scanResult.status === "pending" && (
+                <div className="border-t border-gray-100 pt-3 space-y-2">
+                  <p className="text-xs font-bold text-gray-600">Assign Location & Confirm Receive</p>
+                  <select value={scanResult._wh || ""} onChange={e => setScanResult(prev => ({ ...prev, _wh: e.target.value }))}
+                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm bg-white">
+                    <option value="">Select warehouse</option>
+                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
+                  </select>
+                  <input value={scanResult._loc || ""} onChange={e => setScanResult(prev => ({ ...prev, _loc: e.target.value }))}
+                    placeholder="Location code (e.g. A-03-02)" className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm" />
                   <button onClick={async () => {
                     const headers = await authHeaders();
+                    if (scanResult._loc) {
+                      await fetch(`${API}/package-labels/${scanResult.id}/assign-location`, {
+                        method: "PATCH", headers, body: JSON.stringify({ location_code: scanResult._loc }),
+                      });
+                    }
                     await fetch(`${API}/package-labels/${scanResult.id}/scan`, { method: "PATCH", headers, body: JSON.stringify({ status: "received" }) });
-                    setScanResult({ ...scanResult, status: "received" });
-                  }} className="px-4 py-2 rounded-xl text-sm bg-emerald-600 text-white hover:bg-emerald-700">✓ Mark Received</button>
-                )}
+                    // Stock in if warehouse selected and product exists
+                    if (scanResult._wh && scanResult.product_id) {
+                      await fetch(`${API}/inventory/adjust`, {
+                        method: "POST", headers,
+                        body: JSON.stringify({ warehouse_id: scanResult._wh, product_id: scanResult.product_id, quantity: 1, notes: `Received: ${scanResult.qr_code}` }),
+                      });
+                    }
+                    setScanResult({ ...scanResult, status: "received", location_code: scanResult._loc || scanResult.location_code });
+                    setScanCode("");
+                  }} className="w-full py-2 rounded-xl text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700">
+                    ✓ Confirm Received{scanResult._wh ? " & Stock In" : ""}
+                  </button>
+                </div>
+              )}
+
+              {/* Actions for already received items */}
+              <div className="flex gap-2 pt-2">
                 {(scanResult.status === "received" || scanResult.status === "stored") && (
                   <button onClick={async () => {
                     const headers = await authHeaders();
                     await fetch(`${API}/package-labels/${scanResult.id}/scan`, { method: "PATCH", headers, body: JSON.stringify({ status: "picked" }) });
                     setScanResult({ ...scanResult, status: "picked" });
                   }} className="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white hover:bg-blue-700">📦 Mark Picked</button>
+                )}
+                {scanResult.status !== "pending" && (
+                  <button onClick={() => { setScanResult(null); setScanCode(""); if (!cameraActive) startCamera(); }}
+                    className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Scan Next</button>
                 )}
               </div>
             </div>

@@ -43,6 +43,13 @@ export default function CompanySettingsPage() {
   const [whForm, setWhForm] = useState({ name: "", type: "warehouse", address: "", pic: "", contact: "" });
   const [whEditId, setWhEditId] = useState(null);
 
+  // Zones & Racks
+  const [expandedWh, setExpandedWh] = useState(null);
+  const [zones, setZones] = useState([]);
+  const [zoneForm, setZoneForm] = useState("");
+  const [rackForm, setRackForm] = useState({});
+  const [expandedZone, setExpandedZone] = useState(null);
+
   // Categories
   const [categories, setCategories] = useState([]);
   const [catForm, setCatForm] = useState({ name: "" });
@@ -113,6 +120,48 @@ export default function CompanySettingsPage() {
     const headers = await authHeaders();
     await fetch(`${API}/warehouses/${id}`, { method: "DELETE", headers });
     loadWarehouses();
+  };
+
+  // ── Zones & Racks ──────────────────────────────────────────────────
+  const loadZones = async (whId) => {
+    const res = await fetch(`${API}/warehouses/${whId}/zones`);
+    const d = await res.json();
+    setZones(d.zones || []);
+  };
+
+  const toggleWarehouseExpand = (whId) => {
+    if (expandedWh === whId) { setExpandedWh(null); setZones([]); }
+    else { setExpandedWh(whId); loadZones(whId); }
+  };
+
+  const addZone = async (whId) => {
+    if (!zoneForm.trim()) return;
+    const headers = await authHeaders();
+    await fetch(`${API}/warehouses/${whId}/zones`, { method: "POST", headers, body: JSON.stringify({ name: zoneForm.trim() }) });
+    setZoneForm("");
+    loadZones(whId);
+  };
+
+  const deleteZone = async (zoneId, whId) => {
+    if (!window.confirm("Delete this zone and all its racks?")) return;
+    const headers = await authHeaders();
+    await fetch(`${API}/warehouse-zones/${zoneId}`, { method: "DELETE", headers });
+    loadZones(whId);
+  };
+
+  const addRack = async (zoneId) => {
+    const code = (rackForm[zoneId] || "").trim();
+    if (!code) return;
+    const headers = await authHeaders();
+    await fetch(`${API}/warehouse-zones/${zoneId}/racks`, { method: "POST", headers, body: JSON.stringify({ code }) });
+    setRackForm(f => ({ ...f, [zoneId]: "" }));
+    loadZones(expandedWh);
+  };
+
+  const deleteRack = async (rackId) => {
+    const headers = await authHeaders();
+    await fetch(`${API}/warehouse-racks/${rackId}`, { method: "DELETE", headers });
+    loadZones(expandedWh);
   };
 
   // ── Settings save ─────────────────────────────────────────────────
@@ -257,19 +306,67 @@ export default function CompanySettingsPage() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
             {whouses.length === 0 && <p className="p-4 text-sm text-gray-400 text-center">No locations yet</p>}
             {whouses.map(w => (
-              <div key={w.id} className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <span className="text-sm font-medium text-gray-900">{w.name}</span>
-                  <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${w.type === "showroom" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-600"}`}>{w.type}</span>
-                  {w.pic && <p className="text-xs text-gray-500 mt-0.5">PIC: {w.pic} {w.contact ? `· ${w.contact}` : ""}</p>}
-                  {w.address && <p className="text-xs text-gray-400">{w.address}</p>}
+              <div key={w.id}>
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleWarehouseExpand(w.id)}>
+                    <span className="text-sm font-medium text-gray-900">{w.name}</span>
+                    <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${w.type === "showroom" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-600"}`}>{w.type}</span>
+                    <span className="ml-1 text-xs text-gray-400">{expandedWh === w.id ? "▼" : "▶"} Zones</span>
+                    {w.pic && <p className="text-xs text-gray-500 mt-0.5">PIC: {w.pic} {w.contact ? `· ${w.contact}` : ""}</p>}
+                    {w.address && <p className="text-xs text-gray-400">{w.address}</p>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "", pic: w.pic || "", contact: w.contact || "" }); }}
+                      className="text-xs text-violet-600 hover:underline">Edit</button>
+                    <button onClick={() => deleteWarehouse(w.id)}
+                      className="text-xs text-red-500 hover:underline">Delete</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "", pic: w.pic || "", contact: w.contact || "" }); }}
-                    className="text-xs text-violet-600 hover:underline">Edit</button>
-                  <button onClick={() => deleteWarehouse(w.id)}
-                    className="text-xs text-red-500 hover:underline">Delete</button>
-                </div>
+
+                {/* Zone/Rack management */}
+                {expandedWh === w.id && (
+                  <div className="px-4 pb-4 ml-4 border-l-2 border-violet-100 space-y-2">
+                    <div className="flex gap-2">
+                      <input value={zoneForm} onChange={e => setZoneForm(e.target.value)} placeholder="New zone name (e.g. Zone A)"
+                        className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:border-violet-400"
+                        onKeyDown={e => e.key === "Enter" && addZone(w.id)} />
+                      <button onClick={() => addZone(w.id)} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">+ Zone</button>
+                    </div>
+
+                    {zones.length === 0 && <p className="text-xs text-gray-400">No zones. Add zones to organize rack locations.</p>}
+
+                    {zones.map(z => (
+                      <div key={z.id} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <button onClick={() => setExpandedZone(expandedZone === z.id ? null : z.id)}
+                            className="text-sm font-medium text-gray-800">{z.name} <span className="text-xs text-gray-400">({(z.warehouse_racks || []).length} racks) {expandedZone === z.id ? "▼" : "▶"}</span></button>
+                          <button onClick={() => deleteZone(z.id, w.id)} className="text-xs text-red-500 hover:underline">Delete</button>
+                        </div>
+
+                        {expandedZone === z.id && (
+                          <div className="space-y-1 ml-2">
+                            <div className="flex gap-2">
+                              <input value={rackForm[z.id] || ""} onChange={e => setRackForm(f => ({ ...f, [z.id]: e.target.value }))}
+                                placeholder="Rack code (e.g. A-01-01)"
+                                className="flex-1 px-2 py-1 rounded-lg border border-gray-200 text-xs font-mono focus:outline-none focus:border-violet-400"
+                                onKeyDown={e => e.key === "Enter" && addRack(z.id)} />
+                              <button onClick={() => addRack(z.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300">+ Rack</button>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {(z.warehouse_racks || []).map(r => (
+                                <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-gray-200 text-xs font-mono">
+                                  {r.code}
+                                  <button onClick={() => deleteRack(r.id)} className="text-red-400 hover:text-red-600 ml-1">×</button>
+                                </span>
+                              ))}
+                              {(z.warehouse_racks || []).length === 0 && <span className="text-xs text-gray-400">No racks yet</span>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
