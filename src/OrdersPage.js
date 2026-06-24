@@ -35,6 +35,7 @@ const EMPTY_ORDER = {
   status: "draft", notes: "", items: [],
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "",
+  branch_id: "", salesman_names: "",
 };
 
 // Company details for the printed sales order
@@ -223,6 +224,8 @@ export default function OrdersPage() {
   const companyId = user?.company_id;
 
   const [orders, setOrders] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [salesmen, setSalesmen] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -257,6 +260,15 @@ export default function OrdersPage() {
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
+  useEffect(() => {
+    if (!companyId) return;
+    fetch(`${API}/branches?company_id=${companyId}`).then(r => r.json()).then(d => setBranches(d.branches || []));
+    fetch(`${API}/admin/users/list?company_id=${companyId}`).then(r => r.json()).then(d => {
+      const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
+      setSalesmen([...new Set(names)].sort());
+    });
+  }, [companyId]);
+
   // ── Product search for picker ─────────────────────────────────────
   const searchProducts = useCallback(async (q) => {
     if (!companyId) return;
@@ -279,7 +291,7 @@ export default function OrdersPage() {
   const openNew = () => {
     setEditId(null);
     setEditingOrder(null);
-    setForm(EMPTY_ORDER);
+    setForm({ ...EMPTY_ORDER, salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
     setFormError("");
     setDrawerOpen(true);
   };
@@ -298,6 +310,7 @@ export default function OrdersPage() {
       delivery_time_slot: o.delivery_time_slot || "",
       remark: o.remark || "",
       discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "",
+      branch_id: o.branch_id || "", salesman_names: o.salesman_name || "",
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
@@ -363,6 +376,8 @@ export default function OrdersPage() {
       discount: form.discount === "" ? 0 : Number(form.discount),
       deposit: form.deposit === "" ? 0 : Number(form.deposit),
       payment_method: form.payment_method || null,
+      branch_id: form.branch_id || null,
+      salesman_names: form.salesman_names || null,
       items: form.items.map(it => ({
         ...it,
         quantity: Number(it.quantity) || 1,
@@ -475,6 +490,43 @@ export default function OrdersPage() {
             </div>
             <div className="px-6 py-4 space-y-4">
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
+
+              {/* Branch & Salesman */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Branch *</label>
+                  <select value={form.branch_id} onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="">Select branch</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Sales Assistant(s)</label>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {form.salesman_names.split("/").map(s => s.trim()).filter(Boolean).map((s, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full text-xs">
+                        {s}
+                        <button onClick={() => {
+                          const names = form.salesman_names.split("/").map(n => n.trim()).filter(Boolean).filter((_, j) => j !== i);
+                          setForm(f => ({ ...f, salesman_names: names.join(" / ") }));
+                        }} className="text-violet-400 hover:text-violet-700">×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <select value="" onChange={e => {
+                    if (!e.target.value) return;
+                    const current = form.salesman_names.split("/").map(s => s.trim()).filter(Boolean);
+                    if (!current.includes(e.target.value)) {
+                      setForm(f => ({ ...f, salesman_names: [...current, e.target.value].join(" / ") }));
+                    }
+                    e.target.value = "";
+                  }} className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-xs bg-white focus:outline-none focus:border-violet-400">
+                    <option value="">+ Add salesman</option>
+                    {salesmen.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
 
               {/* Customer info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
