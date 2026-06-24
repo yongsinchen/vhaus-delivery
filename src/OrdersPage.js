@@ -141,10 +141,11 @@ function printSalesOrder(order, signatureDataUrl) {
     .terms li { margin-bottom: 1px; }
     .ack { font-size: 8px; font-style: italic; margin-top: 3px; }
     .foot { display: flex; border-top: 1px solid #111; }
-    .foot .col { flex: 1; padding: 5px 10px; }
+    .foot .col { flex: 1; padding: 5px 10px; display: flex; flex-direction: column; }
     .foot .col + .col { border-left: 1px solid #111; }
-    .sigimg { height: 40px; margin-top: 4px; display: block; }
-    .sigline { margin-top: 20px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+    .sigspace { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 50px; }
+    .sigspace img { height: 40px; }
+    .sigline { border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; margin-top: 4px; }
     @media print { body { margin: 0; } }
   </style></head><body>
     <div class="sheet">
@@ -197,11 +198,12 @@ function printSalesOrder(order, signatureDataUrl) {
       <div class="foot">
         <div class="col">
           <b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
-          ${sig ? `<img src="${sig}" class="sigimg" />` : '<div style="height:40px"></div>'}
+          <div class="sigspace">${sig ? `<img src="${sig}" />` : ""}</div>
           <div class="sigline">Customer Signature</div>
         </div>
         <div class="col">
-          <b>SALES ASSISTANT:</b> ${esc(order.salesman_name || "")}
+          <b>SALES ASSISTANT:</b> <i>${esc(order.salesman_name || "")}</i>
+          <div class="sigspace"></div>
           <div class="sigline">Authorised Signature</div>
         </div>
       </div>
