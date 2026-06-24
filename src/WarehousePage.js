@@ -38,7 +38,7 @@ export default function WarehousePage() {
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const scanIntervalRef = useRef(null);
+  const scanningRef = useRef(false);
 
   const loadDOs = useCallback(async () => {
     if (!companyId) return;
@@ -140,63 +140,70 @@ export default function WarehousePage() {
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } }
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", "true");
-        await videoRef.current.play();
-        setCameraActive(true);
+      const video = videoRef.current;
+      if (!video) { stream.getTracks().forEach(t => t.stop()); return; }
+      video.srcObject = stream;
+      video.muted = true;
 
-        // Wait for video to have actual dimensions
-        const waitForVideo = () => new Promise(resolve => {
-          const check = () => {
-            if (videoRef.current && videoRef.current.videoWidth > 0) resolve();
-            else setTimeout(check, 100);
-          };
-          check();
-        });
-        await waitForVideo();
+      // iOS requires waiting for loadedmetadata before play()
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => { video.play().then(resolve).catch(resolve); };
+        setTimeout(resolve, 3000); // fallback timeout
+      });
 
-        scanIntervalRef.current = setInterval(() => {
-          try {
-            if (!videoRef.current || !canvasRef.current) return;
-            const video = videoRef.current;
-            if (video.readyState < 2 || video.videoWidth === 0) return;
-            const canvas = canvasRef.current;
-            const w = video.videoWidth;
-            const h = video.videoHeight;
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
-            ctx.drawImage(video, 0, 0, w, h);
-            const imageData = ctx.getImageData(0, 0, w, h);
-            const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
-            if (code && code.data) {
-              setScanCode(code.data);
-              stopCamera();
-              fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
-                .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
-            }
-          } catch {}
-        }, 250);
-      }
+      setCameraActive(true);
+      scanningRef.current = true;
+
+      const scanFrame = () => {
+        if (!scanningRef.current) return;
+        try {
+          const canvas = canvasRef.current;
+          if (!canvas || !video || video.paused || video.ended) { requestAnimationFrame(scanFrame); return; }
+          // Use clientWidth as fallback for iOS where videoWidth can be 0
+          const w = video.videoWidth || video.clientWidth || 320;
+          const h = video.videoHeight || video.clientHeight || 240;
+          if (w < 50 || h < 50) { requestAnimationFrame(scanFrame); return; }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0, w, h);
+          const imageData = ctx.getImageData(0, 0, w, h);
+          const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
+          if (code && code.data) {
+            scanningRef.current = false;
+            setScanCode(code.data);
+            stopCamera();
+            fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
+              .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
+            return;
+          }
+        } catch (e) { /* skip frame */ }
+        requestAnimationFrame(scanFrame);
+      };
+      requestAnimationFrame(scanFrame);
     } catch (err) {
-      alert("Camera access denied: " + (err.message || "Please allow camera permission."));
+      alert("Camera error: " + (err.message || "Allow camera in Settings > Safari > Camera."));
     }
   };
 
   const stopCamera = () => {
-    if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
-    if (videoRef.current?.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(t => t.stop());
-      videoRef.current.srcObject = null;
-    }
+    scanningRef.current = false;
+    try {
+      if (videoRef.current?.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+        videoRef.current.srcObject = null;
+      }
+    } catch (e) { /* ignore */ }
     setCameraActive(false);
   };
 
-  // Cleanup camera on unmount or tab switch
-  useEffect(() => { if (tab !== 2) stopCamera(); return () => stopCamera(); }, [tab]); // eslint-disable-line
+  // Cleanup on tab switch or unmount
+  useEffect(() => {
+    if (tab !== 2) stopCamera();
+    return () => { scanningRef.current = false; stopCamera(); };
+  }, [tab]); // eslint-disable-line
 
   const confirmAllReceived = async () => {
     if (!selectedDO) return;
@@ -318,13 +325,16 @@ export default function WarehousePage() {
 
             {/* Camera viewfinder */}
             {cameraActive && (
-              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3" }}>
-                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
-                <canvas ref={canvasRef} className="hidden" />
+              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3", minHeight: 240 }}>
+                <video ref={videoRef} autoPlay playsInline muted
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <canvas ref={canvasRef} style={{ display: "none" }} />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-48 h-48 border-2 border-violet-400 rounded-2xl" />
                 </div>
-                <button onClick={stopCamera} className="absolute top-2 right-2 bg-black/60 text-white px-3 py-1 rounded-lg text-xs">✕ Close</button>
+                <button type="button" onTouchEnd={(e) => { e.preventDefault(); stopCamera(); }} onClick={stopCamera}
+                  className="absolute top-3 right-3 bg-black/70 text-white rounded-full flex items-center justify-center"
+                  style={{ width: 44, height: 44, fontSize: 18, zIndex: 10 }}>✕</button>
               </div>
             )}
 
