@@ -139,33 +139,50 @@ export default function WarehousePage() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        videoRef.current.setAttribute("playsinline", "true");
+        await videoRef.current.play();
         setCameraActive(true);
+
+        // Wait for video to have actual dimensions
+        const waitForVideo = () => new Promise(resolve => {
+          const check = () => {
+            if (videoRef.current && videoRef.current.videoWidth > 0) resolve();
+            else setTimeout(check, 100);
+          };
+          check();
+        });
+        await waitForVideo();
+
         scanIntervalRef.current = setInterval(() => {
-          if (!videoRef.current || !canvasRef.current) return;
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(video, 0, 0);
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height);
-          if (code && code.data) {
-            setScanCode(code.data);
-            stopCamera();
-            // Auto-lookup
-            fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
-              .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
-          }
-        }, 300);
+          try {
+            if (!videoRef.current || !canvasRef.current) return;
+            const video = videoRef.current;
+            if (video.readyState < 2 || video.videoWidth === 0) return;
+            const canvas = canvasRef.current;
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            ctx.drawImage(video, 0, 0, w, h);
+            const imageData = ctx.getImageData(0, 0, w, h);
+            const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
+            if (code && code.data) {
+              setScanCode(code.data);
+              stopCamera();
+              fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
+                .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
+            }
+          } catch {}
+        }, 250);
       }
     } catch (err) {
-      alert("Camera access denied. Please allow camera permission.");
+      alert("Camera access denied: " + (err.message || "Please allow camera permission."));
     }
   };
 
