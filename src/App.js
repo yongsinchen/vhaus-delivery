@@ -968,7 +968,7 @@ export default function App() {
             : <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
-                    <thead><tr className="bg-gray-50 border-b border-gray-100">{["Supplier","DO #","DO Date","Reference","Review Status","Photo","Logged"].map(h=><th key={h} className="px-4 py-3 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>)}</tr></thead>
+                    <thead><tr className="bg-gray-50 border-b border-gray-100">{["Supplier","DO #","DO Date","Reference","Review Status","Photo","Logged",""].map(h=><th key={h} className="px-4 py-3 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-gray-50">
                       {supplierDOs.map((d,i)=>(
                         <tr key={i} className="hover:bg-gray-50">
@@ -979,6 +979,23 @@ export default function App() {
                           <td className="px-4 py-3">{doReview.filter(r=>r.do_number===d.do_number).length>0?<Badge color="amber">{doReview.filter(r=>r.do_number===d.do_number).length} pending</Badge>:<Badge color="emerald">All matched</Badge>}</td>
                           <td className="px-4 py-3">{d.photo_url?<button onClick={()=>setViewPhoto(d.photo_url)} className="text-violet-600 hover:underline font-medium">View 📷</button>:<span className="text-gray-300">-</span>}</td>
                           <td className="px-4 py-3 text-gray-400">{d.created_at?new Date(d.created_at).toLocaleDateString("en-MY"):"-"}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <button onClick={async ()=>{
+                              const newDO = prompt("DO Number:", d.do_number||"");
+                              if (newDO === null) return;
+                              const newSupplier = prompt("Supplier:", d.supplier||"");
+                              if (newSupplier === null) return;
+                              const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                              await fetch(`${BACKEND}/supplier-deliveries/${d.id}`, { method:"PUT", headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`}, body:JSON.stringify({do_number:newDO,supplier:newSupplier,do_date:d.do_date,supplier_reference:d.supplier_reference}) });
+                              loadSupplierDOs();
+                            }} className="text-xs text-violet-600 hover:underline mr-2">Edit</button>
+                            <button onClick={async ()=>{
+                              if (!window.confirm(`Delete DO #${d.do_number||""}? This also removes related review items.`)) return;
+                              const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                              await fetch(`${BACKEND}/supplier-deliveries/${d.id}`, { method:"DELETE", headers:{Authorization:`Bearer ${token}`} });
+                              loadSupplierDOs(); loadDoReview();
+                            }} className="text-xs text-red-500 hover:underline">Delete</button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
