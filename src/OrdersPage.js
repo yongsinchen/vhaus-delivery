@@ -22,91 +22,178 @@ const STATUS_STYLE = {
 
 const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 
+const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"];
+
 const EMPTY_ORDER = {
   customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
+  discount: "", deposit: "", payment_method: "",
 };
+
+// Company details for the printed sales order
+const COMPANY = {
+  name: "V HAUS LIVING (PG) SDN. BHD.",
+  reg: "202301043392 (1537308-U)",
+  address: "2084 Jalan Rozhan, Taman Impian Ria, 14000 Bukit Mertajam, Pulau Pinang",
+  hotline: "014-388 9328",
+  bank: "CIMB 8011211457",
+  branches: [
+    "Georgetown — 014-388 9328",
+    "Alma — 014-388 9328",
+    "Mutiara Rini — 017-721 6389",
+    "Ros Merah — 018-277 8389",
+    "Kulai — 018-277 8389",
+  ],
+};
+
+const TERMS = [
+  "All orders are confirmed only upon payment of a deposit. Deposits are strictly non-refundable.",
+  "Full payment must be settled prior to delivery or collection of goods.",
+  "Delivery dates provided are estimates only. The Company shall not be liable for any delay caused by suppliers, manufacturing, transportation, or any cause beyond its reasonable control.",
+  "Goods sold are not returnable, refundable, or exchangeable once the order is confirmed, except for genuine manufacturing defects reported within 3 days of delivery.",
+  "Customised, made-to-order, and special-size items cannot be cancelled, refunded, or exchanged under any circumstances.",
+  "Natural materials (wood, rattan, leather, fabric) may vary in colour, grain, and texture. Such variations are inherent characteristics and shall not be regarded as defects.",
+  "The customer must inspect all goods upon delivery. Signing the delivery note constitutes acceptance of the goods in good condition.",
+  "Ownership of goods remains with the Company until full payment is received. Goods stored beyond 14 days from the agreed delivery date at the customer's request may incur storage charges.",
+  "Warranty (where applicable) covers manufacturing defects only and excludes normal wear and tear, misuse, or improper care.",
+  "The Company's total liability shall not exceed the purchase value of the goods. This agreement is governed by the laws of Malaysia.",
+];
 
 const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
-function printSalesOrder(order, companyName) {
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function printSalesOrder(order) {
   const items = order.items || order.sales_order_items || [];
-  let subtotal = 0;
-  const rows = items.map((it, i) => {
+  let gross = 0;
+  const MIN_ROWS = 8;
+  const itemRows = items.map((it, i) => {
     const qty = Number(it.quantity) || 1;
     const price = Number(it.unit_price) || 0;
     const line = qty * price;
-    subtotal += line;
+    gross += line;
     const spec = [it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
     return `<tr>
-      <td style="text-align:center">${i + 1}</td>
-      <td>${it.product_code || ""}</td>
-      <td>${it.product_name || ""}${spec ? `<div class="spec">${spec}</div>` : ""}${it.notes ? `<div class="spec">${it.notes}</div>` : ""}</td>
-      <td style="text-align:center">${qty}</td>
-      <td style="text-align:right">${money(price)}</td>
-      <td style="text-align:right">${money(line)}</td>
+      <td class="c">${i + 1}</td>
+      <td>${esc(it.product_name || it.product_code || "")}${spec ? `<div class="spec">${esc(spec)}</div>` : ""}${it.notes ? `<div class="spec">${esc(it.notes)}</div>` : ""}</td>
+      <td class="c">${qty}</td>
+      <td class="r">${it.unit_price === 0 || it.unit_price == null ? "" : money(price)}</td>
+      <td class="r">${line ? money(line) : ""}</td>
     </tr>`;
-  }).join("");
+  });
+  for (let i = items.length; i < MIN_ROWS; i++) {
+    itemRows.push(`<tr><td class="c">${i + 1}</td><td></td><td></td><td></td><td></td></tr>`);
+  }
 
-  const total = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : subtotal;
-  const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString() : new Date().toLocaleDateString();
+  const discount = Number(order.discount) || 0;
+  const deposit = Number(order.deposit) || 0;
+  const subtotal = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : gross;
+  const total = subtotal - discount;
+  const balance = total - deposit;
+  const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString("en-MY") : new Date().toLocaleDateString("en-MY");
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${order.order_number || "Sales Order"}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Order ${esc(order.order_number || "")}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1f2937; margin: 0; padding: 32px; }
-    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #7C3AED; padding-bottom: 16px; margin-bottom: 20px; }
-    .company { font-size: 22px; font-weight: 800; color: #7C3AED; }
-    .doc-title { font-size: 20px; font-weight: 700; text-align: right; }
-    .doc-meta { font-size: 12px; color: #6b7280; text-align: right; margin-top: 4px; }
-    .grid { display: flex; gap: 32px; margin-bottom: 20px; font-size: 13px; }
-    .grid h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; }
-    .grid p { margin: 2px 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { background: #f3f0ff; color: #5b21b6; text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-    td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
-    .spec { font-size: 11px; color: #6b7280; margin-top: 2px; }
-    .totals { margin-top: 16px; display: flex; justify-content: flex-end; }
-    .totals table { width: 280px; }
-    .totals td { border: none; padding: 4px 10px; }
-    .grand { font-weight: 800; font-size: 16px; color: #7C3AED; border-top: 2px solid #7C3AED !important; }
-    .notes { margin-top: 20px; font-size: 12px; color: #4b5563; }
-    .sign { margin-top: 48px; display: flex; justify-content: space-between; font-size: 12px; }
-    .sign div { width: 40%; border-top: 1px solid #9ca3af; padding-top: 6px; text-align: center; color: #6b7280; }
-    @media print { body { padding: 0; } }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; padding: 24px; font-size: 12px; }
+    .sheet { max-width: 800px; margin: 0 auto; border: 1.5px solid #111; }
+    .pad { padding: 10px 14px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5px solid #111; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .logo { width: 46px; height: 46px; border-radius: 10px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 26px; }
+    .bname { font-size: 22px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
+    .bname small { display:block; font-size: 9px; font-weight: 600; letter-spacing: 3px; color:#555; margin-top:3px; }
+    .co { font-size: 11px; text-align: right; line-height: 1.4; }
+    .co b { font-size: 12px; }
+    .branches { font-size: 9.5px; color:#333; margin-top:4px; }
+    .titlebar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #111; background:#f5f5f5; }
+    .title { font-size: 22px; font-weight: 900; letter-spacing: 1px; }
+    .sono { font-size: 16px; font-weight: 800; }
+    .sono b { color: #d6336c; font-size: 20px; }
+    .cust td { padding: 4px 14px; vertical-align: top; }
+    .cust .lbl { font-weight: 700; white-space: nowrap; width: 90px; }
+    .cust .val { border-bottom: 1px dotted #999; }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th { border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; border-right: 1px solid #ccc; background:#f5f5f5; padding: 6px; font-size: 11px; }
+    table.items td { border-right: 1px solid #ccc; border-bottom: 1px solid #eee; padding: 6px 8px; height: 26px; }
+    table.items td:last-child, table.items th:last-child { border-right: none; }
+    .c { text-align: center; } .r { text-align: right; }
+    .spec { font-size: 10px; color: #555; }
+    .totbox { display: flex; border-top: 1.5px solid #111; }
+    .totbox .left { flex: 1; border-right: 1.5px solid #111; padding: 8px 14px; }
+    .totbox .right { width: 230px; }
+    .totbox .right .trow { display: flex; justify-content: space-between; padding: 5px 14px; border-bottom: 1px solid #eee; }
+    .totbox .right .trow.grand { font-weight: 900; font-size: 14px; background:#f5f5f5; }
+    .notes { font-size: 10px; line-height: 1.5; border-top: 1.5px solid #111; }
+    .notes h5 { margin: 0 0 4px; font-size: 11px; }
+    .terms { font-size: 9px; line-height: 1.45; color:#222; border-top: 1px solid #111; }
+    .terms ol { margin: 4px 0 0; padding-left: 16px; }
+    .terms li { margin-bottom: 2px; }
+    .pay { display:flex; border-top:1.5px solid #111; }
+    .pay .pm { flex:1; border-right:1.5px solid #111; padding:8px 14px; }
+    .pay .ob { width:230px; padding:8px 14px; }
+    .ack { font-size:10px; font-style:italic; margin-top:6px; }
+    .sigline { margin-top:34px; border-top:1px solid #111; padding-top:3px; text-align:center; font-size:10px; }
+    @media print { body { padding: 0; } .sheet { border: 1.5px solid #111; } }
   </style></head><body>
-    <div class="head">
-      <div><div class="company">${companyName || "V Haus Living"}</div></div>
-      <div><div class="doc-title">SALES ORDER</div>
-        <div class="doc-meta">No: <strong>${order.order_number || "-"}</strong><br>Date: ${dateStr}<br>Status: ${order.status || ""}</div></div>
-    </div>
-    <div class="grid">
-      <div style="flex:1">
-        <h4>Customer</h4>
-        <p><strong>${order.customer_name || ""}</strong></p>
-        ${order.customer_contact ? `<p>${order.customer_contact}</p>` : ""}
-        ${order.customer_address ? `<p>${order.customer_address}</p>` : ""}
+    <div class="sheet">
+      <div class="head pad">
+        <div class="brand">
+          <div class="logo">V</div>
+          <div class="bname">V-HAUS LIVING<small>WE HOUSE YOUR HOUSE</small></div>
+        </div>
+        <div class="co">
+          <b>${esc(COMPANY.name)}</b> ${esc(COMPANY.reg)}<br>
+          ${esc(COMPANY.address)}<br>
+          Hotline: ${esc(COMPANY.hotline)}
+          <div class="branches">${COMPANY.branches.map(esc).join(" &nbsp;|&nbsp; ")}</div>
+        </div>
       </div>
-      <div style="flex:1">
-        <h4>Delivery</h4>
-        <p>Type: ${order.delivery_type || "-"}</p>
-        <p>Date: ${order.delivery_date || "-"}</p>
-        ${order.delivery_time_slot ? `<p>Time: ${order.delivery_time_slot}</p>` : ""}
-        ${order.salesman_name ? `<p>Salesman: ${order.salesman_name}</p>` : ""}
+      <div class="titlebar pad">
+        <div class="title">SALES ORDER</div>
+        <div class="sono">SALES ORDER : <b>${esc(order.order_number || "")}</b></div>
+      </div>
+      <table class="cust" style="width:100%;border-bottom:1.5px solid #111;border-collapse:collapse;">
+        <tr><td class="lbl">NAME</td><td class="val">${esc(order.customer_name || "")}</td><td class="lbl">ORDER DATE</td><td class="val">${dateStr}</td></tr>
+        <tr><td class="lbl">ADDRESS</td><td class="val" rowspan="2">${esc(order.customer_address || "")}</td><td class="lbl">DELIVERY DATE</td><td class="val">${esc(order.delivery_date || "")} ${esc(order.delivery_time_slot || "")}</td></tr>
+        <tr><td class="lbl">SALES ASSISTANT</td><td class="val">${esc(order.salesman_name || "")}</td></tr>
+        <tr><td class="lbl">H/P NO</td><td class="val">${esc(order.customer_contact || "")}</td><td class="lbl">TYPE</td><td class="val">${esc(order.delivery_type || "")}</td></tr>
+      </table>
+      <table class="items">
+        <thead><tr><th style="width:34px">NO</th><th>DESCRIPTION</th><th style="width:50px">QTY</th><th style="width:90px">UNIT PRICE</th><th style="width:100px">AMOUNT (MYR)</th></tr></thead>
+        <tbody>${itemRows.join("")}</tbody>
+      </table>
+      <div class="totbox">
+        <div class="left"><b>REMARKS:</b><br>${esc(order.remark || order.notes || "")}</div>
+        <div class="right">
+          <div class="trow"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+          ${discount ? `<div class="trow"><span>Discount</span><span>-${money(discount)}</span></div>` : ""}
+          <div class="trow grand"><span>TOTAL</span><span>${money(total)}</span></div>
+          <div class="trow"><span>DEPOSIT</span><span>${money(deposit)}</span></div>
+          <div class="trow grand"><span>BALANCE</span><span>${money(balance)}</span></div>
+        </div>
+      </div>
+      <div class="notes pad">
+        <h5>IMPORTANT NOTES</h5>
+        - Full payment shall be made prior to delivery.<br>
+        - Payment by cheque should be crossed "A/C Payee Only" and payable to ${esc(COMPANY.name)}<br>
+        - Bank Account: ${esc(COMPANY.bank)}
+      </div>
+      <div class="terms pad">
+        <h5 style="margin:0 0 3px;font-size:10px;">TERMS &amp; CONDITIONS</h5>
+        <ol>${TERMS.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
+        <div class="ack">I acknowledge and agree to abide by the conditions of sale stated above.</div>
+      </div>
+      <div class="pay">
+        <div class="pm"><b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
+          <div class="sigline">Customer Signature</div>
+        </div>
+        <div class="ob"><b>ORDER BY:</b>
+          <div class="sigline">Authorised Signature</div>
+        </div>
       </div>
     </div>
-    <table>
-      <thead><tr><th style="width:30px;text-align:center">#</th><th style="width:90px">Code</th><th>Description</th><th style="width:50px;text-align:center">Qty</th><th style="width:90px;text-align:right">Unit Price</th><th style="width:90px;text-align:right">Amount</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="totals"><table>
-      <tr><td>Subtotal</td><td style="text-align:right">${money(total)}</td></tr>
-      <tr><td class="grand">Total (RM)</td><td class="grand" style="text-align:right">${money(total)}</td></tr>
-    </table></div>
-    ${order.notes ? `<div class="notes"><strong>Notes:</strong> ${order.notes}</div>` : ""}
-    ${order.remark ? `<div class="notes"><strong>Remark:</strong> ${order.remark}</div>` : ""}
-    <div class="sign"><div>Customer Signature</div><div>Authorized Signature</div></div>
   </body></html>`;
 
   const w = window.open("", "_blank");
@@ -114,13 +201,12 @@ function printSalesOrder(order, companyName) {
   w.document.write(html);
   w.document.close();
   w.focus();
-  setTimeout(() => { w.print(); }, 300);
+  setTimeout(() => { w.print(); }, 350);
 }
 
 export default function OrdersPage() {
   const { user } = useAuth();
   const companyId = user?.company_id;
-  const companyName = user?.companies?.name || "V Haus Living";
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -196,6 +282,7 @@ export default function OrdersPage() {
       delivery_date: o.delivery_date || "",
       delivery_time_slot: o.delivery_time_slot || "",
       remark: o.remark || "",
+      discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "",
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
@@ -241,7 +328,11 @@ export default function OrdersPage() {
     else alert(d.error || "Upload failed");
   };
 
-  const total = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
+  const subtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
+  const discountVal = Number(form.discount) || 0;
+  const depositVal = Number(form.deposit) || 0;
+  const totalAfterDiscount = subtotal - discountVal;
+  const balanceVal = totalAfterDiscount - depositVal;
 
   const saveOrder = async () => {
     if (!form.customer_name.trim()) { setFormError("Customer name is required"); return; }
@@ -254,6 +345,9 @@ export default function OrdersPage() {
       customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
       delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
+      discount: form.discount === "" ? 0 : Number(form.discount),
+      deposit: form.deposit === "" ? 0 : Number(form.deposit),
+      payment_method: form.payment_method || null,
       items: form.items.map(it => ({
         ...it,
         quantity: Number(it.quantity) || 1,
@@ -325,7 +419,7 @@ export default function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {Number(o.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={e => { e.stopPropagation(); printSalesOrder(o, companyName); }}
+                  <button onClick={e => { e.stopPropagation(); printSalesOrder(o); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
@@ -347,7 +441,7 @@ export default function OrdersPage() {
               <h2 className="text-lg font-bold text-gray-900">{editId ? "Edit Order" : "New Order"}</h2>
               <div className="flex items-center gap-2">
                 {editId && (
-                  <button onClick={() => printSalesOrder({ ...editingOrder, ...form, items: form.items }, companyName)}
+                  <button onClick={() => printSalesOrder({ ...editingOrder, ...form, items: form.items })}
                     className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                 )}
                 <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -429,10 +523,33 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              {/* Total */}
-              <div className="flex items-center justify-between border-t border-gray-100 pt-3">
-                <span className="text-sm font-medium text-gray-500">Subtotal</span>
-                <span className="text-lg font-bold text-gray-900">RM {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              {/* Totals */}
+              <div className="border-t border-gray-100 pt-3 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Subtotal</span>
+                  <span className="font-medium text-gray-900">RM {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
+                  <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Total</span>
+                  <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+                  <span className="text-sm font-medium text-gray-500">Balance</span>
+                  <span className="text-lg font-bold text-violet-700">RM {balanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
+                <select value={form.payment_method} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                  <option value="">—</option>
+                  {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
               </div>
 
               {/* Status + notes */}
