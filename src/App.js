@@ -1108,7 +1108,29 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-gray-500">{doReview.length} items pending review</p>
-              <button onClick={loadDoReview} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">Refresh</button>
+              <div className="flex gap-2">
+                <label className="text-xs border border-violet-200 bg-violet-50 text-violet-700 px-3 py-1.5 rounded-xl hover:bg-violet-100 cursor-pointer flex items-center gap-1">
+                  📤 Upload DO
+                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                    const fd = new FormData();
+                    fd.append("file", file);
+                    const btn = e.target.parentElement;
+                    btn.textContent = "Processing...";
+                    try {
+                      const res = await fetch(`${BACKEND}/do-upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                      const d = await res.json();
+                      if (!res.ok) { alert(d.error || "Upload failed"); return; }
+                      alert(`DO Processed: ${d.supplier || "Unknown"}\n${d.matched} matched, ${d.pending_review} pending review, ${d.showroom} showroom`);
+                      loadDoReview();
+                    } catch (err) { alert("Upload failed: " + err.message); }
+                    finally { btn.innerHTML = "📤 Upload DO"; e.target.value = ""; }
+                  }} />
+                </label>
+                <button onClick={loadDoReview} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">Refresh</button>
+              </div>
             </div>
             {doReviewLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
             : doReview.length === 0
