@@ -99,49 +99,53 @@ function printSalesOrder(order, signatureDataUrl) {
   const balance = total - deposit;
   const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString("en-MY") : new Date().toLocaleDateString("en-MY");
 
+  const sig = signatureDataUrl || order.customer_signature || null;
+
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Order ${esc(order.order_number || "")}</title>
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; padding: 24px; font-size: 12px; }
-    .sheet { max-width: 800px; margin: 0 auto; border: 1.5px solid #111; }
-    .pad { padding: 10px 14px; }
-    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5px solid #111; }
-    .brand { display: flex; align-items: center; gap: 10px; }
-    .logo { width: 46px; height: 46px; border-radius: 10px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 26px; }
-    .bname { font-size: 22px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
-    .bname small { display:block; font-size: 9px; font-weight: 600; letter-spacing: 3px; color:#555; margin-top:3px; }
-    .co { font-size: 11px; text-align: right; line-height: 1.4; }
-    .co b { font-size: 12px; }
-    .branches { font-size: 9.5px; color:#333; margin-top:4px; }
-    .titlebar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #111; background:#f5f5f5; }
-    .title { font-size: 22px; font-weight: 900; letter-spacing: 1px; }
-    .sono { font-size: 16px; font-weight: 800; }
-    .sono b { color: #d6336c; font-size: 20px; }
-    .cust td { padding: 4px 14px; vertical-align: top; }
-    .cust .lbl { font-weight: 700; white-space: nowrap; width: 90px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 8mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; }
+    .sheet { width: 100%; border: 1px solid #111; }
+    .pad { padding: 6px 10px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #111; }
+    .brand { display: flex; align-items: center; gap: 8px; }
+    .logo { width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 20px; }
+    .bname { font-size: 18px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
+    .bname small { display:block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color:#555; margin-top:2px; }
+    .co { font-size: 9px; text-align: right; line-height: 1.3; }
+    .co b { font-size: 10px; }
+    .branches { font-size: 8px; color:#333; margin-top:2px; }
+    .titlebar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #111; background:#f5f5f5; }
+    .title { font-size: 16px; font-weight: 900; letter-spacing: 1px; }
+    .sono { font-size: 12px; font-weight: 800; }
+    .sono b { color: #d6336c; font-size: 14px; }
+    .cust td { padding: 3px 10px; vertical-align: top; font-size: 10px; }
+    .cust .lbl { font-weight: 700; white-space: nowrap; width: 80px; }
     .cust .val { border-bottom: 1px dotted #999; }
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { border-top: 1.5px solid #111; border-bottom: 1.5px solid #111; border-right: 1px solid #ccc; background:#f5f5f5; padding: 6px; font-size: 11px; }
-    table.items td { border-right: 1px solid #ccc; border-bottom: 1px solid #eee; padding: 6px 8px; height: 26px; }
+    table.items th { border-top: 1px solid #111; border-bottom: 1px solid #111; border-right: 1px solid #ccc; background:#f5f5f5; padding: 4px 6px; font-size: 9px; }
+    table.items td { border-right: 1px solid #ccc; border-bottom: 1px solid #eee; padding: 3px 6px; height: 18px; font-size: 10px; }
     table.items td:last-child, table.items th:last-child { border-right: none; }
     .c { text-align: center; } .r { text-align: right; }
-    .spec { font-size: 10px; color: #555; }
-    .totbox { display: flex; border-top: 1.5px solid #111; }
-    .totbox .left { flex: 1; border-right: 1.5px solid #111; padding: 8px 14px; }
-    .totbox .right { width: 230px; }
-    .totbox .right .trow { display: flex; justify-content: space-between; padding: 5px 14px; border-bottom: 1px solid #eee; }
-    .totbox .right .trow.grand { font-weight: 900; font-size: 14px; background:#f5f5f5; }
-    .notes { font-size: 10px; line-height: 1.5; border-top: 1.5px solid #111; }
-    .notes h5 { margin: 0 0 4px; font-size: 11px; }
-    .terms { font-size: 9px; line-height: 1.45; color:#222; border-top: 1px solid #111; }
-    .terms ol { margin: 4px 0 0; padding-left: 16px; }
-    .terms li { margin-bottom: 2px; }
-    .pay { display:flex; border-top:1.5px solid #111; }
-    .pay .pm { flex:1; border-right:1.5px solid #111; padding:8px 14px; }
-    .pay .ob { width:230px; padding:8px 14px; }
-    .ack { font-size:10px; font-style:italic; margin-top:6px; }
-    .sigline { margin-top:34px; border-top:1px solid #111; padding-top:3px; text-align:center; font-size:10px; }
-    @media print { body { padding: 0; } .sheet { border: 1.5px solid #111; } }
+    .spec { font-size: 8px; color: #555; }
+    .totbox { display: flex; border-top: 1px solid #111; }
+    .totbox .left { flex: 1; border-right: 1px solid #111; padding: 5px 10px; font-size: 9px; }
+    .totbox .right { width: 200px; }
+    .totbox .right .trow { display: flex; justify-content: space-between; padding: 3px 10px; border-bottom: 1px solid #eee; font-size: 10px; }
+    .totbox .right .trow.grand { font-weight: 900; font-size: 11px; background:#f5f5f5; }
+    .notes { font-size: 8px; line-height: 1.4; border-top: 1px solid #111; }
+    .notes h5 { margin: 0 0 2px; font-size: 9px; }
+    .terms { font-size: 7.5px; line-height: 1.3; color:#222; border-top: 1px solid #111; }
+    .terms ol { margin: 2px 0 0; padding-left: 14px; }
+    .terms li { margin-bottom: 1px; }
+    .ack { font-size: 8px; font-style: italic; margin-top: 3px; }
+    .foot { display: flex; border-top: 1px solid #111; }
+    .foot .col { flex: 1; padding: 5px 10px; }
+    .foot .col + .col { border-left: 1px solid #111; }
+    .sigimg { height: 40px; margin-top: 4px; display: block; }
+    .sigline { margin-top: 20px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+    @media print { body { margin: 0; } }
   </style></head><body>
     <div class="sheet">
       <div class="head pad">
@@ -158,16 +162,16 @@ function printSalesOrder(order, signatureDataUrl) {
       </div>
       <div class="titlebar pad">
         <div class="title">SALES ORDER</div>
-        <div class="sono">SALES ORDER : <b>${esc(order.order_number || "")}</b></div>
+        <div class="sono">NO: <b>${esc(order.order_number || "")}</b></div>
       </div>
-      <table class="cust" style="width:100%;border-bottom:1.5px solid #111;border-collapse:collapse;">
+      <table class="cust" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
         <tr><td class="lbl">NAME</td><td class="val">${esc(order.customer_name || "")}</td><td class="lbl">ORDER DATE</td><td class="val">${dateStr}</td></tr>
         <tr><td class="lbl">ADDRESS</td><td class="val" rowspan="2">${esc(order.customer_address || "")}</td><td class="lbl">DELIVERY DATE</td><td class="val">${esc(order.delivery_date || "")} ${esc(order.delivery_time_slot || "")}</td></tr>
-        <tr><td class="lbl">SALES ASSISTANT</td><td class="val">${esc(order.salesman_name || "")}</td></tr>
+        <tr><td class="lbl">SALES ASST</td><td class="val">${esc(order.salesman_name || "")}</td></tr>
         <tr><td class="lbl">H/P NO</td><td class="val">${esc(order.customer_contact || "")}</td><td class="lbl">TYPE</td><td class="val">${esc(order.delivery_type || "")}</td></tr>
       </table>
       <table class="items">
-        <thead><tr><th style="width:34px">NO</th><th>DESCRIPTION</th><th style="width:50px">QTY</th><th style="width:90px">UNIT PRICE</th><th style="width:100px">AMOUNT (MYR)</th></tr></thead>
+        <thead><tr><th style="width:28px">NO</th><th>DESCRIPTION</th><th style="width:36px">QTY</th><th style="width:70px">UNIT PRICE</th><th style="width:80px">AMOUNT (MYR)</th></tr></thead>
         <tbody>${itemRows.join("")}</tbody>
       </table>
       <div class="totbox">
@@ -183,20 +187,21 @@ function printSalesOrder(order, signatureDataUrl) {
       <div class="notes pad">
         <h5>IMPORTANT NOTES</h5>
         - Full payment shall be made prior to delivery.<br>
-        - Payment by cheque should be crossed "A/C Payee Only" and payable to ${esc(COMPANY.name)}<br>
-        - Bank Account: ${esc(COMPANY.bank)}
+        - Cheque: crossed "A/C Payee Only", payable to ${esc(COMPANY.name)}. Bank: ${esc(COMPANY.bank)}
       </div>
       <div class="terms pad">
-        <h5 style="margin:0 0 3px;font-size:10px;">TERMS &amp; CONDITIONS</h5>
+        <h5>TERMS &amp; CONDITIONS</h5>
         <ol>${TERMS.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
         <div class="ack">I acknowledge and agree to abide by the conditions of sale stated above.</div>
       </div>
-      <div class="pay">
-        <div class="pm"><b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
-          ${signatureDataUrl ? `<img src="${signatureDataUrl}" style="height:50px;margin-top:8px;display:block;" />` : '<div style="height:50px;"></div>'}
+      <div class="foot">
+        <div class="col">
+          <b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
+          ${sig ? `<img src="${sig}" class="sigimg" />` : '<div style="height:40px"></div>'}
           <div class="sigline">Customer Signature</div>
         </div>
-        <div class="ob"><b>ORDER BY:</b>
+        <div class="col">
+          <b>SALES ASSISTANT:</b> ${esc(order.salesman_name || "")}
           <div class="sigline">Authorised Signature</div>
         </div>
       </div>
@@ -371,6 +376,17 @@ export default function OrdersPage() {
     if (!res.ok) { setFormError(d.error || "Failed to save"); return; }
     setDrawerOpen(false);
     loadOrders();
+    if (!editId && d.order) {
+      setSignOrder(d.order);
+    }
+  };
+
+  const saveSignature = async (orderId, sigData) => {
+    if (!sigData || !orderId) return;
+    const headers = await authHeaders();
+    await fetch(`${API}/sales-orders/${orderId}/signature`, {
+      method: "PATCH", headers, body: JSON.stringify({ signature: sigData }),
+    });
   };
 
   const changeStatus = async (o, status) => {
@@ -615,8 +631,13 @@ export default function OrdersPage() {
 
       {signOrder && (
         <SignaturePad
-          onDone={(sig) => { printSalesOrder(signOrder, sig); setSignOrder(null); }}
-          onCancel={() => setSignOrder(null)}
+          onDone={async (sig) => {
+            if (sig && signOrder.id) await saveSignature(signOrder.id, sig);
+            printSalesOrder(signOrder, sig);
+            setSignOrder(null);
+            loadOrders();
+          }}
+          onCancel={() => { printSalesOrder(signOrder, null); setSignOrder(null); }}
         />
       )}
     </div>
