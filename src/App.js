@@ -61,7 +61,6 @@ const tripStatusColor = s => ({
 const NAV = [
   { id: "overview",   label: "Overview",         icon: "⊞",  canKey: null },
   { id: "orders",     label: "Orders",           icon: "◫",  canKey: "viewMonthly" },
-  { id: "sales",      label: "New Sales Order",  icon: "🧾", canKey: "addOrder" },
   { id: "deliveries", label: "Deliveries",       icon: "⬡",  canKey: "viewSchedule" },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
@@ -92,45 +91,6 @@ function Badge({ children, color = "gray" }) {
 }
 
 // ── Order Card (mobile-first) ─────────────────────────────────────
-function OrderCard({ o, onView, onEdit, isSalesman }) {
-  const items = o.items || [];
-  const allArrived = items.length > 0 && items.every(i => i.arrivalDate);
-  const someArrived = !allArrived && items.some(i => i.arrivalDate);
-  const arrivalBadge = allArrived ? <Badge color="emerald">All items arrived</Badge>
-    : someArrived ? <Badge color="amber">Partial arrival</Badge>
-    : null;
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden cursor-pointer hover:border-violet-200 transition-colors" onClick={() => onView(o)}>
-      <div className="px-4 pt-4 pb-3">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div>
-            <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
-            <p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p>
-          </div>
-          <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
-            {parseFloat(o.balance) > 0 && <span className="text-xs font-bold text-red-600">RM {o.balance}</span>}
-          </div>
-        </div>
-        <p className="text-xs text-gray-400 truncate mb-2">{o.address || "-"}</p>
-        <div className="flex items-center gap-2 flex-wrap">
-          {o.deliveryDate
-            ? <Badge color="blue">📅 {fmt(o.deliveryDate)}</Badge>
-            : <Badge color="gray">📅 TBC</Badge>}
-          {o.salesman && <Badge color="gray">👤 {o.salesman}</Badge>}
-          {o.type === "Service" && <Badge color="violet">🔧 Service</Badge>}
-          {arrivalBadge}
-        </div>
-      </div>
-      {items.filter(i => i.itemName).length > 0 && (
-        <div className="px-4 pb-3 border-t border-gray-50 pt-2">
-          <p className="text-xs text-gray-400 truncate">{items.filter(i => i.itemName).map(i => i.itemName).join(", ")}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Order View Modal ──────────────────────────────────────────────
 function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orders, handleView }) {
   const hasBalance = parseFloat(o.balance) > 0;
@@ -359,11 +319,6 @@ export default function App() {
   const [globalResults, setGlobalResults] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Orders filters
-  const [filterStatus, setFilterStatus] = useState("");
-  const [filterDate, setFilterDate] = useState("");
-  const [filterArea, setFilterArea] = useState("");
-  const [filterSearch, setFilterSearch] = useState("");
 
   // Operations
   const [servicePending, setServicePending] = useState([]);
@@ -472,27 +427,6 @@ export default function App() {
   }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
-  const areas = useMemo(() => {
-    const areaSet = new Set();
-    orders.forEach(o => {
-      if (!o.address) return;
-      const parts = o.address.split(",").map(p => p.trim()).filter(Boolean);
-      if (parts.length >= 2) areaSet.add(parts[parts.length - 2].trim());
-    });
-    return [...areaSet].sort();
-  }, [orders]);
-
-  const filtered = useMemo(() => orders.filter(o => {
-    if (filterStatus && o.status !== filterStatus) return false;
-    if (filterDate && o.deliveryDate !== filterDate) return false;
-    if (filterArea && !(o.address||"").includes(filterArea)) return false;
-    if (filterSearch) {
-      const q = filterSearch.toLowerCase();
-      const itemMatch = o.items?.some(i => `${i.itemCode||""} ${i.itemName||""}`.toLowerCase().includes(q));
-      if (!`${o.soNumber||""} ${o.customerName||""} ${o.contact||""}`.toLowerCase().includes(q) && !itemMatch) return false;
-    }
-    return true;
-  }), [orders, filterStatus, filterDate, filterArea, filterSearch]);
 
   // Ready to deliver logic
   const readyOrders = useMemo(() => orders.filter(o => {
@@ -865,60 +799,8 @@ export default function App() {
       </div>
     );
 
-    // ORDERS
-    if (page === "sales") return <OrdersPage />;
-
-    if (page === "orders") return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Orders</h1>
-            <p className="text-sm text-gray-400">{filtered.length} of {orders.length} orders</p>
-          </div>
-          {can("addOrder") && (
-            <button onClick={() => { setForm({...EMPTY_ORDER,items:[{...EMPTY_ITEM}]}); setEditId(null); setShowForm(true); }} className="bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-violet-700 flex items-center gap-2">+ New Order</button>
-          )}
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <input value={filterSearch} onChange={e=>setFilterSearch(e.target.value)} placeholder="Search SO, customer..." className="col-span-2 sm:col-span-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
-            <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-              <option value="">All statuses</option>
-              {["Pending","Out for Delivery","Delivered","Serviced","Flagged","In Progress"].map(s=><option key={s}>{s}</option>)}
-            </select>
-            <input type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
-            <select value={filterArea} onChange={e=>setFilterArea(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-              <option value="">All areas</option>
-              {areas.map(a=><option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-          {(filterSearch||filterStatus||filterDate||filterArea) && (
-            <button onClick={()=>{setFilterSearch("");setFilterStatus("");setFilterDate("");setFilterArea("");}} className="mt-2 text-xs text-violet-600 hover:underline">Clear filters</button>
-          )}
-        </div>
-
-        {/* Flagged alert */}
-        {flaggedOrders.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
-            <span className="text-xl">🚨</span>
-            <div className="flex-1">
-              <p className="text-sm font-bold text-red-700">{flaggedOrders.length} flagged order{flaggedOrders.length>1?"s":""}</p>
-              <p className="text-xs text-red-500">Reported by salesmen as having incorrect information</p>
-            </div>
-          </div>
-        )}
-
-        {/* Order cards */}
-        {filtered.length === 0
-          ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">📦</div><p className="font-medium">No orders found</p><p className="text-sm mt-1">Try adjusting your filters</p></div>
-          : <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {filtered.map(o => <OrderCard key={o.id} o={o} onView={handleView} onEdit={handleEdit} isSalesman={isSalesman} />)}
-            </div>
-        }
-      </div>
-    );
+    // ORDERS (unified — reads from sales_orders)
+    if (page === "orders") return <OrdersPage />;
 
     // DELIVERIES
     if (page === "deliveries") return (
