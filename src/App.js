@@ -1125,7 +1125,9 @@ export default function App() {
                       const res = await fetch(`${BACKEND}/do-upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
                       const d = await res.json();
                       if (!res.ok) { alert(d.error || "Upload failed"); return; }
-                      alert(`DO Processed: ${d.supplier || "Unknown"}\n${d.matched} matched, ${d.pending_review} pending review, ${d.showroom} showroom`);
+                      let msg = `DO Processed: ${d.supplier || "Unknown"}\n${d.matched} matched, ${d.pending_review} pending review, ${d.showroom} showroom`;
+                      if (d.unrecognized > 0) msg += `\n\n⚠️ ${d.unrecognized} item(s) not in product master:\n${(d.results?.unrecognized || []).map(u => `${u.code} — ${u.name}`).join("\n")}\n\nPlease add these to Products.`;
+                      alert(msg);
                       loadDoReview();
                     } catch (err) { alert("Upload failed: " + err.message); }
                     finally { btn.innerHTML = "📤 Upload DO"; e.target.value = ""; }

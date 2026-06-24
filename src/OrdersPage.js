@@ -66,6 +66,70 @@ const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(unde
 
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+function printDeliveryNote(doData, order, co) {
+  const COMPANY = co || DEFAULT_COMPANY;
+  const items = order.sales_order_items || order.items || [];
+  const itemRows = items.map((it, i) => {
+    const spec = [it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${esc(it.product_code || "")}</td>
+      <td>${esc(it.product_name || "")}${spec ? `<div style="font-size:9px;color:#555">${esc(spec)}</div>` : ""}</td>
+      <td class="c">${it.quantity || 1}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DO ${esc(doData.do_number)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 10mm; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
+    .sheet { border: 1px solid #111; }
+    .pad { padding: 8px 12px; }
+    .head { display: flex; justify-content: space-between; border-bottom: 1px solid #111; }
+    .title { font-size: 18px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; }
+    .info td { padding: 3px 12px; font-size: 11px; vertical-align: top; }
+    .info .lbl { font-weight: 700; width: 80px; }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th { border: 1px solid #111; background: #f5f5f5; padding: 5px; font-size: 10px; }
+    table.items td { border: 1px solid #ddd; padding: 5px 8px; }
+    .c { text-align: center; }
+    .foot { display: flex; border-top: 1px solid #111; }
+    .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
+    .foot .col + .col { border-left: 1px solid #111; }
+    .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+  </style></head><body>
+  <div class="sheet">
+    <div class="head pad">
+      <div><b>${esc(COMPANY.name)}</b><br>${esc(COMPANY.address)}<br>Tel: ${esc(COMPANY.hotline)}</div>
+      <div style="text-align:right"><b>DO#: ${esc(doData.do_number)}</b></div>
+    </div>
+    <div class="title">DELIVERY ORDER</div>
+    <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
+      <tr><td class="lbl">Customer</td><td>${esc(order.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(order.order_number || "")}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(order.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(order.delivery_date || new Date().toISOString().slice(0, 10))}</td></tr>
+      <tr><td class="lbl">Contact</td><td>${esc(order.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(order.salesman_name || "")}</td></tr>
+    </table>
+    <table class="items">
+      <thead><tr><th style="width:30px">NO</th><th style="width:80px">CODE</th><th>DESCRIPTION</th><th style="width:50px">QTY</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="foot">
+      <div class="col"><b>Remarks:</b><br>${esc(order.remark || "")}</div>
+      <div class="col"><div class="sigline">Received By (Customer)</div></div>
+      <div class="col"><div class="sigline">Delivered By</div></div>
+    </div>
+  </div>
+  </body></html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) { alert("Allow pop-ups to print"); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
+}
+
 function printSalesOrder(order, signatureDataUrl, co) {
   const COMPANY = co || DEFAULT_COMPANY;
   const items = order.items || order.sales_order_items || [];
@@ -590,6 +654,19 @@ export default function OrdersPage() {
                   <>
                     <button onClick={() => openSubmitPO(editingOrder)}
                       className="text-sm px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">📋 Submit PO</button>
+                    <button onClick={async () => {
+                      if (!editingOrder?.id) return;
+                      const items = editingOrder.sales_order_items || [];
+                      if (items.length === 0) { alert("No items"); return; }
+                      if (!window.confirm(`Generate Delivery Order for ${items.length} items?`)) return;
+                      const headers = await authHeaders();
+                      const res = await fetch(`${API}/sales-orders/${editingOrder.id}/generate-do`, {
+                        method: "POST", headers, body: JSON.stringify({ item_ids: items.map(i => i.id) }),
+                      });
+                      const d = await res.json();
+                      if (!res.ok) { alert(d.error || "Failed"); return; }
+                      printDeliveryNote(d, editingOrder, companyInfo);
+                    }} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">🚚 Generate DO</button>
                     <button onClick={() => setSignOrder({ ...editingOrder, ...form, items: form.items })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   </>
