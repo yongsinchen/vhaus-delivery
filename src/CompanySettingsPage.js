@@ -28,6 +28,7 @@ export default function CompanySettingsPage() {
   const [settings, setSettings] = useState({
     company_name: "", registration_no: "", address: "", hotline: "", bank_account: "", branches_display: "",
     work_start: "09:00", work_end: "18:00", base_address: "",
+    countries: "[]",
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState("");
@@ -194,6 +195,41 @@ export default function CompanySettingsPage() {
             </div>
           </div>
           <Field label="Base Warehouse Address" value={settings.base_address || ""} onChange={v => setSettings(s => ({ ...s, base_address: v }))} placeholder="Warehouse address for delivery routing" />
+
+          {/* Countries & GST */}
+          <div className="border-t border-gray-100 pt-4 mt-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-2">Countries & GST Rates</h4>
+            <p className="text-xs text-gray-400 mb-3">Configure countries your salesmen sell to. GST is auto-calculated on sales orders.</p>
+            <div className="space-y-2">
+              {(() => {
+                let list = [];
+                try { list = JSON.parse(settings.countries || "[]"); } catch {}
+                if (!Array.isArray(list)) list = [];
+                const update = (newList) => setSettings(s => ({ ...s, countries: JSON.stringify(newList) }));
+                return (
+                  <>
+                    {list.map((c, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input value={c.code || ""} onChange={e => { const n = [...list]; n[i] = { ...n[i], code: e.target.value.toUpperCase() }; update(n); }}
+                          placeholder="MY" className="w-16 px-2 py-1.5 rounded-lg border border-gray-200 text-xs text-center focus:outline-none focus:border-violet-400" />
+                        <input value={c.name || ""} onChange={e => { const n = [...list]; n[i] = { ...n[i], name: e.target.value }; update(n); }}
+                          placeholder="Malaysia" className="flex-1 px-2 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:border-violet-400" />
+                        <div className="flex items-center gap-1">
+                          <input type="number" value={c.gst_rate ?? ""} onChange={e => { const n = [...list]; n[i] = { ...n[i], gst_rate: e.target.value === "" ? 0 : Number(e.target.value) }; update(n); }}
+                            placeholder="0" className="w-16 px-2 py-1.5 rounded-lg border border-gray-200 text-xs text-right focus:outline-none focus:border-violet-400" />
+                          <span className="text-xs text-gray-400">%</span>
+                        </div>
+                        <button type="button" onClick={() => update(list.filter((_, j) => j !== i))} className="text-xs text-red-400 hover:text-red-600">×</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => update([...list, { code: "", name: "", gst_rate: 0 }])}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Country</button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
             <button onClick={saveSettings} disabled={settingsSaving}
               className="px-6 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">

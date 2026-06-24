@@ -36,6 +36,7 @@ const EMPTY_ORDER = {
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "",
   branch_id: "", salesman_names: "",
+  country: "", gst_rate: 0,
 };
 
 // Company details for the printed sales order
@@ -91,7 +92,10 @@ function printSalesOrder(order, signatureDataUrl, co) {
   const discount = Number(order.discount) || 0;
   const deposit = Number(order.deposit) || 0;
   const subtotal = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : gross;
-  const total = subtotal - discount;
+  const afterDisc = subtotal - discount;
+  const orderGstRate = Number(order.gst_rate) || 0;
+  const orderGst = Number(order.gst_amount) || Math.round(afterDisc * orderGstRate) / 100;
+  const total = afterDisc + orderGst;
   const balance = total - deposit;
   const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString("en-MY") : new Date().toLocaleDateString("en-MY");
 
@@ -176,7 +180,8 @@ function printSalesOrder(order, signatureDataUrl, co) {
         <div class="right">
           <div class="trow"><span>Subtotal</span><span>${money(subtotal)}</span></div>
           ${discount ? `<div class="trow"><span>Discount</span><span>-${money(discount)}</span></div>` : ""}
-          <div class="trow grand"><span>TOTAL</span><span>${money(total)}</span></div>
+          ${orderGst ? `<div class="trow"><span>GST (${orderGstRate}%)</span><span>${money(orderGst)}</span></div>` : ""}
+          <div class="trow grand"><span>TOTAL${orderGst ? " (incl. GST)" : ""}</span><span>${money(total)}</span></div>
           <div class="trow"><span>DEPOSIT</span><span>${money(deposit)}</span></div>
           <div class="trow grand"><span>BALANCE</span><span>${money(balance)}</span></div>
         </div>
@@ -222,6 +227,7 @@ export default function OrdersPage() {
   const [branches, setBranches] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
+  const [countries, setCountries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -274,6 +280,10 @@ export default function OrdersPage() {
           branches_display: d.settings.branches_display || DEFAULT_COMPANY.branches_display,
         });
       }
+      try {
+        const list = JSON.parse(d.settings?.countries || "[]");
+        if (Array.isArray(list) && list.length) setCountries(list);
+      } catch {}
     });
   }, [companyId]);
 
@@ -319,6 +329,7 @@ export default function OrdersPage() {
       remark: o.remark || "",
       discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "",
       branch_id: o.branch_id || "", salesman_names: o.salesman_name || "",
+      country: o.country || "", gst_rate: o.gst_rate ?? 0,
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
@@ -367,7 +378,10 @@ export default function OrdersPage() {
   const subtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
   const discountVal = Number(form.discount) || 0;
   const depositVal = Number(form.deposit) || 0;
-  const totalAfterDiscount = subtotal - discountVal;
+  const gstRate = Number(form.gst_rate) || 0;
+  const afterDiscount = subtotal - discountVal;
+  const gstAmount = Math.round(afterDiscount * gstRate) / 100;
+  const totalAfterDiscount = afterDiscount + gstAmount;
   const balanceVal = totalAfterDiscount - depositVal;
 
   const saveOrder = async () => {
@@ -386,6 +400,8 @@ export default function OrdersPage() {
       payment_method: form.payment_method || null,
       branch_id: form.branch_id || null,
       salesman_names: form.salesman_names || null,
+      country: form.country || null,
+      gst_rate: gstRate, gst_amount: gstAmount,
       items: form.items.map(it => ({
         ...it,
         quantity: Number(it.quantity) || 1,
@@ -542,7 +558,19 @@ export default function OrdersPage() {
                 <Field label="Customer Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
                 <Field label="Contact" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
               </div>
-              <Field label="Address" value={form.customer_address} onChange={v => setForm(f => ({ ...f, customer_address: v }))} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Address" value={form.customer_address} onChange={v => setForm(f => ({ ...f, customer_address: v }))} />
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Country</label>
+                  <select value={form.country} onChange={e => {
+                    const c = countries.find(x => x.code === e.target.value);
+                    setForm(f => ({ ...f, country: e.target.value, gst_rate: c?.gst_rate ?? 0 }));
+                  }} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="">Select country</option>
+                    {countries.map(c => <option key={c.code} value={c.code}>{c.name} ({c.code}){c.gst_rate ? ` — GST ${c.gst_rate}%` : ""}</option>)}
+                  </select>
+                </div>
+              </div>
 
               {/* Delivery details */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -620,8 +648,14 @@ export default function OrdersPage() {
                   <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
                   <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
                 </div>
+                {gstRate > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">GST ({gstRate}%)</span>
+                    <span className="text-gray-700">{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Total</span>
+                  <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
                   <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex items-center justify-between border-t border-gray-100 pt-2">
