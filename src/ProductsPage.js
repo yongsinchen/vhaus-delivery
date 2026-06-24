@@ -788,6 +788,12 @@ export default function ProductsPage() {
                   <p className="text-sm text-gray-500">
                     {importResult.imported} imported, {importResult.skipped} skipped out of {importResult.total} total.
                   </p>
+                  {importResult.errors?.length > 0 && (
+                    <div className="mt-2 bg-red-50 rounded-xl p-3 text-left">
+                      <p className="text-xs font-medium text-red-700 mb-1">Skip reasons:</p>
+                      {importResult.errors.map((e, i) => <p key={i} className="text-xs text-red-600">{e}</p>)}
+                    </div>
+                  )}
                   <button onClick={() => setImportOpen(false)}
                     className="mt-4 px-6 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
                     Done
