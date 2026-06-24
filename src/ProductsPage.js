@@ -706,7 +706,15 @@ export default function ProductsPage() {
                           <th className="px-3 py-2">Size / Variant</th>
                           <th className="px-3 py-2">Color</th>
                           <th className="px-3 py-2">Supplier</th>
-                          <th className="px-3 py-2 text-center">Custom</th>
+                          <th className="px-3 py-2 text-center">
+                            <label className="flex items-center justify-center gap-1 cursor-pointer">
+                              <input type="checkbox"
+                                checked={importRows.length > 0 && importRows.every(r => r.is_customizable)}
+                                onChange={e => setImportRows(prev => prev.map(r => ({ ...r, is_customizable: e.target.checked })))}
+                                className="rounded border-gray-300 text-amber-500 focus:ring-amber-400" />
+                              <span>Custom</span>
+                            </label>
+                          </th>
                           <th className="px-3 py-2 text-right">Cost</th>
                           <th className="px-3 py-2 text-right">Price</th>
                         </tr>
