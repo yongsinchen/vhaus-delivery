@@ -323,20 +323,18 @@ export default function WarehousePage() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
             <h3 className="text-sm font-bold text-gray-700">Scan QR Code</h3>
 
-            {/* Camera viewfinder */}
-            {cameraActive && (
-              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3", minHeight: 240 }}>
-                <video ref={videoRef} autoPlay playsInline muted
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                <canvas ref={canvasRef} style={{ display: "none" }} />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-48 h-48 border-2 border-violet-400 rounded-2xl" />
-                </div>
-                <button type="button" onTouchEnd={(e) => { e.preventDefault(); stopCamera(); }} onClick={stopCamera}
-                  className="absolute top-3 right-3 bg-black/70 text-white rounded-full flex items-center justify-center"
-                  style={{ width: 44, height: 44, fontSize: 18, zIndex: 10 }}>✕</button>
+            {/* Camera viewfinder — video always in DOM so ref is available */}
+            <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3", minHeight: 240, display: cameraActive ? "block" : "none" }}>
+              <video ref={videoRef} autoPlay playsInline muted
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <canvas ref={canvasRef} style={{ display: "none" }} />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 border-2 border-violet-400 rounded-2xl" />
               </div>
-            )}
+              <button type="button" onTouchEnd={(e) => { e.preventDefault(); stopCamera(); }} onClick={stopCamera}
+                className="absolute top-3 right-3 bg-black/70 text-white rounded-full flex items-center justify-center"
+                style={{ width: 44, height: 44, fontSize: 18, zIndex: 10 }}>✕</button>
+            </div>
 
             <div className="flex gap-2">
               <input value={scanCode} onChange={e => setScanCode(e.target.value)} placeholder="QR code (e.g. PKG-260625-A3F2)"
