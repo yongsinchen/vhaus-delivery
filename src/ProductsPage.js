@@ -15,7 +15,7 @@ const authHeaders = async () => ({
 
 const EMPTY_PRODUCT = {
   code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
-  unit_cost: "", unit_price: "", is_standard: true, reorder_point: 0,
+  unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0,
 };
 
 export default function ProductsPage() {
@@ -116,7 +116,7 @@ export default function ProductsPage() {
       code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "", size: p.size || "",
       supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
-      is_standard: p.is_standard, reorder_point: p.reorder_point ?? 0,
+      is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
     });
     setFormError("");
     setDrawerOpen(true);
@@ -132,7 +132,7 @@ export default function ProductsPage() {
       supplier_id: form.supplier_id || null, category_id: form.category_id || null,
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
-      is_standard: form.is_standard, reorder_point: Number(form.reorder_point) || 0,
+      is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0,
     };
     const url = editId ? `${API}/products/${editId}` : `${API}/products`;
     const method = editId ? "PUT" : "POST";
@@ -326,7 +326,7 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const rowEdits = importRows.map(r => ({
       id: r.id, product_code: r.product_code, product_name: r.product_name,
-      color: r.color, size: r.size, supplier_name: r.supplier_name,
+      color: r.color, size: r.size, is_customizable: r.is_customizable || false, supplier_name: r.supplier_name,
       unit_cost: r.unit_cost, unit_price: r.unit_price, action: r._action,
     }));
     await fetch(`${API}/catalogue-import/${importJobId}/rows`, { method: "PUT", headers, body: JSON.stringify({ rows: rowEdits }) });
@@ -346,7 +346,7 @@ export default function ProductsPage() {
     // Save row edits first
     const rowEdits = importRows.map(r => ({
       id: r.id, product_code: r.product_code, product_name: r.product_name,
-      color: r.color, size: r.size, supplier_name: r.supplier_name,
+      color: r.color, size: r.size, is_customizable: r.is_customizable || false, supplier_name: r.supplier_name,
       unit_cost: r.unit_cost, unit_price: r.unit_price, action: r._action,
     }));
     await fetch(`${API}/catalogue-import/${importJobId}/rows`, {
@@ -465,10 +465,11 @@ export default function ProductsPage() {
                 <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">{p.color || "—"}</td>
                 <td className="px-4 py-3 text-right text-gray-600">{p.unit_cost != null ? p.unit_cost.toFixed(2) : "—"}</td>
                 <td className="px-4 py-3 text-right text-gray-900 font-medium">{p.unit_price != null ? p.unit_price.toFixed(2) : "—"}</td>
-                <td className="px-4 py-3 text-center">
+                <td className="px-4 py-3 text-center space-x-1">
                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${p.is_active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
                     {p.is_active ? "Active" : "Inactive"}
                   </span>
+                  {p.is_customizable && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Custom</span>}
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={e => { e.stopPropagation(); toggleActive(p); }}
@@ -555,6 +556,13 @@ export default function ProductsPage() {
                   <button onClick={() => setForm(f => ({ ...f, is_standard: !f.is_standard }))}
                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${form.is_standard ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-500"}`}>
                     {form.is_standard ? "Yes" : "No"}
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Customizable</label>
+                  <button onClick={() => setForm(f => ({ ...f, is_customizable: !f.is_customizable }))}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${form.is_customizable ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-500"}`}>
+                    {form.is_customizable ? "Yes" : "No"}
                   </button>
                 </div>
               </div>
@@ -698,6 +706,7 @@ export default function ProductsPage() {
                           <th className="px-3 py-2">Size / Variant</th>
                           <th className="px-3 py-2">Color</th>
                           <th className="px-3 py-2">Supplier</th>
+                          <th className="px-3 py-2 text-center">Custom</th>
                           <th className="px-3 py-2 text-right">Cost</th>
                           <th className="px-3 py-2 text-right">Price</th>
                         </tr>
@@ -739,6 +748,10 @@ export default function ProductsPage() {
                             <td className="px-3 py-2">
                               <input value={r.supplier_name || ""} onChange={e => updateImportRow(i, "supplier_name", e.target.value)}
                                 className="w-28 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <input type="checkbox" checked={r.is_customizable || false} onChange={e => updateImportRow(i, "is_customizable", e.target.checked)}
+                                className="rounded border-gray-300 text-amber-500 focus:ring-amber-400" />
                             </td>
                             <td className="px-3 py-2 text-right">
                               <input value={r.unit_cost ?? ""} onChange={e => updateImportRow(i, "unit_cost", e.target.value === "" ? null : Number(e.target.value))}
