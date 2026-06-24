@@ -355,7 +355,9 @@ export default function App() {
   const loadOrders = async () => {
     setLoading(true); setError(null);
     let q = supabase.from("orders").select("*").order("created_at", { ascending: true });
-    if (!isMaster && companyId) q = q.eq("company_id", companyId);
+    // Scope to the user's own company (master included). Only a user with no
+    // company_id (super-admin) sees everything.
+    if (companyId) q = q.eq("company_id", companyId);
     const { data, error: err } = await q;
     if (err) { setError("Failed to load orders: " + err.message); setLoading(false); return; }
     const all = (data || []).map(fromDb);
@@ -370,7 +372,7 @@ export default function App() {
   const loadServicePending = async () => {
     setSpLoading(true);
     try {
-      const url = companyId && !isMaster ? `${BACKEND}/service-pending?company_id=${companyId}` : `${BACKEND}/service-pending`;
+      const url = companyId ? `${BACKEND}/service-pending?company_id=${companyId}` : `${BACKEND}/service-pending`;
       const d = await fetch(url).then(r => r.json());
       setServicePending(Array.isArray(d) ? d : []);
     } catch(e) {} setSpLoading(false);
@@ -386,7 +388,7 @@ export default function App() {
     setServicesLoading(true);
     try {
       const params = new URLSearchParams();
-      if (companyId && !isMaster) params.set("company_id", companyId);
+      if (companyId) params.set("company_id", companyId);
       if (isSalesman && user?.salesman_name) params.set("salesman", user.salesman_name);
       const d = await fetch(`${BACKEND}/services?${params}`).then(r => r.json());
       setServices(Array.isArray(d) ? d.map(fromDb) : []);
@@ -398,7 +400,7 @@ export default function App() {
     setSupplierDOsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (companyId && !isMaster) params.set("company_id", companyId);
+      if (companyId) params.set("company_id", companyId);
       if (supplierFilter) params.set("supplier", supplierFilter);
       if (doDateFrom) params.set("from_date", doDateFrom);
       if (doDateTo) params.set("to_date", doDateTo);

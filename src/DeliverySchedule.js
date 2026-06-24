@@ -659,7 +659,7 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   );
 }
 
-export default function DeliverySchedule({ readOnly = false, companyId = null, isMaster = false, currentUser = null }) {
+export default function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [routes, setRoutes] = useState([]);
   const [unassigned, setUnassigned] = useState([]);
@@ -704,16 +704,16 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, i
   const loadServiceOrders = useCallback(async () => {
     try {
       // Services scheduled for this date (already have delivery_date set)
-      const res = await fetch(`${API}/delivery/unassigned?date=${date}${companyId && !isMaster ? `&company_id=${companyId}` : ""}`);
+      const res = await fetch(`${API}/delivery/unassigned?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
 
       // All service orders with no date yet — shown separately so admin can schedule them
-      const res2 = await fetch(`${API}/services/unscheduled${companyId && !isMaster ? `?company_id=${companyId}` : ""}`);
+      const res2 = await fetch(`${API}/services/unscheduled${companyId ? `?company_id=${companyId}` : ""}`);
       const data2 = await res2.json();
       setUnscheduledServices(Array.isArray(data2) ? data2 : []);
     } catch (e) { console.error("loadServiceOrders error:", e); }
-  }, [date, companyId, isMaster]);
+  }, [date, companyId]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
