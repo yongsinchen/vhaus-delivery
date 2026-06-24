@@ -65,7 +65,7 @@ export default function ProductsPage() {
   // Bulk edit
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkForm, setBulkForm] = useState({ supplier: false, supplier_id: "", category: false, category_id: "", active: false, is_active: true, cost: false, cost_divisor: "3" });
+  const [bulkForm, setBulkForm] = useState({ supplier: false, supplier_id: "", category: false, category_id: "", active: false, is_active: true, cost: false, cost_divisor: "3", setCost: false, unit_cost: "", setPrice: false, unit_price: "" });
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState("");
 
@@ -208,6 +208,8 @@ export default function ProductsPage() {
     if (bulkForm.supplier) set.supplier_id = bulkForm.supplier_id || null;
     if (bulkForm.category) set.category_id = bulkForm.category_id || null;
     if (bulkForm.active) set.is_active = bulkForm.is_active;
+    if (bulkForm.setCost && bulkForm.unit_cost !== "") set.unit_cost = Number(bulkForm.unit_cost);
+    if (bulkForm.setPrice && bulkForm.unit_price !== "") set.unit_price = Number(bulkForm.unit_price);
     const cost_divisor = bulkForm.cost ? bulkForm.cost_divisor : undefined;
     if (Object.keys(set).length === 0 && !cost_divisor) { setBulkError("Pick at least one change to apply"); return; }
     setBulkSaving(true); setBulkError("");
@@ -256,17 +258,17 @@ export default function ProductsPage() {
   const activeCostDivisor = importCostMode === "derive" && Number(importCostDivisor) > 0
     ? Number(importCostDivisor) : null;
 
-  const pollJob = useCallback(async (jobId) => {
+  const pollJob = useCallback(async (jobId, supplierLabel) => {
     const headers = await authHeaders();
     const res = await fetch(`${API}/catalogue-import/${jobId}`, { headers });
     if (!res.ok) return;
     const { job } = await res.json();
     if (job.status === "processing") {
       setImportProgress({ pages_processed: job.pages_processed || 0, pages_total: job.pages_total || 0 });
-      setTimeout(() => pollJob(jobId), 3000);
+      setTimeout(() => pollJob(jobId, supplierLabel), 3000);
     } else if (job.status === "review") {
       setImportProgress(null);
-      setImportRows((job.catalogue_import_rows || []).map(r => ({ ...r, _action: r.action })));
+      setImportRows((job.catalogue_import_rows || []).map(r => ({ ...r, _action: r.action, supplier_name: r.supplier_name || supplierLabel || "" })));
       setImportStep("review");
     } else if (job.status === "failed") {
       setImportProgress(null);
@@ -297,11 +299,12 @@ export default function ProductsPage() {
     setUploading(false);
     if (!res.ok) { setImportError(d.error || "Upload failed"); setImportStep("upload"); return; }
     setImportJobId(d.job_id);
+    const supplierLabel = importSupplier ? suppliers.find(s => s.id === importSupplier)?.name || "" : "";
     if (d.status === "review") {
-      setImportRows((d.rows || []).map(r => ({ ...r, _action: r.action })));
+      setImportRows((d.rows || []).map(r => ({ ...r, _action: r.action, supplier_name: r.supplier_name || supplierLabel })));
       setImportStep("review");
     } else {
-      pollJob(d.job_id);
+      pollJob(d.job_id, supplierLabel);
     }
   };
 
@@ -838,6 +841,32 @@ export default function ProductsPage() {
                     <option value="true">Active</option>
                     <option value="false">Inactive</option>
                   </select>
+                )}
+              </div>
+
+              {/* Set unit cost */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.setCost} onChange={e => setBulkForm(f => ({ ...f, setCost: e.target.checked }))} />
+                  Set unit cost
+                </label>
+                {bulkForm.setCost && (
+                  <input type="number" min="0" step="any" value={bulkForm.unit_cost} placeholder="Enter cost"
+                    onChange={e => setBulkForm(f => ({ ...f, unit_cost: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                )}
+              </div>
+
+              {/* Set unit price */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.setPrice} onChange={e => setBulkForm(f => ({ ...f, setPrice: e.target.checked }))} />
+                  Set unit price
+                </label>
+                {bulkForm.setPrice && (
+                  <input type="number" min="0" step="any" value={bulkForm.unit_price} placeholder="Enter price"
+                    onChange={e => setBulkForm(f => ({ ...f, unit_price: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
                 )}
               </div>
 
