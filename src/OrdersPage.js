@@ -229,6 +229,7 @@ export default function OrdersPage() {
   const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
   const [countries, setCountries] = useState([]);
   const [categorySpecs, setCategorySpecs] = useState({});
+  const [specOptionsMap, setSpecOptionsMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -274,6 +275,14 @@ export default function OrdersPage() {
     fetch(`${API}/admin/users/list?company_id=${companyId}`).then(r => r.json()).then(d => {
       const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
       setSalesmen([...new Set(names)].sort());
+    });
+    fetch(`${API}/spec-options?company_id=${companyId}`).then(r => r.json()).then(d => {
+      const map = {};
+      (d.options || []).filter(o => o.is_approved).forEach(o => {
+        if (!map[o.label]) map[o.label] = [];
+        map[o.label].push(o.value);
+      });
+      setSpecOptionsMap(map);
     });
     fetch(`${API}/categories?company_id=${companyId}`).then(r => r.json()).then(d => {
       const map = {};
@@ -423,6 +432,18 @@ export default function OrdersPage() {
       items: form.items.map(it => {
         const specs = (it.custom_specs || []).filter(s => s.label || s.value);
         const customDim = specs.length ? specs.map(s => `${s.label}: ${s.value}`).join(" | ") : (it.custom_dimensions || "");
+        // Auto-submit unrecognized spec values to library as pending
+        specs.forEach(s => {
+          if (s.label && s.value) {
+            const libValues = specOptionsMap[s.label] || [];
+            if (!libValues.includes(s.value)) {
+              getToken().then(token => fetch(`${API}/spec-options`, {
+                method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ label: s.label, value: s.value, is_approved: false }),
+              }));
+            }
+          }
+        });
         return {
           ...it,
           custom_dimensions: customDim,
@@ -718,24 +739,35 @@ export default function OrdersPage() {
                       {it.is_custom && (
                         <div className="space-y-2 pt-1">
                           <label className="block text-xs font-medium text-gray-500">Customization Specs</label>
-                          {(it.custom_specs || []).map((spec, si) => (
-                            <div key={si} className="flex gap-1 items-center">
-                              <input value={spec.label} onChange={e => {
-                                const specs = [...(it.custom_specs || [])];
-                                specs[si] = { ...specs[si], label: e.target.value };
-                                updateItem(i, "custom_specs", specs);
-                              }} placeholder="Label" className="w-28 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
-                              <input value={spec.value} onChange={e => {
-                                const specs = [...(it.custom_specs || [])];
-                                specs[si] = { ...specs[si], value: e.target.value };
-                                updateItem(i, "custom_specs", specs);
-                              }} placeholder="Value" className="flex-1 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
-                              <button type="button" onClick={() => {
-                                const specs = (it.custom_specs || []).filter((_, j) => j !== si);
-                                updateItem(i, "custom_specs", specs);
-                              }} className="text-xs text-gray-300 hover:text-red-500">x</button>
-                            </div>
-                          ))}
+                          {(it.custom_specs || []).map((spec, si) => {
+                            const libValues = specOptionsMap[spec.label] || [];
+                            const isUnrecognized = spec.value && libValues.length > 0 && !libValues.includes(spec.value);
+                            const dlId = `dl-${i}-${si}`;
+                            return (
+                              <div key={si} className="flex gap-1 items-center">
+                                <input value={spec.label} onChange={e => {
+                                  const specs = [...(it.custom_specs || [])];
+                                  specs[si] = { ...specs[si], label: e.target.value };
+                                  updateItem(i, "custom_specs", specs);
+                                }} placeholder="Label" className="w-28 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                                <div className="flex-1 relative">
+                                  <input list={dlId} value={spec.value} onChange={e => {
+                                    const specs = [...(it.custom_specs || [])];
+                                    specs[si] = { ...specs[si], value: e.target.value };
+                                    updateItem(i, "custom_specs", specs);
+                                  }} placeholder="Value" className={`w-full px-2 py-1 text-xs rounded-lg border focus:outline-none focus:border-violet-400 ${isUnrecognized ? "border-amber-300 bg-amber-50" : "border-gray-200"}`} />
+                                  <datalist id={dlId}>
+                                    {libValues.map(v => <option key={v} value={v} />)}
+                                  </datalist>
+                                  {isUnrecognized && <span className="absolute right-2 top-1 text-amber-500 text-xs" title="Not in library">●</span>}
+                                </div>
+                                <button type="button" onClick={() => {
+                                  const specs = (it.custom_specs || []).filter((_, j) => j !== si);
+                                  updateItem(i, "custom_specs", specs);
+                                }} className="text-xs text-gray-300 hover:text-red-500">x</button>
+                              </div>
+                            );
+                          })}
                           <button type="button" onClick={() => {
                             const specs = [...(it.custom_specs || []), { label: "", value: "" }];
                             updateItem(i, "custom_specs", specs);

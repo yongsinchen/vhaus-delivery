@@ -17,7 +17,7 @@ const authHeaders = async () => ({
   Authorization: `Bearer ${await getToken()}`,
 });
 
-const TABS = ["Company Info", "Branches", "Operations", "Categories"];
+const TABS = ["Company Info", "Branches", "Operations", "Categories", "Options Library"];
 
 export default function CompanySettingsPage() {
   const { user } = useAuth();
@@ -43,6 +43,12 @@ export default function CompanySettingsPage() {
   const [catForm, setCatForm] = useState({ name: "" });
   const [catEditId, setCatEditId] = useState(null);
 
+  // Options Library
+  const [specOptions, setSpecOptions] = useState([]);
+  const [pendingOptions, setPendingOptions] = useState([]);
+  const [newOptLabel, setNewOptLabel] = useState("");
+  const [newOptValue, setNewOptValue] = useState("");
+
   const loadSettings = useCallback(async () => {
     if (!companyId) return;
     const res = await fetch(`${API}/company-settings?company_id=${companyId}`);
@@ -66,7 +72,19 @@ export default function CompanySettingsPage() {
     setCategories(d.categories || []);
   }, [companyId]);
 
-  useEffect(() => { loadSettings(); loadBranches(); loadCategories(); }, [loadSettings, loadBranches, loadCategories]);
+  const loadSpecOptions = useCallback(async () => {
+    if (!companyId) return;
+    const [allRes, pendRes] = await Promise.all([
+      fetch(`${API}/spec-options?company_id=${companyId}`),
+      fetch(`${API}/spec-options/pending?company_id=${companyId}`),
+    ]);
+    const allD = await allRes.json();
+    const pendD = await pendRes.json();
+    setSpecOptions((allD.options || []).filter(o => o.is_approved));
+    setPendingOptions(pendD.options || []);
+  }, [companyId]);
+
+  useEffect(() => { loadSettings(); loadBranches(); loadCategories(); loadSpecOptions(); }, [loadSettings, loadBranches, loadCategories, loadSpecOptions]);
 
   // ── Settings save ─────────────────────────────────────────────────
   const saveSettings = async () => {
@@ -303,6 +321,85 @@ export default function CompanySettingsPage() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Tab: Options Library */}
+      {tab === 4 && (
+        <div className="space-y-4 max-w-2xl">
+          {/* Pending review */}
+          {pendingOptions.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-2">
+              <h3 className="text-sm font-bold text-amber-800">Pending Review ({pendingOptions.length})</h3>
+              <p className="text-xs text-amber-600">These values were added by salesmen and need approval.</p>
+              {pendingOptions.map(o => (
+                <div key={o.id} className="flex items-center justify-between bg-white rounded-xl px-3 py-2 border border-amber-100">
+                  <div>
+                    <span className="text-xs text-gray-500">{o.label}:</span>
+                    <span className="text-sm font-medium text-gray-900 ml-1">{o.value}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={async () => {
+                      const headers = await authHeaders();
+                      await fetch(`${API}/spec-options/${o.id}/approve`, { method: "PATCH", headers });
+                      loadSpecOptions();
+                    }} className="text-xs px-2 py-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200">Approve</button>
+                    <button onClick={async () => {
+                      const headers = await authHeaders();
+                      await fetch(`${API}/spec-options/${o.id}`, { method: "DELETE", headers });
+                      loadSpecOptions();
+                    }} className="text-xs px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Reject</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add new option */}
+          <div className="flex gap-2">
+            <input value={newOptLabel} onChange={e => setNewOptLabel(e.target.value)} placeholder="Label (e.g. Fabric Color)"
+              className="w-40 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+            <input value={newOptValue} onChange={e => setNewOptValue(e.target.value)} placeholder="Value (e.g. Lamboo 03)"
+              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400"
+              onKeyDown={async e => {
+                if (e.key !== "Enter" || !newOptLabel.trim() || !newOptValue.trim()) return;
+                const headers = await authHeaders();
+                await fetch(`${API}/spec-options`, { method: "POST", headers, body: JSON.stringify({ label: newOptLabel.trim(), value: newOptValue.trim(), is_approved: true }) });
+                setNewOptValue("");
+                loadSpecOptions();
+              }} />
+            <button onClick={async () => {
+              if (!newOptLabel.trim() || !newOptValue.trim()) return;
+              const headers = await authHeaders();
+              await fetch(`${API}/spec-options`, { method: "POST", headers, body: JSON.stringify({ label: newOptLabel.trim(), value: newOptValue.trim(), is_approved: true }) });
+              setNewOptValue("");
+              loadSpecOptions();
+            }} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Add</button>
+          </div>
+
+          {/* Grouped options */}
+          {(() => {
+            const grouped = {};
+            specOptions.forEach(o => { if (!grouped[o.label]) grouped[o.label] = []; grouped[o.label].push(o); });
+            return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([label, opts]) => (
+              <div key={label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                <h4 className="text-sm font-bold text-gray-700 mb-2">{label} <span className="text-xs font-normal text-gray-400">({opts.length})</span></h4>
+                <div className="flex flex-wrap gap-1">
+                  {opts.map(o => (
+                    <span key={o.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-50 text-violet-700 rounded-full text-xs">
+                      {o.value}
+                      <button type="button" onClick={async () => {
+                        const headers = await authHeaders();
+                        await fetch(`${API}/spec-options/${o.id}`, { method: "DELETE", headers });
+                        loadSpecOptions();
+                      }} className="text-violet-300 hover:text-red-500">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ));
+          })()}
+          {specOptions.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No options yet. Add labels and values above.</p>}
         </div>
       )}
     </div>
