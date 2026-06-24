@@ -10,6 +10,7 @@ import SuppliersPage from "./SuppliersPage";
 import CompanySettingsPage from "./CompanySettingsPage";
 import PurchaseOrdersPage from "./PurchaseOrdersPage";
 import InventoryPage from "./InventoryPage";
+import WarehousePage from "./WarehousePage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -68,6 +69,7 @@ const NAV = [
   { id: "products",   label: "Products",         icon: "📦", canKey: null, manageOnly: true },
   { id: "purchase",   label: "Purchase Orders",   icon: "📋", canKey: null, manageOnly: true },
   { id: "inventory",  label: "Inventory",          icon: "📊", canKey: null, manageOnly: true },
+  { id: "warehouse",  label: "Warehouse",          icon: "🏭", canKey: null, manageOnly: true },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
@@ -1112,8 +1114,8 @@ export default function App() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-bold text-gray-700">Items ({doDetail.items?.length || 0})</h3>
-                    <button onClick={() => setLabelModal({ doId: doDetail.id, doNumber: doDetail.do_number, supplier: doDetail.supplier, items: (doDetail.items || []).map(it => ({ ...it, carton_count: 1 })) })}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100">🏷 Generate Labels</button>
+                    <button onClick={() => { setDoDetail(null); setPage("warehouse"); }}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100">🏭 Go to Warehouse</button>
                   </div>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">
@@ -1164,8 +1166,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Label Generation Modal */}
-        {labelModal && (
+        {/* Label Generation — moved to Warehouse page */}
+        {false && labelModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={() => setLabelModal(null)} />
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
@@ -1359,6 +1361,9 @@ export default function App() {
 
     // INVENTORY
     if (page === "inventory") return <InventoryPage />;
+
+    // WAREHOUSE
+    if (page === "warehouse") return <WarehousePage />;
 
     // SUPPLIERS
     if (page === "suppliers") return <SuppliersPage />;
