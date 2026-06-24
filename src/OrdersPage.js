@@ -41,12 +41,7 @@ const EMPTY_ORDER = {
 
 // Company details for the printed sales order
 const DEFAULT_COMPANY = {
-  name: "V HAUS LIVING (PG) SDN. BHD.",
-  reg: "202301043392 (1537308-U)",
-  address: "2084 Jalan Rozhan, Taman Impian Ria, 14000 Bukit Mertajam, Pulau Pinang",
-  hotline: "014-388 9328",
-  bank: "CIMB 8011211457",
-  branches_display: "Georgetown — 014-388 9328 | Alma — 014-388 9328 | Mutiara Rini — 017-721 6389 | Ros Merah — 018-277 8389 | Kulai — 018-277 8389",
+  name: "", reg: "", address: "", hotline: "", bank: "", branches_display: "",
 };
 
 const TERMS = [
@@ -492,7 +487,7 @@ export default function OrdersPage() {
       branch_id: form.branch_id || null,
       salesman_names: form.salesman_names || null,
       country: form.country || null,
-      gst_rate: gstRate, gst_amount: gstAmount, gst_waived: form.gst_waived || false,
+      gst_rate: Number(form.gst_rate) || 0, gst_amount: gstAmount, gst_waived: form.gst_waived || false,
       items: form.items.map(it => {
         const specs = (it.custom_specs || []).filter(s => s.label || s.value);
         const customDim = specs.length ? specs.map(s => `${s.label}: ${s.value}`).join(" | ") : (it.custom_dimensions || "");
@@ -904,18 +899,11 @@ export default function OrdersPage() {
               <Field label="Order Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
               <Field label="Remark" value={form.remark} onChange={v => setForm(f => ({ ...f, remark: v }))} />
 
-              {(Number(form.gst_rate) || 0) > 0 && !form.gst_waived && (
-                <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+              {(Number(form.gst_rate) || 0) > 0 && (
+                <label className={`flex items-center gap-2 text-xs cursor-pointer ${form.gst_waived ? "text-amber-600" : "text-gray-500"}`}>
                   <input type="checkbox" checked={form.gst_waived} onChange={e => setForm(f => ({ ...f, gst_waived: e.target.checked }))}
-                    className="rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
-                  Waive GST for this order
-                </label>
-              )}
-              {form.gst_waived && (
-                <label className="flex items-center gap-2 text-xs text-amber-600 cursor-pointer">
-                  <input type="checkbox" checked={form.gst_waived} onChange={e => setForm(f => ({ ...f, gst_waived: e.target.checked }))}
-                    className="rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
-                  GST waived for this order
+                    className={`rounded ${form.gst_waived ? "border-amber-300 text-amber-600 focus:ring-amber-500" : "border-gray-300 text-violet-600 focus:ring-violet-500"}`} />
+                  {form.gst_waived ? "GST waived for this order" : "Waive GST for this order"}
                 </label>
               )}
 

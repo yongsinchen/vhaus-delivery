@@ -405,7 +405,6 @@ export default function App() {
   const [doDateTo, setDoDateTo] = useState("");
   const [viewPhoto, setViewPhoto] = useState(null);
   const [doDetail, setDoDetail] = useState(null);
-  const [labelModal, setLabelModal] = useState(null); // { items: [{...item, carton_count: 1}] }
   const [convertDate, setConvertDate] = useState("");
   const [serviceDateModal, setServiceDateModal] = useState(null); // { id, soNumber, svNumber, customerName }
   const [serviceDateValue, setServiceDateValue] = useState("");
@@ -1160,94 +1159,6 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Label Generation — moved to Warehouse page */}
-        {false && labelModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/50" onClick={() => setLabelModal(null)} />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
-              <div className="px-5 py-4 border-b border-gray-100">
-                <h3 className="text-lg font-bold text-gray-900">Generate QR Labels</h3>
-                <p className="text-xs text-gray-500">Set carton count per item. One QR label per carton.</p>
-              </div>
-              <div className="overflow-y-auto p-5 space-y-2">
-                {labelModal.items.map((it, i) => (
-                  <div key={i} className="flex items-center gap-2 border border-gray-100 rounded-xl p-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{it.item_name || it.product_name || "-"}</p>
-                      <p className="text-xs text-gray-400">{it.item_code || ""} {it.so_number ? `· SO: ${it.so_number}` : ""}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <label className="text-xs text-gray-500">Cartons:</label>
-                      <input type="number" min="1" value={it.carton_count} onChange={e => {
-                        const items = [...labelModal.items];
-                        items[i] = { ...items[i], carton_count: Number(e.target.value) || 1 };
-                        setLabelModal(prev => ({ ...prev, items }));
-                      }} className="w-14 px-2 py-1 text-sm text-center rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
-                <span className="text-xs text-gray-500">Total labels: {labelModal.items.reduce((s, it) => s + (Number(it.carton_count) || 1), 0)}</span>
-                <div className="flex gap-2">
-                  <button onClick={() => setLabelModal(null)} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
-                  <button onClick={async () => {
-                    const token = (await supabase.auth.getSession()).data?.session?.access_token;
-                    const payload = {
-                      supplier_delivery_id: labelModal.doId,
-                      items: labelModal.items.map(it => ({
-                        product_code: it.item_code || it.product_code, product_name: it.item_name || it.product_name,
-                        so_number: it.so_number, carton_count: Number(it.carton_count) || 1,
-                      })),
-                    };
-                    const res = await fetch(`${BACKEND}/package-labels/generate`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
-                    const d = await res.json();
-                    if (!res.ok) { alert(d.error || "Failed"); return; }
-                    setLabelModal(null);
-                    // Print labels
-                    const labels = d.labels || [];
-                    const labelHtml = labels.map(l => `
-                      <div class="label">
-                        <div class="qr"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(l.qr_code)}" /></div>
-                        <div class="info">
-                          <div class="code">${l.qr_code}</div>
-                          <div class="prod"><b>${l.product_code || ""}</b> ${l.product_name || ""}</div>
-                          ${l.so_number ? `<div class="so">SO: ${l.so_number}</div>` : ""}
-                          <div class="do">DO: ${labelModal.doNumber || ""} · ${labelModal.supplier || ""}</div>
-                          <div class="carton">Carton ${l.carton_number} of ${l.total_cartons}</div>
-                          ${l.location_code ? `<div class="loc">📍 ${l.location_code}</div>` : ""}
-                          <div class="date">${new Date().toLocaleDateString("en-MY")}</div>
-                        </div>
-                      </div>
-                    `).join("");
-                    const w = window.open("", "_blank");
-                    if (!w) { alert("Allow pop-ups to print labels"); return; }
-                    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Package Labels</title>
-                    <style>
-                      @page { size: A4; margin: 10mm; }
-                      body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 10px; }
-                      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-                      .label { border: 1.5px solid #333; border-radius: 8px; padding: 12px; display: flex; gap: 12px; align-items: center; page-break-inside: avoid; }
-                      .qr img { width: 100px; height: 100px; }
-                      .info { flex: 1; }
-                      .code { font-family: monospace; font-size: 10px; color: #7C3AED; margin-bottom: 4px; }
-                      .prod { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-                      .so, .do { font-size: 10px; color: #555; }
-                      .carton { font-size: 13px; font-weight: 900; margin-top: 4px; color: #111; }
-                      .loc { font-size: 11px; font-weight: 700; color: #7C3AED; margin-top: 2px; }
-                      .date { font-size: 9px; color: #999; margin-top: 2px; }
-                    </style></head><body><div class="grid">${labelHtml}</div></body></html>`);
-                    w.document.close();
-                    w.focus();
-                    setTimeout(() => w.print(), 500);
-                    alert(`${d.count} labels generated`);
-                  }} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Generate & Print</button>
                 </div>
               </div>
             </div>

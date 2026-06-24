@@ -43,7 +43,8 @@ export default function InventoryPage() {
   const [txQty, setTxQty] = useState("");
   const [txNotes, setTxNotes] = useState("");
 
-  const [productSearch, setProductSearch] = useState("");
+  const [adjProductSearch, setAdjProductSearch] = useState("");
+  const [txProductSearch, setTxProductSearch] = useState("");
 
   const loadWarehouses = useCallback(async () => {
     if (!companyId) return;
@@ -91,8 +92,8 @@ export default function InventoryPage() {
       })
     : inventory;
 
-  const filteredProducts = productSearch
-    ? products.filter(p => (p.code + " " + p.name).toLowerCase().includes(productSearch.toLowerCase())).slice(0, 20)
+  const getFilteredProducts = (q) => q
+    ? products.filter(p => (p.code + " " + p.name).toLowerCase().includes(q.toLowerCase())).slice(0, 20)
     : products.slice(0, 20);
 
   const doAdjust = async () => {
@@ -258,12 +259,12 @@ export default function InventoryPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Product</label>
-            <input value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="Search product…"
+            <input value={adjProductSearch} onChange={e => setAdjProductSearch(e.target.value)} placeholder="Search product…"
               className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm mb-1" />
-            {productSearch && (
+            {adjProductSearch && (
               <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto">
-                {filteredProducts.map(p => (
-                  <button key={p.id} onClick={() => { setAdjProduct(p.id); setProductSearch(`${p.code} ${p.name}`); }}
+                {getFilteredProducts(adjProductSearch).map(p => (
+                  <button key={p.id} onClick={() => { setAdjProduct(p.id); setAdjProductSearch(`${p.code} ${p.name}`); }}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50 ${adjProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
                     <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""} {p.color ? <span className="text-gray-400">· {p.color}</span> : ""}
                   </button>
@@ -311,12 +312,12 @@ export default function InventoryPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Product</label>
-            <input value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="Search product…"
+            <input value={txProductSearch} onChange={e => setTxProductSearch(e.target.value)} placeholder="Search product…"
               className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm mb-1" />
-            {productSearch && (
+            {txProductSearch && (
               <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto">
-                {filteredProducts.map(p => (
-                  <button key={p.id} onClick={() => { setTxProduct(p.id); setProductSearch(`${p.code} ${p.name}`); }}
+                {getFilteredProducts(txProductSearch).map(p => (
+                  <button key={p.id} onClick={() => { setTxProduct(p.id); setTxProductSearch(`${p.code} ${p.name}`); }}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50 ${txProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
                     <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""} {p.color ? <span className="text-gray-400">· {p.color}</span> : ""}
                   </button>

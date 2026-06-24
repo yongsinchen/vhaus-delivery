@@ -23,7 +23,6 @@ export default function WarehousePage() {
 
   const [dos, setDos] = useState([]);
   const [selectedDO, setSelectedDO] = useState(null);
-  const [, setDoItems] = useState([]);
   const [labels, setLabels] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -59,7 +58,6 @@ export default function WarehousePage() {
     const res = await fetch(`${API}/supplier-deliveries/${d.id}`);
     const data = await res.json();
     const items = (data.items || []).map(it => ({ ...it, carton_count: 1 }));
-    setDoItems(items);
     setLabelItems(items);
     // Load existing labels for this DO
     const lRes = await fetch(`${API}/package-labels?supplier_delivery_id=${d.id}`);
