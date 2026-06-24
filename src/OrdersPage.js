@@ -70,7 +70,7 @@ const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(unde
 
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function printSalesOrder(order) {
+function printSalesOrder(order, signatureDataUrl) {
   const items = order.items || order.sales_order_items || [];
   let gross = 0;
   const MIN_ROWS = 8;
@@ -193,6 +193,7 @@ function printSalesOrder(order) {
       </div>
       <div class="pay">
         <div class="pm"><b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
+          ${signatureDataUrl ? `<img src="${signatureDataUrl}" style="height:50px;margin-top:8px;display:block;" />` : '<div style="height:50px;"></div>'}
           <div class="sigline">Customer Signature</div>
         </div>
         <div class="ob"><b>ORDER BY:</b>
@@ -229,6 +230,7 @@ export default function OrdersPage() {
 
   // Product picker
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [signOrder, setSignOrder] = useState(null);
   const [products, setProducts] = useState([]);
   const [productSearch, setProductSearch] = useState("");
   const [productLoading, setProductLoading] = useState(false);
@@ -425,7 +427,7 @@ export default function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {Number(o.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={e => { e.stopPropagation(); printSalesOrder(o); }}
+                  <button onClick={e => { e.stopPropagation(); setSignOrder(o); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
@@ -447,7 +449,7 @@ export default function OrdersPage() {
               <h2 className="text-lg font-bold text-gray-900">{editId ? "Edit Order" : "New Order"}</h2>
               <div className="flex items-center gap-2">
                 {editId && (
-                  <button onClick={() => printSalesOrder({ ...editingOrder, ...form, items: form.items })}
+                  <button onClick={() => setSignOrder({ ...editingOrder, ...form, items: form.items })}
                     className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                 )}
                 <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -610,6 +612,87 @@ export default function OrdersPage() {
           </div>
         </div>
       )}
+
+      {signOrder && (
+        <SignaturePad
+          onDone={(sig) => { printSalesOrder(signOrder, sig); setSignOrder(null); }}
+          onCancel={() => setSignOrder(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SignaturePad({ onDone, onCancel }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+
+  const getPos = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  };
+
+  const start = (e) => {
+    e.preventDefault();
+    drawing.current = true;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const end = () => { drawing.current = false; };
+
+  const clear = () => {
+    const c = canvasRef.current;
+    c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  };
+
+  useEffect(() => {
+    const c = canvasRef.current;
+    const ctx = c.getContext("2d");
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }, []);
+
+  const confirm = () => {
+    const c = canvasRef.current;
+    const ctx = c.getContext("2d");
+    const pixels = ctx.getImageData(0, 0, c.width, c.height).data;
+    const hasContent = pixels.some((v, i) => i % 4 === 3 && v > 0);
+    onDone(hasContent ? c.toDataURL("image/png") : null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3">
+        <h3 className="text-lg font-bold text-gray-900">Customer Signature</h3>
+        <p className="text-xs text-gray-500">Sign below with your finger or mouse</p>
+        <canvas
+          ref={canvasRef} width={400} height={160}
+          className="w-full border border-gray-200 rounded-xl bg-gray-50 cursor-crosshair touch-none"
+          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+          onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+        />
+        <div className="flex gap-2">
+          <button onClick={clear} className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Clear</button>
+          <button onClick={onCancel} className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
+          <button onClick={confirm} className="flex-1 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Confirm & Print</button>
+        </div>
+      </div>
     </div>
   );
 }
