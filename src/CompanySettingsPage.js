@@ -242,9 +242,9 @@ export default function CompanySettingsPage() {
 
       {/* Tab: Categories */}
       {tab === 3 && (
-        <div className="space-y-4 max-w-lg">
+        <div className="space-y-4 max-w-2xl">
           <div className="flex gap-2">
-            <input value={catForm.name} onChange={e => setCatForm({ name: e.target.value })} placeholder="Category name"
+            <input value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} placeholder="Category name"
               className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400"
               onKeyDown={e => e.key === "Enter" && saveCategory()} />
             <button onClick={saveCategory} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">
@@ -254,17 +254,54 @@ export default function CompanySettingsPage() {
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
             {categories.length === 0 && <p className="p-4 text-sm text-gray-400 text-center">No categories yet</p>}
-            {categories.map(c => (
-              <div key={c.id} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm font-medium text-gray-900">{c.name}</span>
-                <div className="flex gap-2">
-                  <button onClick={() => { setCatEditId(c.id); setCatForm({ name: c.name }); }}
-                    className="text-xs text-violet-600 hover:underline">Edit</button>
-                  <button onClick={() => deleteCategory(c.id)}
-                    className="text-xs text-red-500 hover:underline">Delete</button>
+            {categories.map(c => {
+              let specs = [];
+              try { specs = JSON.parse(c.spec_labels || "[]"); } catch {}
+              if (!Array.isArray(specs)) specs = [];
+              return (
+                <div key={c.id} className="px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-900">{c.name}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setCatEditId(c.id); setCatForm({ name: c.name }); }}
+                        className="text-xs text-violet-600 hover:underline">Edit Name</button>
+                      <button onClick={() => deleteCategory(c.id)}
+                        className="text-xs text-red-500 hover:underline">Delete</button>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-400 mb-1">Customization Specs (shown when ordering customizable products in this category)</p>
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {specs.map((s, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">
+                          {s}
+                          <button type="button" onClick={async () => {
+                            const next = specs.filter((_, j) => j !== i);
+                            const headers = await authHeaders();
+                            await fetch(`${API}/categories/${c.id}`, { method: "PUT", headers, body: JSON.stringify({ name: c.name, spec_labels: JSON.stringify(next) }) });
+                            loadCategories();
+                          }} className="text-amber-400 hover:text-amber-700">×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <form onSubmit={async e => {
+                      e.preventDefault();
+                      const input = e.target.elements.newspec;
+                      const val = input.value.trim();
+                      if (!val) return;
+                      const next = [...specs, val];
+                      const headers = await authHeaders();
+                      await fetch(`${API}/categories/${c.id}`, { method: "PUT", headers, body: JSON.stringify({ name: c.name, spec_labels: JSON.stringify(next) }) });
+                      input.value = "";
+                      loadCategories();
+                    }} className="flex gap-1">
+                      <input name="newspec" placeholder="+ Add spec label (e.g. Fabric Color)" className="flex-1 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                      <button type="submit" className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200">Add</button>
+                    </form>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

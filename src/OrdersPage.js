@@ -228,6 +228,7 @@ export default function OrdersPage() {
   const [salesmen, setSalesmen] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
   const [countries, setCountries] = useState([]);
+  const [categorySpecs, setCategorySpecs] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -273,6 +274,11 @@ export default function OrdersPage() {
     fetch(`${API}/admin/users/list?company_id=${companyId}`).then(r => r.json()).then(d => {
       const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
       setSalesmen([...new Set(names)].sort());
+    });
+    fetch(`${API}/categories?company_id=${companyId}`).then(r => r.json()).then(d => {
+      const map = {};
+      (d.categories || []).forEach(c => { try { map[c.id] = JSON.parse(c.spec_labels || "[]"); } catch { map[c.id] = []; } });
+      setCategorySpecs(map);
     });
     fetch(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
       if (d.settings && d.settings.company_name) {
@@ -338,7 +344,9 @@ export default function OrdersPage() {
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
-        custom_dimensions: it.custom_dimensions || "", quantity: it.quantity ?? 1,
+        custom_dimensions: it.custom_dimensions || "",
+        custom_specs: (it.custom_dimensions || "").includes(": ") ? (it.custom_dimensions || "").split(" | ").map(s => { const [l, ...v] = s.split(": "); return { label: l || "", value: v.join(": ") || "" }; }) : [],
+        quantity: it.quantity ?? 1,
         unit_price: it.unit_price ?? "", unit_cost: it.unit_cost ?? "",
         attachment_url: it.attachment_url || "", notes: it.notes || "",
       })),
@@ -348,12 +356,16 @@ export default function OrdersPage() {
   };
 
   const addLineItem = (p) => {
+    const catId = p.product_categories?.id;
+    const specLabels = (catId && categorySpecs[catId]) || [];
+    const specs = p.is_customizable ? specLabels.map(label => ({ label, value: "" })) : [];
     setForm(f => ({
       ...f,
       items: [...f.items, {
         product_id: p.id, product_code: p.code, product_name: p.name,
         size: p.size || "", color: p.color || "", is_custom: p.is_customizable || false,
-        custom_dimensions: "", quantity: 1, unit_price: p.unit_price ?? "", unit_cost: p.unit_cost ?? "",
+        custom_specs: specs, custom_dimensions: "",
+        quantity: 1, unit_price: p.unit_price ?? "", unit_cost: p.unit_cost ?? "",
         attachment_url: "", notes: "",
       }],
     }));
@@ -408,12 +420,18 @@ export default function OrdersPage() {
       salesman_names: form.salesman_names || null,
       country: form.country || null,
       gst_rate: gstRate, gst_amount: gstAmount, gst_waived: form.gst_waived || false,
-      items: form.items.map(it => ({
-        ...it,
-        quantity: Number(it.quantity) || 1,
-        unit_price: it.unit_price === "" ? null : Number(it.unit_price),
-        unit_cost: it.unit_cost === "" ? null : Number(it.unit_cost),
-      })),
+      items: form.items.map(it => {
+        const specs = (it.custom_specs || []).filter(s => s.label || s.value);
+        const customDim = specs.length ? specs.map(s => `${s.label}: ${s.value}`).join(" | ") : (it.custom_dimensions || "");
+        return {
+          ...it,
+          custom_dimensions: customDim,
+          custom_specs: undefined,
+          quantity: Number(it.quantity) || 1,
+          unit_price: it.unit_price === "" ? null : Number(it.unit_price),
+          unit_cost: it.unit_cost === "" ? null : Number(it.unit_cost),
+        };
+      }),
     };
     const url = editId ? `${API}/sales-orders/${editId}` : `${API}/sales-orders`;
     const method = editId ? "PUT" : "POST";
@@ -699,8 +717,29 @@ export default function OrdersPage() {
                       {/* Customizable extras */}
                       {it.is_custom && (
                         <div className="space-y-2 pt-1">
-                          <Field label="Custom Dimensions / Spec" value={it.custom_dimensions}
-                            onChange={v => updateItem(i, "custom_dimensions", v)} placeholder='e.g. W55" or 5.5FT' small />
+                          <label className="block text-xs font-medium text-gray-500">Customization Specs</label>
+                          {(it.custom_specs || []).map((spec, si) => (
+                            <div key={si} className="flex gap-1 items-center">
+                              <input value={spec.label} onChange={e => {
+                                const specs = [...(it.custom_specs || [])];
+                                specs[si] = { ...specs[si], label: e.target.value };
+                                updateItem(i, "custom_specs", specs);
+                              }} placeholder="Label" className="w-28 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                              <input value={spec.value} onChange={e => {
+                                const specs = [...(it.custom_specs || [])];
+                                specs[si] = { ...specs[si], value: e.target.value };
+                                updateItem(i, "custom_specs", specs);
+                              }} placeholder="Value" className="flex-1 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                              <button type="button" onClick={() => {
+                                const specs = (it.custom_specs || []).filter((_, j) => j !== si);
+                                updateItem(i, "custom_specs", specs);
+                              }} className="text-xs text-gray-300 hover:text-red-500">x</button>
+                            </div>
+                          ))}
+                          <button type="button" onClick={() => {
+                            const specs = [...(it.custom_specs || []), { label: "", value: "" }];
+                            updateItem(i, "custom_specs", specs);
+                          }} className="text-xs px-2 py-1 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100">+ Add Spec</button>
                           <AttachmentField idx={i} url={it.attachment_url} onUpload={uploadAttachment} onClear={() => updateItem(i, "attachment_url", "")} />
                         </div>
                       )}
