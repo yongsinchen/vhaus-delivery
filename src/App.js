@@ -1094,9 +1094,6 @@ export default function App() {
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
             <button onClick={loadOrders} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔄</button>
-            {can("addOrder") && (
-              <button onClick={() => { setForm({...EMPTY_ORDER,items:[{...EMPTY_ITEM}]}); setEditId(null); setShowForm(true); }} className="hidden sm:flex items-center gap-1.5 bg-violet-600 text-white text-sm font-medium px-3 py-2 rounded-xl hover:bg-violet-700">+ Order</button>
-            )}
           </div>
         </div>
 

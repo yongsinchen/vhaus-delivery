@@ -20,9 +20,12 @@ const STATUS_STYLE = {
   cancelled: "bg-red-100 text-red-600",
 };
 
+const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
+
 const EMPTY_ORDER = {
   customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
+  delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
 };
 
 export default function OrdersPage() {
@@ -96,6 +99,10 @@ export default function OrdersPage() {
       customer_address: o.customer_address || "",
       status: o.status || "draft",
       notes: o.notes || "",
+      delivery_type: o.delivery_type || "Delivery",
+      delivery_date: o.delivery_date || "",
+      delivery_time_slot: o.delivery_time_slot || "",
+      remark: o.remark || "",
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
@@ -152,6 +159,8 @@ export default function OrdersPage() {
     const body = {
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
       customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
+      delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
+      delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
       items: form.items.map(it => ({
         ...it,
         quantity: Number(it.quantity) || 1,
@@ -216,6 +225,8 @@ export default function OrdersPage() {
                 <p className="text-xs text-gray-400">
                   {(o.sales_order_items || []).length} item{(o.sales_order_items || []).length !== 1 ? "s" : ""}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
+                  {o.delivery_type ? ` · ${o.delivery_type}` : ""}
+                  {o.delivery_date ? ` · 📅 ${o.delivery_date}` : ""}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -248,6 +259,23 @@ export default function OrdersPage() {
                 <Field label="Contact" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
               </div>
               <Field label="Address" value={form.customer_address} onChange={v => setForm(f => ({ ...f, customer_address: v }))} />
+
+              {/* Delivery details */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
+                  <select value={form.delivery_type} onChange={e => setForm(f => ({ ...f, delivery_type: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    {DELIVERY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Delivery Date</label>
+                  <input type="date" value={form.delivery_date} onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <Field label="Time Slot" value={form.delivery_time_slot} onChange={v => setForm(f => ({ ...f, delivery_time_slot: v }))} placeholder="e.g. 2-5pm" />
+              </div>
 
               {/* Line items */}
               <div>
@@ -313,6 +341,7 @@ export default function OrdersPage() {
                 </select>
               </div>
               <Field label="Order Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
+              <Field label="Remark" value={form.remark} onChange={v => setForm(f => ({ ...f, remark: v }))} />
 
               <button onClick={saveOrder} disabled={saving}
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
