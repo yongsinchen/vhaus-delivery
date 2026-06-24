@@ -32,13 +32,18 @@ export default function WarehousePage() {
   const [labelItems, setLabelItems] = useState([]);
   const [labelWarehouse, setLabelWarehouse] = useState("");
 
-  // Scan
+  // Scan — multi-item batch
   const [scanCode, setScanCode] = useState("");
-  const [scanResult, setScanResult] = useState(null);
+  const [scannedItems, setScannedItems] = useState([]); // array of package labels
+  const [scanMsg, setScanMsg] = useState(""); // flash message
+  const [batchWh, setBatchWh] = useState("");
+  const [batchLoc, setBatchLoc] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const scanningRef = useRef(false);
+  const scannedCodesRef = useRef(new Set());
+  const lastScannedRef = useRef(new Set());
 
   const loadDOs = useCallback(async () => {
     if (!companyId) return;
@@ -129,12 +134,65 @@ export default function WarehousePage() {
     setTimeout(() => w.print(), 500);
   };
 
-  const doScan = async () => {
-    if (!scanCode.trim()) return;
-    const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(scanCode.trim())}`);
+  const addScannedItem = async (code) => {
+    if (!code.trim()) return;
+    if (scannedCodesRef.current.has(code.trim())) {
+      setScanMsg(`⚠️ Already scanned: ${code.trim()}`);
+      setTimeout(() => setScanMsg(""), 2000);
+      return;
+    }
+    const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(code.trim())}`);
     const d = await res.json();
-    if (!res.ok) { setScanResult({ error: d.error || "Not found" }); return; }
-    setScanResult(d.label);
+    if (!res.ok || !d.label) {
+      setScanMsg(`❌ Not found: ${code.trim()}`);
+      setTimeout(() => setScanMsg(""), 2000);
+      return;
+    }
+    if (d.label.status !== "pending") {
+      setScanMsg(`⏭ Skipped (already ${d.label.status}): ${code.trim()}`);
+      setTimeout(() => setScanMsg(""), 2000);
+      return;
+    }
+    scannedCodesRef.current.add(code.trim());
+    setScannedItems(prev => [...prev, d.label]);
+    setScanMsg(`✅ Added: ${d.label.product_name || d.label.product_code} (${d.label.carton_number}/${d.label.total_cartons})`);
+    setTimeout(() => setScanMsg(""), 2000);
+    setScanCode("");
+  };
+
+  const doScan = () => addScannedItem(scanCode);
+
+  const removeScannedItem = (qrCode) => {
+    scannedCodesRef.current.delete(qrCode);
+    setScannedItems(prev => prev.filter(i => i.qr_code !== qrCode));
+  };
+
+  const confirmBatch = async () => {
+    if (scannedItems.length === 0) return;
+    if (!batchWh) { alert("Select a warehouse"); return; }
+    const headers = await authHeaders();
+    let confirmed = 0;
+    for (const item of scannedItems) {
+      if (batchLoc) {
+        await fetch(`${API}/package-labels/${item.id}/assign-location`, {
+          method: "PATCH", headers, body: JSON.stringify({ location_code: batchLoc }),
+        });
+      }
+      await fetch(`${API}/package-labels/${item.id}/scan`, {
+        method: "PATCH", headers, body: JSON.stringify({ status: "received" }),
+      });
+      if (item.product_id) {
+        await fetch(`${API}/inventory/adjust`, {
+          method: "POST", headers,
+          body: JSON.stringify({ warehouse_id: batchWh, product_id: item.product_id, quantity: 1, notes: `Received: ${item.qr_code}` }),
+        });
+      }
+      confirmed++;
+    }
+    alert(`${confirmed} packages confirmed & stocked`);
+    setScannedItems([]);
+    scannedCodesRef.current.clear();
+    setBatchLoc("");
   };
 
   const startCamera = async () => {
@@ -172,12 +230,14 @@ export default function WarehousePage() {
           const imageData = ctx.getImageData(0, 0, w, h);
           const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
           if (code && code.data) {
-            scanningRef.current = false;
-            setScanCode(code.data);
-            stopCamera();
-            fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
-              .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
-            return;
+            // Don't stop camera — keep scanning, add to batch
+            const qr = code.data;
+            if (!scannedCodesRef.current.has(qr) && !lastScannedRef.current.has(qr)) {
+              lastScannedRef.current.add(qr);
+              addScannedItem(qr);
+              // Cooldown: ignore same code for 3 seconds to avoid rapid re-scan
+              setTimeout(() => lastScannedRef.current.delete(qr), 3000);
+            }
           }
         } catch (e) { /* skip frame */ }
         requestAnimationFrame(scanFrame);
@@ -320,10 +380,14 @@ export default function WarehousePage() {
       {/* Scan & Assign */}
       {tab === 2 && (
         <div className="max-w-lg space-y-4">
+          {/* Camera + input */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
-            <h3 className="text-sm font-bold text-gray-700">Scan QR Code</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-700">Scan QR Codes</h3>
+              {scannedItems.length > 0 && <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">{scannedItems.length} scanned</span>}
+            </div>
 
-            {/* Camera viewfinder — video always in DOM so ref is available */}
+            {/* Camera viewfinder */}
             <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3", minHeight: 240, display: cameraActive ? "block" : "none" }}>
               <video ref={videoRef} autoPlay playsInline muted
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
@@ -331,94 +395,71 @@ export default function WarehousePage() {
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-48 h-48 border-2 border-violet-400 rounded-2xl" />
               </div>
+              {/* Scan count overlay */}
+              {scannedItems.length > 0 && (
+                <div className="absolute top-3 left-3 bg-emerald-600 text-white px-3 py-1 rounded-full text-xs font-bold">{scannedItems.length} scanned</div>
+              )}
               <button type="button" onTouchEnd={(e) => { e.preventDefault(); stopCamera(); }} onClick={stopCamera}
                 className="absolute top-3 right-3 bg-black/70 text-white rounded-full flex items-center justify-center"
                 style={{ width: 44, height: 44, fontSize: 18, zIndex: 10 }}>✕</button>
+              {/* Flash message overlay */}
+              {scanMsg && (
+                <div className="absolute bottom-3 left-3 right-3 bg-black/80 text-white text-sm px-3 py-2 rounded-xl text-center">{scanMsg}</div>
+              )}
             </div>
+
+            {/* Flash message (when camera off) */}
+            {!cameraActive && scanMsg && (
+              <div className={`text-sm px-3 py-2 rounded-xl text-center ${scanMsg.startsWith("✅") ? "bg-emerald-50 text-emerald-700" : scanMsg.startsWith("⚠️") || scanMsg.startsWith("⏭") ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>{scanMsg}</div>
+            )}
 
             <div className="flex gap-2">
               <input value={scanCode} onChange={e => setScanCode(e.target.value)} placeholder="QR code (e.g. PKG-260625-A3F2)"
                 className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm font-mono focus:outline-none focus:border-violet-400"
                 onKeyDown={e => e.key === "Enter" && doScan()} />
               {!cameraActive && (
-                <button onClick={startCamera} className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">📷</button>
+                <button onClick={startCamera} className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700" style={{ minWidth: 44 }}>📷</button>
               )}
-              <button onClick={doScan} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Search</button>
+              <button onClick={doScan} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Add</button>
             </div>
           </div>
 
-          {scanResult && !scanResult.error && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-700">Package Found</h3>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                  scanResult.status === "received" ? "bg-emerald-100 text-emerald-700" :
-                  scanResult.status === "stored" ? "bg-blue-100 text-blue-700" :
-                  scanResult.status === "picked" ? "bg-indigo-100 text-indigo-700" :
-                  scanResult.status === "delivered" ? "bg-gray-100 text-gray-500" :
-                  "bg-amber-100 text-amber-700"
-                }`}>{scanResult.status}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-gray-400">Product:</span> <b>{scanResult.product_code} {scanResult.product_name}</b></div>
-                <div><span className="text-gray-400">Carton:</span> <b>{scanResult.carton_number}/{scanResult.total_cartons}</b></div>
-                {scanResult.so_number && <div><span className="text-gray-400">SO:</span> <b>{scanResult.so_number}</b></div>}
-                {scanResult.location_code && <div><span className="text-gray-400">Location:</span> <b className="text-violet-700">{scanResult.location_code}</b></div>}
+          {/* Scanned items list */}
+          {scannedItems.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+              <h4 className="text-sm font-bold text-gray-700">Scanned Packages ({scannedItems.length})</h4>
+              <div className="space-y-1 max-h-60 overflow-y-auto">
+                {scannedItems.map(item => (
+                  <div key={item.id} className="flex items-center justify-between py-1.5 px-2 rounded-lg bg-gray-50 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-gray-900">{item.product_code} {item.product_name}</span>
+                      <span className="text-gray-400 ml-2">Carton {item.carton_number}/{item.total_cartons}</span>
+                      {item.so_number && <span className="text-violet-600 ml-2">SO: {item.so_number}</span>}
+                    </div>
+                    <button onClick={() => removeScannedItem(item.qr_code)} className="text-red-400 hover:text-red-600 ml-2 flex-shrink-0" style={{ minWidth: 28 }}>✕</button>
+                  </div>
+                ))}
               </div>
 
-              {/* Assign warehouse + location */}
-              {scanResult.status === "pending" && (
-                <div className="border-t border-gray-100 pt-3 space-y-2">
-                  <p className="text-xs font-bold text-gray-600">Assign Location & Confirm Receive</p>
-                  <select value={scanResult._wh || ""} onChange={e => setScanResult(prev => ({ ...prev, _wh: e.target.value }))}
-                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm bg-white">
-                    <option value="">Select warehouse</option>
-                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
-                  </select>
-                  <input value={scanResult._loc || ""} onChange={e => setScanResult(prev => ({ ...prev, _loc: e.target.value }))}
-                    placeholder="Location code (e.g. A-03-02)" className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm" />
-                  <button onClick={async () => {
-                    const headers = await authHeaders();
-                    if (scanResult._loc) {
-                      await fetch(`${API}/package-labels/${scanResult.id}/assign-location`, {
-                        method: "PATCH", headers, body: JSON.stringify({ location_code: scanResult._loc }),
-                      });
-                    }
-                    await fetch(`${API}/package-labels/${scanResult.id}/scan`, { method: "PATCH", headers, body: JSON.stringify({ status: "received" }) });
-                    // Stock in if warehouse selected and product exists
-                    if (scanResult._wh && scanResult.product_id) {
-                      await fetch(`${API}/inventory/adjust`, {
-                        method: "POST", headers,
-                        body: JSON.stringify({ warehouse_id: scanResult._wh, product_id: scanResult.product_id, quantity: 1, notes: `Received: ${scanResult.qr_code}` }),
-                      });
-                    }
-                    setScanResult({ ...scanResult, status: "received", location_code: scanResult._loc || scanResult.location_code });
-                    setScanCode("");
-                  }} className="w-full py-2 rounded-xl text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700">
-                    ✓ Confirm Received{scanResult._wh ? " & Stock In" : ""}
-                  </button>
-                </div>
-              )}
-
-              {/* Actions for already received items */}
-              <div className="flex gap-2 pt-2">
-                {(scanResult.status === "received" || scanResult.status === "stored") && (
-                  <button onClick={async () => {
-                    const headers = await authHeaders();
-                    await fetch(`${API}/package-labels/${scanResult.id}/scan`, { method: "PATCH", headers, body: JSON.stringify({ status: "picked" }) });
-                    setScanResult({ ...scanResult, status: "picked" });
-                  }} className="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white hover:bg-blue-700">📦 Mark Picked</button>
-                )}
-                {scanResult.status !== "pending" && (
-                  <button onClick={() => { setScanResult(null); setScanCode(""); if (!cameraActive) startCamera(); }}
-                    className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-600 hover:bg-gray-200">Scan Next</button>
-                )}
+              {/* Batch assign + confirm */}
+              <div className="border-t border-gray-100 pt-3 space-y-2">
+                <p className="text-xs font-bold text-gray-600">Assign Location & Confirm All</p>
+                <select value={batchWh} onChange={e => setBatchWh(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm bg-white">
+                  <option value="">Select warehouse</option>
+                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
+                </select>
+                <input value={batchLoc} onChange={e => setBatchLoc(e.target.value)}
+                  placeholder="Location code (e.g. A-03-02)" className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm" />
+                <button onClick={confirmBatch} disabled={!batchWh}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                  ✓ Confirm {scannedItems.length} Package{scannedItems.length !== 1 ? "s" : ""} Received & Stock In
+                </button>
               </div>
+
+              <button onClick={() => { setScannedItems([]); scannedCodesRef.current.clear(); }}
+                className="w-full py-1.5 rounded-xl text-xs text-gray-500 hover:bg-gray-50">Clear All</button>
             </div>
-          )}
-
-          {scanResult?.error && (
-            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 text-sm text-red-700">{scanResult.error}</div>
           )}
         </div>
       )}
