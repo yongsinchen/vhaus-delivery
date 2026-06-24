@@ -39,19 +39,13 @@ const EMPTY_ORDER = {
 };
 
 // Company details for the printed sales order
-const COMPANY = {
+const DEFAULT_COMPANY = {
   name: "V HAUS LIVING (PG) SDN. BHD.",
   reg: "202301043392 (1537308-U)",
   address: "2084 Jalan Rozhan, Taman Impian Ria, 14000 Bukit Mertajam, Pulau Pinang",
   hotline: "014-388 9328",
   bank: "CIMB 8011211457",
-  branches: [
-    "Georgetown — 014-388 9328",
-    "Alma — 014-388 9328",
-    "Mutiara Rini — 017-721 6389",
-    "Ros Merah — 018-277 8389",
-    "Kulai — 018-277 8389",
-  ],
+  branches_display: "Georgetown — 014-388 9328 | Alma — 014-388 9328 | Mutiara Rini — 017-721 6389 | Ros Merah — 018-277 8389 | Kulai — 018-277 8389",
 };
 
 const TERMS = [
@@ -71,7 +65,8 @@ const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(unde
 
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function printSalesOrder(order, signatureDataUrl) {
+function printSalesOrder(order, signatureDataUrl, co) {
+  const COMPANY = co || DEFAULT_COMPANY;
   const items = order.items || order.sales_order_items || [];
   let gross = 0;
   const MIN_ROWS = 8;
@@ -159,7 +154,7 @@ function printSalesOrder(order, signatureDataUrl) {
           <b>${esc(COMPANY.name)}</b> ${esc(COMPANY.reg)}<br>
           ${esc(COMPANY.address)}<br>
           Hotline: ${esc(COMPANY.hotline)}
-          <div class="branches">${COMPANY.branches.map(esc).join(" &nbsp;|&nbsp; ")}</div>
+          <div class="branches">${esc(COMPANY.branches_display || "")}</div>
         </div>
       </div>
       <div class="titlebar pad">
@@ -226,6 +221,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [branches, setBranches] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
+  const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -266,6 +262,18 @@ export default function OrdersPage() {
     fetch(`${API}/admin/users/list?company_id=${companyId}`).then(r => r.json()).then(d => {
       const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
       setSalesmen([...new Set(names)].sort());
+    });
+    fetch(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
+      if (d.settings && d.settings.company_name) {
+        setCompanyInfo({
+          name: d.settings.company_name || DEFAULT_COMPANY.name,
+          reg: d.settings.registration_no || DEFAULT_COMPANY.reg,
+          address: d.settings.address || DEFAULT_COMPANY.address,
+          hotline: d.settings.hotline || DEFAULT_COMPANY.hotline,
+          bank: d.settings.bank_account || DEFAULT_COMPANY.bank,
+          branches_display: d.settings.branches_display || DEFAULT_COMPANY.branches_display,
+        });
+      }
     });
   }, [companyId]);
 
@@ -687,11 +695,11 @@ export default function OrdersPage() {
         <SignaturePad
           onDone={async (sig) => {
             if (sig && signOrder.id) await saveSignature(signOrder.id, sig);
-            printSalesOrder(signOrder, sig);
+            printSalesOrder(signOrder, sig, companyInfo);
             setSignOrder(null);
             loadOrders();
           }}
-          onCancel={() => { printSalesOrder(signOrder, null); setSignOrder(null); }}
+          onCancel={() => { printSalesOrder(signOrder, null, companyInfo); setSignOrder(null); }}
         />
       )}
     </div>
