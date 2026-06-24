@@ -14,7 +14,7 @@ const getToken = async () => {
 };
 const authHeaders = async () => ({ "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` });
 
-const TABS = ["Stock Levels", "Movements", "Adjust", "Transfer"];
+const TABS = ["Stock Levels", "Movements", "Adjust", "Transfer", "Import"];
 
 export default function InventoryPage() {
   const { user } = useAuth();
@@ -265,7 +265,7 @@ export default function InventoryPage() {
                 {filteredProducts.map(p => (
                   <button key={p.id} onClick={() => { setAdjProduct(p.id); setProductSearch(`${p.code} ${p.name}`); }}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50 ${adjProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
-                    <span className="font-mono text-violet-700">{p.code}</span> {p.name}
+                    <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""} {p.color ? <span className="text-gray-400">· {p.color}</span> : ""}
                   </button>
                 ))}
               </div>
@@ -318,7 +318,7 @@ export default function InventoryPage() {
                 {filteredProducts.map(p => (
                   <button key={p.id} onClick={() => { setTxProduct(p.id); setProductSearch(`${p.code} ${p.name}`); }}
                     className={`w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50 ${txProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
-                    <span className="font-mono text-violet-700">{p.code}</span> {p.name}
+                    <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""} {p.color ? <span className="text-gray-400">· {p.color}</span> : ""}
                   </button>
                 ))}
               </div>
@@ -337,6 +337,52 @@ export default function InventoryPage() {
             </div>
           </div>
           <button onClick={doTransfer} className="px-6 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Transfer</button>
+        </div>
+      )}
+
+      {/* Import */}
+      {tab === 4 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-lg">
+          <p className="text-sm text-gray-500">Upload an Excel/CSV with columns: <b>code</b> (product code), <b>quantity</b>. Products are matched by code against your master list.</p>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Destination Warehouse</label>
+            <select id="import-wh" className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="">Select location</option>
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
+            </select>
+          </div>
+          <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:border-violet-300 transition-colors">
+            <input type="file" accept=".xlsx,.xls,.csv" id="import-file" className="hidden" onChange={async e => {
+              const file = e.target.files?.[0];
+              const wh = document.getElementById("import-wh").value;
+              if (!file || !wh) { alert("Select a warehouse and file"); return; }
+              const token = await getToken();
+              const fd = new FormData();
+              fd.append("file", file);
+              fd.append("warehouse_id", wh);
+              const btn = document.getElementById("import-btn");
+              if (btn) btn.textContent = "Importing…";
+              const res = await fetch(`${API}/inventory/import`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+              const d = await res.json();
+              if (btn) btn.textContent = "Upload & Import";
+              if (!res.ok) { alert(d.error || "Failed"); return; }
+              let msg = `Imported: ${d.imported}, Skipped: ${d.skipped}`;
+              if (d.errors?.length) msg += "\n\nErrors:\n" + d.errors.join("\n");
+              alert(msg);
+              loadInventory();
+              e.target.value = "";
+            }} />
+            <label htmlFor="import-file" className="cursor-pointer">
+              <div className="text-3xl mb-2">📁</div>
+              <p id="import-btn" className="text-sm font-medium text-gray-700">Upload & Import</p>
+              <p className="text-xs text-gray-400 mt-1">XLSX, XLS, or CSV</p>
+            </label>
+          </div>
+          <div className="text-xs text-gray-400">
+            <p className="font-medium mb-1">Expected columns:</p>
+            <code className="bg-gray-50 px-2 py-1 rounded text-xs">code, quantity</code>
+            <p className="mt-1">Product code must match your master product list. Unmatched codes will be skipped and reported.</p>
+          </div>
         </div>
       )}
     </div>

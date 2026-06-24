@@ -40,7 +40,7 @@ export default function CompanySettingsPage() {
 
   // Warehouses
   const [whouses, setWhouses] = useState([]);
-  const [whForm, setWhForm] = useState({ name: "", type: "warehouse", address: "" });
+  const [whForm, setWhForm] = useState({ name: "", type: "warehouse", address: "", pic: "", contact: "" });
   const [whEditId, setWhEditId] = useState(null);
 
   // Categories
@@ -229,18 +229,30 @@ export default function CompanySettingsPage() {
       {/* Tab: Warehouses */}
       {tab === 2 && (
         <div className="space-y-4 max-w-lg">
-          <div className="flex gap-2">
-            <input value={whForm.name} onChange={e => setWhForm(f => ({ ...f, name: e.target.value }))} placeholder="Location name"
-              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-            <select value={whForm.type} onChange={e => setWhForm(f => ({ ...f, type: e.target.value }))}
-              className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-              <option value="warehouse">Warehouse</option>
-              <option value="showroom">Showroom</option>
-            </select>
-            <button onClick={saveWarehouse} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">
-              {whEditId ? "Update" : "Add"}
-            </button>
-            {whEditId && <button onClick={() => { setWhEditId(null); setWhForm({ name: "", type: "warehouse", address: "" }); }} className="px-3 py-2 rounded-xl text-sm bg-gray-100 text-gray-600">Cancel</button>}
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input value={whForm.name} onChange={e => setWhForm(f => ({ ...f, name: e.target.value }))} placeholder="Location name"
+                className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              <select value={whForm.type} onChange={e => setWhForm(f => ({ ...f, type: e.target.value }))}
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+                <option value="warehouse">Warehouse</option>
+                <option value="showroom">Showroom</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input value={whForm.pic} onChange={e => setWhForm(f => ({ ...f, pic: e.target.value }))} placeholder="Person In Charge"
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              <input value={whForm.contact} onChange={e => setWhForm(f => ({ ...f, contact: e.target.value }))} placeholder="Contact number"
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+            </div>
+            <input value={whForm.address} onChange={e => setWhForm(f => ({ ...f, address: e.target.value }))} placeholder="Address"
+              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+            <div className="flex gap-2">
+              <button onClick={saveWarehouse} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">
+                {whEditId ? "Update" : "Add"}
+              </button>
+              {whEditId && <button onClick={() => { setWhEditId(null); setWhForm({ name: "", type: "warehouse", address: "", pic: "", contact: "" }); }} className="px-3 py-2 rounded-xl text-sm bg-gray-100 text-gray-600">Cancel</button>}
+            </div>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
             {whouses.length === 0 && <p className="p-4 text-sm text-gray-400 text-center">No locations yet</p>}
@@ -249,10 +261,11 @@ export default function CompanySettingsPage() {
                 <div>
                   <span className="text-sm font-medium text-gray-900">{w.name}</span>
                   <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${w.type === "showroom" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-600"}`}>{w.type}</span>
-                  {w.address && <p className="text-xs text-gray-400 mt-0.5">{w.address}</p>}
+                  {w.pic && <p className="text-xs text-gray-500 mt-0.5">PIC: {w.pic} {w.contact ? `· ${w.contact}` : ""}</p>}
+                  {w.address && <p className="text-xs text-gray-400">{w.address}</p>}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "" }); }}
+                  <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "", pic: w.pic || "", contact: w.contact || "" }); }}
                     className="text-xs text-violet-600 hover:underline">Edit</button>
                   <button onClick={() => deleteWarehouse(w.id)}
                     className="text-xs text-red-500 hover:underline">Delete</button>
