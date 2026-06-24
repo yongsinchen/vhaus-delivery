@@ -36,7 +36,7 @@ const EMPTY_ORDER = {
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "",
   branch_id: "", salesman_names: "",
-  country: "", gst_rate: 0,
+  country: "", gst_rate: 0, gst_waived: false,
 };
 
 // Company details for the printed sales order
@@ -329,7 +329,7 @@ export default function OrdersPage() {
       remark: o.remark || "",
       discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "",
       branch_id: o.branch_id || "", salesman_names: o.salesman_name || "",
-      country: o.country || "", gst_rate: o.gst_rate ?? 0,
+      country: o.country || "", gst_rate: o.gst_rate ?? 0, gst_waived: o.gst_waived || false,
       items: (o.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
@@ -378,7 +378,7 @@ export default function OrdersPage() {
   const subtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
   const discountVal = Number(form.discount) || 0;
   const depositVal = Number(form.deposit) || 0;
-  const gstRate = Number(form.gst_rate) || 0;
+  const gstRate = form.gst_waived ? 0 : (Number(form.gst_rate) || 0);
   const afterDiscount = subtotal - discountVal;
   const gstAmount = Math.round(afterDiscount * gstRate) / 100;
   const totalAfterDiscount = afterDiscount + gstAmount;
@@ -401,7 +401,7 @@ export default function OrdersPage() {
       branch_id: form.branch_id || null,
       salesman_names: form.salesman_names || null,
       country: form.country || null,
-      gst_rate: gstRate, gst_amount: gstAmount,
+      gst_rate: gstRate, gst_amount: gstAmount, gst_waived: form.gst_waived || false,
       items: form.items.map(it => ({
         ...it,
         quantity: Number(it.quantity) || 1,
@@ -648,10 +648,16 @@ export default function OrdersPage() {
                   <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
                   <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
                 </div>
-                {gstRate > 0 && (
+                {(Number(form.gst_rate) || 0) > 0 && (
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">GST ({gstRate}%)</span>
-                    <span className="text-gray-700">{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                    <span className="text-gray-500 flex items-center gap-2">
+                      {form.gst_waived ? <s>GST ({form.gst_rate}%)</s> : `GST (${gstRate}%)`}
+                      <button type="button" onClick={() => setForm(f => ({ ...f, gst_waived: !f.gst_waived }))}
+                        className={`text-xs px-2 py-0.5 rounded-full ${form.gst_waived ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500 hover:bg-amber-50"}`}>
+                        {form.gst_waived ? "Waived" : "Waive"}
+                      </button>
+                    </span>
+                    <span className={`text-gray-700 ${form.gst_waived ? "line-through text-gray-400" : ""}`}>{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between text-sm">
