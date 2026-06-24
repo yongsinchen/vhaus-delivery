@@ -97,8 +97,9 @@ export default function PurchaseOrdersPage() {
     const address = companySettings.base_address || companySettings.address || "";
     const lines = items.map((it, i) => {
       const name = [it.product_code, it.product_name].filter(Boolean).join(" ");
-      const details = [it.color, it.size].filter(Boolean).map(d => `- ${d}`).join("\n");
-      return `${i + 1}. ${name} x${it.quantity || 1} unit${details ? "\n" + details : ""}`;
+      const details = [it.color, it.size, it.custom_dimensions].filter(Boolean).map(d => `- ${d}`);
+      if (it.notes) details.push(`- Note: ${it.notes}`);
+      return `${i + 1}. ${name} x${it.quantity || 1} unit${details.length ? "\n" + details.join("\n") : ""}`;
     });
     const msg = [
       companyName,
@@ -247,6 +248,9 @@ export default function PurchaseOrdersPage() {
                           <td className="px-3 py-2">
                             <p className="font-medium text-gray-900">{it.product_name || it.product_code}</p>
                             <p className="text-xs text-gray-400">{[it.size, it.color].filter(Boolean).join(" · ")}</p>
+                            {it.custom_dimensions && <p className="text-xs text-amber-600">Custom: {it.custom_dimensions}</p>}
+                            {it.notes && <p className="text-xs text-gray-400">{it.notes}</p>}
+                            {it.attachment_url && <a href={it.attachment_url} target="_blank" rel="noreferrer" className="text-xs text-violet-600 underline">View drawing</a>}
                           </td>
                           <td className="px-3 py-2 text-center">{it.quantity}</td>
                           <td className="px-3 py-2 text-center">
