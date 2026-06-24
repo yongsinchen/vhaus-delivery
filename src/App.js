@@ -342,6 +342,7 @@ export default function App() {
   const [doDateFrom, setDoDateFrom] = useState("");
   const [doDateTo, setDoDateTo] = useState("");
   const [viewPhoto, setViewPhoto] = useState(null);
+  const [doDetail, setDoDetail] = useState(null);
   const [convertDate, setConvertDate] = useState("");
   const [serviceDateModal, setServiceDateModal] = useState(null); // { id, soNumber, svNumber, customerName }
   const [serviceDateValue, setServiceDateValue] = useState("");
@@ -971,24 +972,19 @@ export default function App() {
                     <thead><tr className="bg-gray-50 border-b border-gray-100">{["Supplier","DO #","DO Date","Reference","Review Status","Photo","Logged",""].map(h=><th key={h} className="px-4 py-3 text-left font-semibold text-gray-500 whitespace-nowrap">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-gray-50">
                       {supplierDOs.map((d,i)=>(
-                        <tr key={i} className="hover:bg-gray-50">
+                        <tr key={i} className="hover:bg-gray-50 cursor-pointer" onClick={async ()=>{
+                          const res = await fetch(`${BACKEND}/supplier-deliveries/${d.id}`);
+                          const data = await res.json();
+                          setDoDetail({ ...d, ...data.delivery, items: data.items || [] });
+                        }}>
                           <td className="px-4 py-3 font-semibold text-gray-800">{d.supplier||"-"}</td>
                           <td className="px-4 py-3 text-violet-700 font-medium">{d.do_number||"-"}</td>
                           <td className="px-4 py-3 text-gray-600">{d.do_date?fmt(d.do_date):"-"}</td>
                           <td className="px-4 py-3 text-gray-500">{d.supplier_reference||"-"}</td>
                           <td className="px-4 py-3">{doReview.filter(r=>r.do_number===d.do_number).length>0?<Badge color="amber">{doReview.filter(r=>r.do_number===d.do_number).length} pending</Badge>:<Badge color="emerald">All matched</Badge>}</td>
-                          <td className="px-4 py-3">{d.photo_url?<button onClick={()=>setViewPhoto(d.photo_url)} className="text-violet-600 hover:underline font-medium">View 📷</button>:<span className="text-gray-300">-</span>}</td>
+                          <td className="px-4 py-3" onClick={e=>e.stopPropagation()}>{d.photo_url?<button onClick={()=>setViewPhoto(d.photo_url)} className="text-violet-600 hover:underline font-medium">View 📷</button>:<span className="text-gray-300">-</span>}</td>
                           <td className="px-4 py-3 text-gray-400">{d.created_at?new Date(d.created_at).toLocaleDateString("en-MY"):"-"}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <button onClick={async ()=>{
-                              const newDO = prompt("DO Number:", d.do_number||"");
-                              if (newDO === null) return;
-                              const newSupplier = prompt("Supplier:", d.supplier||"");
-                              if (newSupplier === null) return;
-                              const token = (await supabase.auth.getSession()).data?.session?.access_token;
-                              await fetch(`${BACKEND}/supplier-deliveries/${d.id}`, { method:"PUT", headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`}, body:JSON.stringify({do_number:newDO,supplier:newSupplier,do_date:d.do_date,supplier_reference:d.supplier_reference}) });
-                              loadSupplierDOs();
-                            }} className="text-xs text-violet-600 hover:underline mr-2">Edit</button>
+                          <td className="px-4 py-3 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                             <button onClick={async ()=>{
                               if (!window.confirm(`Delete DO #${d.do_number||""}? This also removes related review items.`)) return;
                               const token = (await supabase.auth.getSession()).data?.session?.access_token;
@@ -1002,6 +998,96 @@ export default function App() {
                   </table>
                 </div>
               </div>}
+          </div>
+        )}
+
+        {/* DO Detail Drawer */}
+        {doDetail && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setDoDetail(null)} />
+            <div className="relative w-full max-w-2xl bg-white h-full overflow-y-auto shadow-2xl">
+              <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">DO #{doDetail.do_number || "-"}</h2>
+                  <p className="text-sm text-gray-500">{doDetail.supplier} · {doDetail.do_date ? fmt(doDetail.do_date) : "-"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {doDetail.photo_url && <button onClick={() => setViewPhoto(doDetail.photo_url)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100">📷 Photo</button>}
+                  <button onClick={() => setDoDetail(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+                </div>
+              </div>
+              <div className="px-6 py-4 space-y-4">
+                {/* Editable header */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">DO Number</label>
+                    <input value={doDetail.do_number || ""} onChange={e => setDoDetail(prev => ({ ...prev, do_number: e.target.value }))}
+                      onBlur={async () => { const token = (await supabase.auth.getSession()).data?.session?.access_token; await fetch(`${BACKEND}/supplier-deliveries/${doDetail.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ do_number: doDetail.do_number, supplier: doDetail.supplier, do_date: doDetail.do_date, supplier_reference: doDetail.supplier_reference }) }); loadSupplierDOs(); }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Supplier</label>
+                    <input value={doDetail.supplier || ""} onChange={e => setDoDetail(prev => ({ ...prev, supplier: e.target.value }))}
+                      onBlur={async () => { const token = (await supabase.auth.getSession()).data?.session?.access_token; await fetch(`${BACKEND}/supplier-deliveries/${doDetail.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ do_number: doDetail.do_number, supplier: doDetail.supplier, do_date: doDetail.do_date, supplier_reference: doDetail.supplier_reference }) }); loadSupplierDOs(); }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Reference</label>
+                    <input value={doDetail.supplier_reference || ""} onChange={e => setDoDetail(prev => ({ ...prev, supplier_reference: e.target.value }))}
+                      onBlur={async () => { const token = (await supabase.auth.getSession()).data?.session?.access_token; await fetch(`${BACKEND}/supplier-deliveries/${doDetail.id}`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ do_number: doDetail.do_number, supplier: doDetail.supplier, do_date: doDetail.do_date, supplier_reference: doDetail.supplier_reference }) }); loadSupplierDOs(); }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  </div>
+                </div>
+
+                {/* Items list */}
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-2">Items ({doDetail.items?.length || 0})</h3>
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 uppercase">
+                          <th className="px-3 py-2 text-left">Item</th>
+                          <th className="px-3 py-2 text-left">SO #</th>
+                          <th className="px-3 py-2 text-center">Qty</th>
+                          <th className="px-3 py-2 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(doDetail.items || []).length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-400 text-xs">No items recorded</td></tr>}
+                        {(doDetail.items || []).map((item, idx) => {
+                          const reasonStyle = {
+                            showroom: "bg-blue-100 text-blue-700",
+                            no_so: "bg-gray-100 text-gray-600",
+                            so_not_found: "bg-amber-100 text-amber-700",
+                            item_not_matched: "bg-yellow-100 text-yellow-700",
+                            duplicate_arrival: "bg-violet-100 text-violet-700",
+                          };
+                          const isResolved = item.status === "Resolved" || item.status === "Dismissed";
+                          return (
+                            <tr key={item.id || idx} className={`border-t border-gray-50 ${isResolved ? "opacity-50" : ""}`}>
+                              <td className="px-3 py-2">
+                                <p className="font-medium text-gray-900">{item.item_name || "-"}</p>
+                                {item.item_code && <p className="text-xs text-violet-600 font-mono">{item.item_code}</p>}
+                              </td>
+                              <td className="px-3 py-2">
+                                {item.so_number ? <span className="text-xs font-mono text-violet-700">{item.so_number}</span> : <span className="text-xs text-gray-400">—</span>}
+                              </td>
+                              <td className="px-3 py-2 text-center text-xs">{item.quantity || "-"}</td>
+                              <td className="px-3 py-2 text-center">
+                                {isResolved
+                                  ? <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">{item.status}</span>
+                                  : <span className={`px-2 py-0.5 rounded-full text-xs ${reasonStyle[item.reason] || "bg-gray-100 text-gray-600"}`}>{item.reason?.replace(/_/g, " ") || "pending"}</span>
+                                }
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
