@@ -243,6 +243,11 @@ export default function OrdersPage() {
   // Product picker
   const [pickerOpen, setPickerOpen] = useState(false);
   const [signOrder, setSignOrder] = useState(null);
+
+  // Submit PO
+  const [poModal, setPOModal] = useState(null); // { order, groups: { supplierId: { name, items } } }
+  const [poSubmitting, setPOSubmitting] = useState(false);
+  const [poSelectedItems, setPOSelectedItems] = useState(new Set());
   const [products, setProducts] = useState([]);
   const [productSearch, setProductSearch] = useState("");
   const [productLoading, setProductLoading] = useState(false);
@@ -431,6 +436,42 @@ export default function OrdersPage() {
     });
   };
 
+  const openSubmitPO = async (order) => {
+    const items = order.sales_order_items || order.items || [];
+    const productIds = items.map(i => i.product_id).filter(Boolean);
+    if (productIds.length === 0) { alert("No products linked to items"); return; }
+    const res = await fetch(`${API}/products?company_id=${companyId}&limit=999`);
+    const d = await res.json();
+    const prodMap = new Map((d.products || []).map(p => [p.id, p]));
+    const groups = {};
+    const noSupplier = [];
+    for (const item of items) {
+      const prod = prodMap.get(item.product_id);
+      const sid = prod?.suppliers?.id;
+      if (!sid) { noSupplier.push(item); continue; }
+      if (!groups[sid]) groups[sid] = { name: prod.suppliers.name, items: [] };
+      groups[sid].items.push(item);
+    }
+    const allIds = new Set(items.filter(i => prodMap.get(i.product_id)?.suppliers?.id).map(i => i.id));
+    setPOSelectedItems(allIds);
+    setPOModal({ order, groups, noSupplier });
+  };
+
+  const confirmSubmitPO = async () => {
+    if (!poModal || poSelectedItems.size === 0) return;
+    setPOSubmitting(true);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/sales-orders/${poModal.order.id}/submit-po`, {
+      method: "POST", headers,
+      body: JSON.stringify({ item_ids: [...poSelectedItems] }),
+    });
+    const d = await res.json();
+    setPOSubmitting(false);
+    if (!res.ok) { alert(d.error || "Failed to create POs"); return; }
+    setPOModal(null);
+    alert(`Created ${d.created.length} PO(s): ${d.created.map(p => p.po_number).join(", ")}${d.skipped_no_supplier ? ` (${d.skipped_no_supplier} items skipped — no supplier)` : ""}`);
+  };
+
   const changeStatus = async (o, status) => {
     const headers = await authHeaders();
     await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
@@ -507,8 +548,12 @@ export default function OrdersPage() {
               <h2 className="text-lg font-bold text-gray-900">{editId ? "Edit Order" : "New Order"}</h2>
               <div className="flex items-center gap-2">
                 {editId && (
-                  <button onClick={() => setSignOrder({ ...editingOrder, ...form, items: form.items })}
-                    className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                  <>
+                    <button onClick={() => openSubmitPO(editingOrder)}
+                      className="text-sm px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">📋 Submit PO</button>
+                    <button onClick={() => setSignOrder({ ...editingOrder, ...form, items: form.items })}
+                      className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                  </>
                 )}
                 <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
@@ -778,6 +823,55 @@ export default function OrdersPage() {
           }}
           onCancel={() => { printSalesOrder(signOrder, null, companyInfo); setSignOrder(null); }}
         />
+      )}
+
+      {/* Submit PO Modal */}
+      {poModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => !poSubmitting && setPOModal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-900">Submit Purchase Orders</h3>
+              <p className="text-xs text-gray-500 mt-1">Items grouped by supplier. Deselect items you don't want to order yet.</p>
+            </div>
+            <div className="overflow-y-auto p-5 space-y-4">
+              {Object.entries(poModal.groups).map(([sid, group]) => (
+                <div key={sid} className="border border-gray-200 rounded-xl p-3">
+                  <p className="text-sm font-bold text-violet-700 mb-2">{group.name}</p>
+                  {group.items.map(it => (
+                    <label key={it.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer">
+                      <input type="checkbox" checked={poSelectedItems.has(it.id)}
+                        onChange={e => {
+                          const next = new Set(poSelectedItems);
+                          e.target.checked ? next.add(it.id) : next.delete(it.id);
+                          setPOSelectedItems(next);
+                        }}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
+                      <span className="flex-1">{it.product_name || it.product_code} {it.size ? `· ${it.size}` : ""} {it.color ? `· ${it.color}` : ""}</span>
+                      <span className="text-xs text-gray-400">x{it.quantity || 1}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+              {poModal.noSupplier?.length > 0 && (
+                <div className="border border-amber-200 rounded-xl p-3 bg-amber-50">
+                  <p className="text-sm font-bold text-amber-700 mb-1">No Supplier (skipped)</p>
+                  {poModal.noSupplier.map((it, i) => (
+                    <p key={i} className="text-xs text-amber-600">{it.product_name || it.product_code}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-100 flex gap-2">
+              <button onClick={() => setPOModal(null)} disabled={poSubmitting}
+                className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
+              <button onClick={confirmSubmitPO} disabled={poSubmitting || poSelectedItems.size === 0}
+                className="flex-1 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                {poSubmitting ? "Creating…" : `Create ${Object.keys(poModal.groups).length} PO(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
