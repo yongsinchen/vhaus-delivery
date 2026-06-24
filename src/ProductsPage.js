@@ -14,7 +14,7 @@ const authHeaders = async () => ({
 });
 
 const EMPTY_PRODUCT = {
-  code: "", name: "", description: "", color: "", supplier_id: "", category_id: "",
+  code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
   unit_cost: "", unit_price: "", is_standard: true, reorder_point: 0,
 };
 
@@ -113,7 +113,7 @@ export default function ProductsPage() {
   const openEdit = (p) => {
     setEditId(p.id);
     setForm({
-      code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "",
+      code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "", size: p.size || "",
       supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
       is_standard: p.is_standard, reorder_point: p.reorder_point ?? 0,
@@ -128,7 +128,7 @@ export default function ProductsPage() {
     setFormError("");
     const headers = await authHeaders();
     const body = {
-      code: form.code, name: form.name, description: form.description || null, color: form.color || null,
+      code: form.code, name: form.name, description: form.description || null, color: form.color || null, size: form.size || null,
       supplier_id: form.supplier_id || null, category_id: form.category_id || null,
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
@@ -310,7 +310,7 @@ export default function ProductsPage() {
     // Save row edits first
     const rowEdits = importRows.map(r => ({
       id: r.id, product_code: r.product_code, product_name: r.product_name,
-      color: r.color, supplier_name: r.supplier_name,
+      color: r.color, size: r.size, supplier_name: r.supplier_name,
       unit_cost: r.unit_cost, unit_price: r.unit_price, action: r._action,
     }));
     await fetch(`${API}/catalogue-import/${importJobId}/rows`, {
@@ -400,6 +400,7 @@ export default function ProductsPage() {
               </th>
               <th className="px-4 py-3">Code</th>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3 hidden lg:table-cell">Size</th>
               <th className="px-4 py-3 hidden md:table-cell">Supplier</th>
               <th className="px-4 py-3 hidden md:table-cell">Category</th>
               <th className="px-4 py-3 hidden lg:table-cell">Color</th>
@@ -410,8 +411,8 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && products.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {loading && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && products.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
             {!loading && products.map(p => (
               <tr key={p.id} className={`border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer ${selectedIds.has(p.id) ? "bg-violet-50/50" : ""}`} onClick={() => openEdit(p)}>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
@@ -419,6 +420,7 @@ export default function ProductsPage() {
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-violet-700 font-medium">{p.code}</td>
                 <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
+                <td className="px-4 py-3 text-gray-500 text-xs hidden lg:table-cell">{p.size || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.suppliers?.name || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.product_categories?.name || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">{p.color || "—"}</td>
@@ -468,6 +470,7 @@ export default function ProductsPage() {
               <Field label="Name *" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Product name" />
               <Field label="Description" value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} placeholder="Optional" />
               <Field label="Color" value={form.color} onChange={v => setForm(f => ({ ...f, color: v }))} placeholder="e.g. Walnut Brown" />
+              <Field label="Size / Variant" value={form.size} onChange={v => setForm(f => ({ ...f, size: v }))} placeholder="e.g. W1200 x D600 x H750mm (2 Drawers)" />
 
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Supplier</label>
@@ -649,6 +652,7 @@ export default function ProductsPage() {
                           <th className="px-3 py-2">Action</th>
                           <th className="px-3 py-2">Code</th>
                           <th className="px-3 py-2">Name</th>
+                          <th className="px-3 py-2">Size / Variant</th>
                           <th className="px-3 py-2">Color</th>
                           <th className="px-3 py-2">Supplier</th>
                           <th className="px-3 py-2 text-right">Cost</th>
@@ -673,6 +677,10 @@ export default function ProductsPage() {
                             <td className="px-3 py-2">
                               <input value={r.product_name || ""} onChange={e => updateImportRow(i, "product_name", e.target.value)}
                                 className="w-full min-w-[140px] px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input value={r.size || ""} onChange={e => updateImportRow(i, "size", e.target.value)}
+                                className="w-36 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
                             </td>
                             <td className="px-3 py-2">
                               <input value={r.color || ""} onChange={e => updateImportRow(i, "color", e.target.value)}
