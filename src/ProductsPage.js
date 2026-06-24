@@ -62,6 +62,13 @@ export default function ProductsPage() {
   const [newSupplier, setNewSupplier] = useState("");
   const [newCategory, setNewCategory] = useState("");
 
+  // Supplier management drawer
+  const [supplierMgrOpen, setSupplierMgrOpen] = useState(false);
+  const [supplierForms, setSupplierForms] = useState({}); // id -> { name, code, contact, cost_divisor }
+  const [supplierSavingId, setSupplierSavingId] = useState(null);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierDivisor, setNewSupplierDivisor] = useState("");
+
   const loadSuppliers = useCallback(async () => {
     if (!companyId) return;
     const res = await fetch(`${API}/suppliers?company_id=${companyId}`);
@@ -156,6 +163,52 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const res = await fetch(`${API}/categories`, { method: "POST", headers, body: JSON.stringify({ name: newCategory.trim() }) });
     if (res.ok) { setNewCategory(""); loadCategories(); }
+  };
+
+  // ── Manage suppliers ──────────────────────────────────────────────
+  const openSupplierMgr = () => {
+    const forms = {};
+    suppliers.forEach(s => {
+      forms[s.id] = {
+        name: s.name || "", code: s.code || "", contact: s.contact || "",
+        cost_divisor: s.cost_divisor != null ? String(s.cost_divisor) : "",
+      };
+    });
+    setSupplierForms(forms);
+    setNewSupplierName("");
+    setNewSupplierDivisor("");
+    setSupplierMgrOpen(true);
+  };
+
+  const setSupplierField = (id, field, value) => {
+    setSupplierForms(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+
+  const saveSupplier = async (id) => {
+    const f = supplierForms[id];
+    if (!f || !f.name.trim()) return;
+    setSupplierSavingId(id);
+    const headers = await authHeaders();
+    const body = {
+      name: f.name.trim(), code: f.code.trim() || null, contact: f.contact.trim() || null,
+      cost_divisor: f.cost_divisor === "" ? null : Number(f.cost_divisor),
+    };
+    const res = await fetch(`${API}/suppliers/${id}`, { method: "PUT", headers, body: JSON.stringify(body) });
+    setSupplierSavingId(null);
+    if (res.ok) { await loadSuppliers(); loadProducts(page); }
+  };
+
+  const createSupplierFromMgr = async () => {
+    if (!newSupplierName.trim()) return;
+    const headers = await authHeaders();
+    const body = { name: newSupplierName.trim(), cost_divisor: newSupplierDivisor === "" ? null : Number(newSupplierDivisor) };
+    const res = await fetch(`${API}/suppliers`, { method: "POST", headers, body: JSON.stringify(body) });
+    if (res.ok) {
+      const { supplier } = await res.json();
+      setNewSupplierName(""); setNewSupplierDivisor("");
+      await loadSuppliers();
+      if (supplier) setSupplierForms(prev => ({ ...prev, [supplier.id]: { name: supplier.name || "", code: supplier.code || "", contact: supplier.contact || "", cost_divisor: supplier.cost_divisor != null ? String(supplier.cost_divisor) : "" } }));
+    }
   };
 
   // ── Catalogue import ──────────────────────────────────────────────
@@ -291,6 +344,9 @@ export default function ProductsPage() {
           <p className="text-sm text-gray-500">{total} product{total !== 1 ? "s" : ""}</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={openSupplierMgr} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
+            🏷 Suppliers
+          </button>
           <button onClick={openImport} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
             📄 Import Catalogue
           </button>
@@ -652,6 +708,82 @@ export default function ProductsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Supplier Management Drawer ─────────────────────────────── */}
+      {supplierMgrOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSupplierMgrOpen(false)} />
+          <div className="relative w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+              <h2 className="text-lg font-bold text-gray-900">Suppliers</h2>
+              <button onClick={() => setSupplierMgrOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <p className="text-xs text-gray-500">
+                Set a cost rule per supplier. A divisor calculates each product's cost from its catalogue price
+                (e.g. 3 → price 2000 becomes cost 666.67). Leave it blank to use the cost printed in the catalogue.
+              </p>
+
+              {/* Add new supplier */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2 bg-gray-50/50">
+                <label className="block text-xs font-medium text-gray-500">Add supplier</label>
+                <div className="flex gap-2">
+                  <input value={newSupplierName} onChange={e => setNewSupplierName(e.target.value)} placeholder="Supplier name"
+                    className="flex-1 px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
+                  <input value={newSupplierDivisor} onChange={e => setNewSupplierDivisor(e.target.value)} placeholder="÷ N" type="number" min="0" step="any"
+                    className="w-20 px-3 py-2 text-sm rounded-xl border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
+                  <button onClick={createSupplierFromMgr} disabled={!newSupplierName.trim()}
+                    className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Existing suppliers */}
+              {suppliers.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No suppliers yet</p>}
+              {suppliers.map(s => {
+                const f = supplierForms[s.id] || { name: s.name || "", code: "", contact: "", cost_divisor: "" };
+                return (
+                  <div key={s.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                        <input value={f.name} onChange={e => setSupplierField(s.id, "name", e.target.value)}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Code</label>
+                        <input value={f.code} onChange={e => setSupplierField(s.id, "code", e.target.value)}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Cost divisor</label>
+                        <input value={f.cost_divisor} onChange={e => setSupplierField(s.id, "cost_divisor", e.target.value)}
+                          type="number" min="0" step="any" placeholder="blank = catalogue cost"
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Contact</label>
+                        <input value={f.contact} onChange={e => setSupplierField(s.id, "contact", e.target.value)}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">
+                        {Number(f.cost_divisor) > 0 ? `Cost = Price ÷ ${Number(f.cost_divisor)}` : "Uses catalogue cost"}
+                      </span>
+                      <button onClick={() => saveSupplier(s.id)} disabled={supplierSavingId === s.id || !f.name.trim()}
+                        className="px-4 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        {supplierSavingId === s.id ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
