@@ -81,11 +81,10 @@ export default function CompanySettingsPage() {
   const saveBranch = async () => {
     if (!branchForm.name.trim()) return;
     const headers = await authHeaders();
-    if (branchEditId) {
-      await fetch(`${API}/branches/${branchEditId}`, { method: "PUT", headers, body: JSON.stringify(branchForm) });
-    } else {
-      await fetch(`${API}/branches`, { method: "POST", headers, body: JSON.stringify(branchForm) });
-    }
+    const url = branchEditId ? `${API}/branches/${branchEditId}` : `${API}/branches`;
+    const method = branchEditId ? "PUT" : "POST";
+    const res = await fetch(url, { method, headers, body: JSON.stringify(branchForm) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to save branch"); return; }
     setBranchForm({ name: "" }); setBranchEditId(null); loadBranches();
   };
 
