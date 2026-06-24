@@ -386,6 +386,7 @@ export default function OrdersPage() {
 
   const saveOrder = async () => {
     if (!form.customer_name.trim()) { setFormError("Customer name is required"); return; }
+    if (!form.country) { setFormError("Please select a country"); return; }
     if (form.items.length === 0) { setFormError("Add at least one product"); return; }
     setSaving(true);
     setFormError("");
