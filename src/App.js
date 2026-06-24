@@ -226,9 +226,15 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
 }
 
 // ── DO Review Item ────────────────────────────────────────────────
-function DoReviewItem({ item, orders, onResolve, onDismiss, onView }) {
+function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, onAddToStock, companyId }) {
   const [linkSo, setLinkSo] = useState(item.so_number || "");
   const [selectedItemIdx, setSelectedItemIdx] = useState("");
+  const [stockMode, setStockMode] = useState(false);
+  const [stockProduct, setStockProduct] = useState("");
+  const [stockWarehouse, setStockWarehouse] = useState("");
+  const [stockQty, setStockQty] = useState(item.quantity || "1");
+  const [productSearch, setProductSearch] = useState(item.item_name || "");
+  const [productResults, setProductResults] = useState([]);
   const reasonMap = {
     showroom: { icon: "🏷️", label: "Showroom Stock", color: "bg-blue-50 border-blue-200 text-blue-700" },
     no_so: { icon: "❓", label: "No SO Found", color: "bg-gray-50 border-gray-200 text-gray-600" },
@@ -275,9 +281,12 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView }) {
         )}
         <div className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400 mb-0.5">Logged</p><p className="text-sm font-semibold">{item.created_at ? new Date(item.created_at).toLocaleDateString("en-MY") : "-"}</p></div>
       </div>
-      {needsMatch && (
+      {needsMatch && !stockMode && (
         <div className="px-4 pb-4 border-t pt-3 space-y-3">
-          <p className="text-xs font-bold text-gray-600">Match to Sales Order</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-gray-600">Match to Sales Order</p>
+            <button onClick={() => setStockMode(true)} className="text-xs px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">📦 Add to Stock Instead</button>
+          </div>
           <div className="flex gap-2">
             <input value={linkSo} onChange={e => { setLinkSo(e.target.value); setSelectedItemIdx(""); }} placeholder="SO number" className="flex-1 border rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
             {matchedOrder && <span className="text-xs text-emerald-600 font-medium self-center">✓ {matchedOrder.customerName}</span>}
@@ -292,6 +301,56 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView }) {
           {matchedOrder && <div className="flex justify-end"><button onClick={handleResolve} disabled={matchedItems.length>0&&selectedItemIdx===""} className="text-sm bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 disabled:opacity-40">Set Arrival & Resolve</button></div>}
         </div>
       )}
+      {(needsMatch && stockMode) || item.reason === "showroom" ? (
+        <div className="px-4 pb-4 border-t pt-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-gray-600">📦 Add to Inventory Stock</p>
+            {needsMatch && <button onClick={() => setStockMode(false)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">← Match SO Instead</button>}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Product (from master list)</label>
+            <input value={productSearch} onChange={async e => {
+              setProductSearch(e.target.value);
+              if (e.target.value.length >= 2) {
+                const res = await fetch(`${BACKEND}/products?company_id=${companyId}&search=${encodeURIComponent(e.target.value)}&limit=10&is_active=true`);
+                const d = await res.json();
+                setProductResults(d.products || []);
+              } else setProductResults([]);
+            }} placeholder="Search product code or name…" className="w-full border rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+            {productResults.length > 0 && (
+              <div className="border border-gray-200 rounded-xl mt-1 max-h-32 overflow-y-auto">
+                {productResults.map(p => (
+                  <button key={p.id} onClick={() => { setStockProduct(p.id); setProductSearch(`${p.code} ${p.name} ${p.size||""}`); setProductResults([]); }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50 ${stockProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
+                    <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!stockProduct && productSearch.length >= 2 && productResults.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">⚠️ Product not found in master list. Please add it in Products first.</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Warehouse</label>
+              <select value={stockWarehouse} onChange={e => setStockWarehouse(e.target.value)} className="w-full border rounded-xl px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300">
+                <option value="">Select location</option>
+                {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Quantity</label>
+              <input type="number" value={stockQty} onChange={e => setStockQty(e.target.value)} className="w-full border rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => { if (!stockProduct || !stockWarehouse) { alert("Select product and warehouse"); return; } onAddToStock(item.id, stockProduct, stockWarehouse, stockQty); }}
+              disabled={!stockProduct || !stockWarehouse}
+              className="text-sm bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 disabled:opacity-40">Add to Stock & Resolve</button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -337,6 +396,7 @@ export default function App() {
   const [services, setServices] = useState([]);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [supplierDOs, setSupplierDOs] = useState([]);
+  const [doWarehouses, setDoWarehouses] = useState([]);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [doDateFrom, setDoDateFrom] = useState("");
@@ -425,6 +485,7 @@ export default function App() {
     loadServicePending();
     loadDoReview();
     loadServices();
+    if (companyId) fetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
   }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
@@ -463,6 +524,13 @@ export default function App() {
     const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ so_number: soNumber, item_code: itemCode }) }).then(r=>r.json());
     if (res.success) { loadDoReview(); loadOrders(); } else alert("Failed: "+(res.error||"Unknown"));
   };
+  const addToStockDoReview = async (id, product_id, warehouse_id, quantity) => {
+    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+    const res = await fetch(`${BACKEND}/do-review/${id}/add-to-stock`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ product_id, warehouse_id, quantity: Number(quantity) || 1 }) });
+    const d = await res.json();
+    if (d.success) { loadDoReview(); alert("Added to stock & resolved"); } else alert(d.error || "Failed");
+  };
+
   const dismissDoReview = async id => {
     if (!window.confirm("Dismiss this item?")) return;
     const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method:"PATCH" }).then(r=>r.json());
@@ -1124,7 +1192,7 @@ export default function App() {
             {doReviewLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
             : doReview.length === 0
             ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">✅</div><p className="font-medium">All DO items matched</p></div>
-            : <div className="space-y-3">{doReview.map(item => <DoReviewItem key={item.id} item={item} orders={orders} onResolve={resolveDoReview} onDismiss={dismissDoReview} onView={handleView} />)}</div>}
+            : <div className="space-y-3">{doReview.map(item => <DoReviewItem key={item.id} item={item} orders={orders} onResolve={resolveDoReview} onDismiss={dismissDoReview} onView={handleView} warehouses={doWarehouses} onAddToStock={addToStockDoReview} companyId={companyId} />)}</div>}
           </div>
         )}
       </div>
