@@ -39,6 +39,7 @@ export default function PurchaseOrdersPage() {
 
   const [detailOrder, setDetailOrder] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [companySettings, setCompanySettings] = useState({});
 
   const loadOrders = useCallback(async () => {
     if (!companyId) return;
@@ -59,6 +60,7 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     if (!companyId) return;
     fetch(`${API}/suppliers?company_id=${companyId}`).then(r => r.json()).then(d => setSuppliers(d.suppliers || []));
+    fetch(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => setCompanySettings(d.settings || {}));
   }, [companyId]);
 
   const openDetail = async (po) => {
@@ -87,6 +89,36 @@ export default function PurchaseOrdersPage() {
       setDetailOrder(d.order);
     }
     loadOrders();
+  };
+
+  const copyPOMessage = (po) => {
+    const items = po.purchase_order_items || [];
+    const companyName = companySettings.company_name || "V Haus";
+    const address = companySettings.base_address || companySettings.address || "";
+    const lines = items.map((it, i) => {
+      const name = [it.product_code, it.product_name].filter(Boolean).join(" ");
+      const details = [it.color, it.size].filter(Boolean).map(d => `- ${d}`).join("\n");
+      return `${i + 1}. ${name} x${it.quantity || 1} unit${details ? "\n" + details : ""}`;
+    });
+    const msg = [
+      companyName,
+      `PO: ${po.po_number}`,
+      `Delivery Date: ${po.expected_date || "ASAP"}`,
+      "",
+      ...lines,
+      "",
+      "",
+      `${companyName}`,
+      address,
+    ].join("\n");
+    navigator.clipboard.writeText(msg).then(() => alert("PO message copied to clipboard!")).catch(() => {
+      const ta = document.createElement("textarea"); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+      alert("PO message copied to clipboard!");
+    });
+  };
+
+  const markAsSent = async (id) => {
+    await changeStatus(id, "sent");
   };
 
   const deletePO = async (id) => {
@@ -155,6 +187,12 @@ export default function PurchaseOrdersPage() {
                 <p className="text-sm text-gray-500">{detailOrder.suppliers?.name}</p>
               </div>
               <div className="flex items-center gap-2">
+                <button onClick={() => copyPOMessage(detailOrder)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100">📋 Copy Message</button>
+                {detailOrder.status === "draft" && (
+                  <button onClick={() => markAsSent(detailOrder.id)}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">✓ Mark as Sent</button>
+                )}
                 {detailOrder.status === "draft" && (
                   <button onClick={() => deletePO(detailOrder.id)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>
                 )}
@@ -170,8 +208,26 @@ export default function PurchaseOrdersPage() {
                 </select>
               </div>
 
-              {detailOrder.expected_date && <p className="text-sm text-gray-500">Expected: {detailOrder.expected_date}</p>}
-              {detailOrder.notes && <p className="text-sm text-gray-500">Notes: {detailOrder.notes}</p>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Expected Delivery</label>
+                  <input type="date" value={detailOrder.expected_date || ""} onChange={async e => {
+                    const val = e.target.value;
+                    setDetailOrder(prev => ({ ...prev, expected_date: val }));
+                    const headers = await authHeaders();
+                    await fetch(`${API}/purchase-orders/${detailOrder.id}`, { method: "PUT", headers, body: JSON.stringify({ expected_date: val, notes: detailOrder.notes }) });
+                  }} className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
+                  <input value={detailOrder.notes || ""} onChange={e => setDetailOrder(prev => ({ ...prev, notes: e.target.value }))}
+                    onBlur={async () => {
+                      const headers = await authHeaders();
+                      await fetch(`${API}/purchase-orders/${detailOrder.id}`, { method: "PUT", headers, body: JSON.stringify({ expected_date: detailOrder.expected_date, notes: detailOrder.notes }) });
+                    }}
+                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" placeholder="e.g. Urgent order" />
+                </div>
+              </div>
 
               <div className="border border-gray-100 rounded-xl overflow-hidden">
                 <table className="w-full text-sm">
