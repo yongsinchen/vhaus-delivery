@@ -564,18 +564,19 @@ export default function OrdersPage() {
                     const updated = { ...f, customer_address: v };
                     if (v.length > 3) {
                       const lower = v.toLowerCase();
-                      const digits = v.replace(/\D/g, "");
                       let detected = null;
-                      // Postal code detection: SG = 6 digits (01xxxx-82xxxx), MY = 5 digits (0xxxx-9xxxx)
-                      const postals = digits.match(/\d{5,6}/g) || [];
+                      // Extract standalone postal codes (bounded by spaces/punctuation)
+                      const postalMatches = v.match(/(?:^|\s)(\d{5,6})(?:\s|$|,)/g) || [];
+                      const postals = postalMatches.map(m => m.trim().replace(",", ""));
                       for (const p of postals) {
-                        if (p.length === 6 && Number(p) >= 10000 && Number(p) <= 829999) { detected = "SG"; break; }
                         if (p.length === 5) { detected = "MY"; break; }
+                        if (p.length === 6 && Number(p) >= 10000 && Number(p) <= 829999) { detected = "SG"; break; }
                       }
-                      // Name/keyword fallback
+                      // Keyword fallback — use word boundaries to avoid matching "SG" inside "SG ARA"
                       if (!detected) {
-                        if (lower.includes("singapore")) detected = "SG";
-                        else if (lower.includes("malaysia") || lower.includes("penang") || lower.includes("pulau pinang") || lower.includes("kuala lumpur") || lower.includes("johor") || lower.includes("selangor") || lower.includes("kedah") || lower.includes("perak") || lower.includes("melaka")) detected = "MY";
+                        const MY_KEYWORDS = ["malaysia", "penang", "pulau pinang", "kuala lumpur", "johor", "selangor", "kedah", "perak", "melaka", "negeri sembilan", "pahang", "terengganu", "kelantan", "sabah", "sarawak", "bukit mertajam", "butterworth", "bayan lepas", "georgetown", "simpang ampat", "nibong tebal", "sungai petani", "kulim", "ipoh"];
+                        if (MY_KEYWORDS.some(k => lower.includes(k))) detected = "MY";
+                        else if (/\bsingapore\b/i.test(v)) detected = "SG";
                       }
                       if (detected) {
                         const match = countries.find(c => c.code === detected);
