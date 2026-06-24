@@ -28,9 +28,99 @@ const EMPTY_ORDER = {
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
 };
 
+const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+function printSalesOrder(order, companyName) {
+  const items = order.items || order.sales_order_items || [];
+  let subtotal = 0;
+  const rows = items.map((it, i) => {
+    const qty = Number(it.quantity) || 1;
+    const price = Number(it.unit_price) || 0;
+    const line = qty * price;
+    subtotal += line;
+    const spec = [it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
+    return `<tr>
+      <td style="text-align:center">${i + 1}</td>
+      <td>${it.product_code || ""}</td>
+      <td>${it.product_name || ""}${spec ? `<div class="spec">${spec}</div>` : ""}${it.notes ? `<div class="spec">${it.notes}</div>` : ""}</td>
+      <td style="text-align:center">${qty}</td>
+      <td style="text-align:right">${money(price)}</td>
+      <td style="text-align:right">${money(line)}</td>
+    </tr>`;
+  }).join("");
+
+  const total = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : subtotal;
+  const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString() : new Date().toLocaleDateString();
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${order.order_number || "Sales Order"}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1f2937; margin: 0; padding: 32px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #7C3AED; padding-bottom: 16px; margin-bottom: 20px; }
+    .company { font-size: 22px; font-weight: 800; color: #7C3AED; }
+    .doc-title { font-size: 20px; font-weight: 700; text-align: right; }
+    .doc-meta { font-size: 12px; color: #6b7280; text-align: right; margin-top: 4px; }
+    .grid { display: flex; gap: 32px; margin-bottom: 20px; font-size: 13px; }
+    .grid h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; }
+    .grid p { margin: 2px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f3f0ff; color: #5b21b6; text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .spec { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .totals { margin-top: 16px; display: flex; justify-content: flex-end; }
+    .totals table { width: 280px; }
+    .totals td { border: none; padding: 4px 10px; }
+    .grand { font-weight: 800; font-size: 16px; color: #7C3AED; border-top: 2px solid #7C3AED !important; }
+    .notes { margin-top: 20px; font-size: 12px; color: #4b5563; }
+    .sign { margin-top: 48px; display: flex; justify-content: space-between; font-size: 12px; }
+    .sign div { width: 40%; border-top: 1px solid #9ca3af; padding-top: 6px; text-align: center; color: #6b7280; }
+    @media print { body { padding: 0; } }
+  </style></head><body>
+    <div class="head">
+      <div><div class="company">${companyName || "V Haus Living"}</div></div>
+      <div><div class="doc-title">SALES ORDER</div>
+        <div class="doc-meta">No: <strong>${order.order_number || "-"}</strong><br>Date: ${dateStr}<br>Status: ${order.status || ""}</div></div>
+    </div>
+    <div class="grid">
+      <div style="flex:1">
+        <h4>Customer</h4>
+        <p><strong>${order.customer_name || ""}</strong></p>
+        ${order.customer_contact ? `<p>${order.customer_contact}</p>` : ""}
+        ${order.customer_address ? `<p>${order.customer_address}</p>` : ""}
+      </div>
+      <div style="flex:1">
+        <h4>Delivery</h4>
+        <p>Type: ${order.delivery_type || "-"}</p>
+        <p>Date: ${order.delivery_date || "-"}</p>
+        ${order.delivery_time_slot ? `<p>Time: ${order.delivery_time_slot}</p>` : ""}
+        ${order.salesman_name ? `<p>Salesman: ${order.salesman_name}</p>` : ""}
+      </div>
+    </div>
+    <table>
+      <thead><tr><th style="width:30px;text-align:center">#</th><th style="width:90px">Code</th><th>Description</th><th style="width:50px;text-align:center">Qty</th><th style="width:90px;text-align:right">Unit Price</th><th style="width:90px;text-align:right">Amount</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="totals"><table>
+      <tr><td>Subtotal</td><td style="text-align:right">${money(total)}</td></tr>
+      <tr><td class="grand">Total (RM)</td><td class="grand" style="text-align:right">${money(total)}</td></tr>
+    </table></div>
+    ${order.notes ? `<div class="notes"><strong>Notes:</strong> ${order.notes}</div>` : ""}
+    ${order.remark ? `<div class="notes"><strong>Remark:</strong> ${order.remark}</div>` : ""}
+    <div class="sign"><div>Customer Signature</div><div>Authorized Signature</div></div>
+  </body></html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups to print."); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 300);
+}
+
 export default function OrdersPage() {
   const { user } = useAuth();
   const companyId = user?.company_id;
+  const companyName = user?.companies?.name || "V Haus Living";
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,6 +130,7 @@ export default function OrdersPage() {
   // Order builder drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
   const [form, setForm] = useState(EMPTY_ORDER);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -86,6 +177,7 @@ export default function OrdersPage() {
   // ── Order CRUD ────────────────────────────────────────────────────
   const openNew = () => {
     setEditId(null);
+    setEditingOrder(null);
     setForm(EMPTY_ORDER);
     setFormError("");
     setDrawerOpen(true);
@@ -93,6 +185,7 @@ export default function OrdersPage() {
 
   const openEdit = (o) => {
     setEditId(o.id);
+    setEditingOrder(o);
     setForm({
       customer_name: o.customer_name || "",
       customer_contact: o.customer_contact || "",
@@ -231,10 +324,14 @@ export default function OrdersPage() {
               </div>
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {Number(o.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
-                  className="mt-1 text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
-                  {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <div className="flex items-center gap-1 mt-1 justify-end">
+                  <button onClick={e => { e.stopPropagation(); printSalesOrder(o, companyName); }}
+                    className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                  <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
+                    className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
+                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -248,7 +345,13 @@ export default function OrdersPage() {
           <div className="relative w-full max-w-2xl bg-white h-full overflow-y-auto shadow-2xl">
             <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-lg font-bold text-gray-900">{editId ? "Edit Order" : "New Order"}</h2>
-              <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <div className="flex items-center gap-2">
+                {editId && (
+                  <button onClick={() => printSalesOrder({ ...editingOrder, ...form, items: form.items }, companyName)}
+                    className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                )}
+                <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
             </div>
             <div className="px-6 py-4 space-y-4">
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
