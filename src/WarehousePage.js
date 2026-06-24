@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import jsQR from "jsqr";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -34,6 +35,10 @@ export default function WarehousePage() {
   // Scan
   const [scanCode, setScanCode] = useState("");
   const [scanResult, setScanResult] = useState(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const scanIntervalRef = useRef(null);
 
   const loadDOs = useCallback(async () => {
     if (!companyId) return;
@@ -131,6 +136,50 @@ export default function WarehousePage() {
     if (!res.ok) { setScanResult({ error: d.error || "Not found" }); return; }
     setScanResult(d.label);
   };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setCameraActive(true);
+        scanIntervalRef.current = setInterval(() => {
+          if (!videoRef.current || !canvasRef.current) return;
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          if (code && code.data) {
+            setScanCode(code.data);
+            stopCamera();
+            // Auto-lookup
+            fetch(`${API}/package-labels/validate/${encodeURIComponent(code.data)}`)
+              .then(r => r.json()).then(d => setScanResult(d.label || { error: d.error || "Not found" }));
+          }
+        }, 300);
+      }
+    } catch (err) {
+      alert("Camera access denied. Please allow camera permission.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (scanIntervalRef.current) { clearInterval(scanIntervalRef.current); scanIntervalRef.current = null; }
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+  };
+
+  // Cleanup camera on unmount or tab switch
+  useEffect(() => { if (tab !== 2) stopCamera(); return () => stopCamera(); }, [tab]); // eslint-disable-line
 
   const confirmAllReceived = async () => {
     if (!selectedDO) return;
@@ -249,11 +298,27 @@ export default function WarehousePage() {
         <div className="max-w-lg space-y-4">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
             <h3 className="text-sm font-bold text-gray-700">Scan QR Code</h3>
+
+            {/* Camera viewfinder */}
+            {cameraActive && (
+              <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3" }}>
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+                <canvas ref={canvasRef} className="hidden" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-48 h-48 border-2 border-violet-400 rounded-2xl" />
+                </div>
+                <button onClick={stopCamera} className="absolute top-2 right-2 bg-black/60 text-white px-3 py-1 rounded-lg text-xs">✕ Close</button>
+              </div>
+            )}
+
             <div className="flex gap-2">
-              <input value={scanCode} onChange={e => setScanCode(e.target.value)} placeholder="Enter or scan QR code (e.g. PKG-260625-A3F2)"
+              <input value={scanCode} onChange={e => setScanCode(e.target.value)} placeholder="QR code (e.g. PKG-260625-A3F2)"
                 className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm font-mono focus:outline-none focus:border-violet-400"
                 onKeyDown={e => e.key === "Enter" && doScan()} />
-              <button onClick={doScan} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Scan</button>
+              {!cameraActive && (
+                <button onClick={startCamera} className="px-3 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">📷</button>
+              )}
+              <button onClick={doScan} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Search</button>
             </div>
           </div>
 
