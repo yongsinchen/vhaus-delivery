@@ -17,7 +17,7 @@ const authHeaders = async () => ({
   Authorization: `Bearer ${await getToken()}`,
 });
 
-const TABS = ["Company Info", "Branches", "Operations", "Categories", "Options Library"];
+const TABS = ["Company Info", "Branches", "Warehouses", "Operations", "Categories", "Options Library"];
 
 export default function CompanySettingsPage() {
   const { user } = useAuth();
@@ -37,6 +37,11 @@ export default function CompanySettingsPage() {
   const [branches, setBranches] = useState([]);
   const [branchForm, setBranchForm] = useState({ name: "" });
   const [branchEditId, setBranchEditId] = useState(null);
+
+  // Warehouses
+  const [whouses, setWhouses] = useState([]);
+  const [whForm, setWhForm] = useState({ name: "", type: "warehouse", address: "" });
+  const [whEditId, setWhEditId] = useState(null);
 
   // Categories
   const [categories, setCategories] = useState([]);
@@ -72,6 +77,13 @@ export default function CompanySettingsPage() {
     setCategories(d.categories || []);
   }, [companyId]);
 
+  const loadWarehouses = useCallback(async () => {
+    if (!companyId) return;
+    const res = await fetch(`${API}/warehouses?company_id=${companyId}`);
+    const d = await res.json();
+    setWhouses(d.warehouses || []);
+  }, [companyId]);
+
   const loadSpecOptions = useCallback(async () => {
     if (!companyId) return;
     const [allRes, pendRes] = await Promise.all([
@@ -84,7 +96,24 @@ export default function CompanySettingsPage() {
     setPendingOptions(pendD.options || []);
   }, [companyId]);
 
-  useEffect(() => { loadSettings(); loadBranches(); loadCategories(); loadSpecOptions(); }, [loadSettings, loadBranches, loadCategories, loadSpecOptions]);
+  useEffect(() => { loadSettings(); loadBranches(); loadWarehouses(); loadCategories(); loadSpecOptions(); }, [loadSettings, loadBranches, loadWarehouses, loadCategories, loadSpecOptions]);
+
+  const saveWarehouse = async () => {
+    if (!whForm.name.trim()) return;
+    const headers = await authHeaders();
+    const url = whEditId ? `${API}/warehouses/${whEditId}` : `${API}/warehouses`;
+    const method = whEditId ? "PUT" : "POST";
+    const res = await fetch(url, { method, headers, body: JSON.stringify(whForm) });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed"); return; }
+    setWhForm({ name: "", type: "warehouse", address: "" }); setWhEditId(null); loadWarehouses();
+  };
+
+  const deleteWarehouse = async (id) => {
+    if (!window.confirm("Deactivate this location?")) return;
+    const headers = await authHeaders();
+    await fetch(`${API}/warehouses/${id}`, { method: "DELETE", headers });
+    loadWarehouses();
+  };
 
   // ── Settings save ─────────────────────────────────────────────────
   const saveSettings = async () => {
@@ -197,8 +226,45 @@ export default function CompanySettingsPage() {
         </div>
       )}
 
-      {/* Tab: Operations */}
+      {/* Tab: Warehouses */}
       {tab === 2 && (
+        <div className="space-y-4 max-w-lg">
+          <div className="flex gap-2">
+            <input value={whForm.name} onChange={e => setWhForm(f => ({ ...f, name: e.target.value }))} placeholder="Location name"
+              className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+            <select value={whForm.type} onChange={e => setWhForm(f => ({ ...f, type: e.target.value }))}
+              className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="warehouse">Warehouse</option>
+              <option value="showroom">Showroom</option>
+            </select>
+            <button onClick={saveWarehouse} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">
+              {whEditId ? "Update" : "Add"}
+            </button>
+            {whEditId && <button onClick={() => { setWhEditId(null); setWhForm({ name: "", type: "warehouse", address: "" }); }} className="px-3 py-2 rounded-xl text-sm bg-gray-100 text-gray-600">Cancel</button>}
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
+            {whouses.length === 0 && <p className="p-4 text-sm text-gray-400 text-center">No locations yet</p>}
+            {whouses.map(w => (
+              <div key={w.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <span className="text-sm font-medium text-gray-900">{w.name}</span>
+                  <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${w.type === "showroom" ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-600"}`}>{w.type}</span>
+                  {w.address && <p className="text-xs text-gray-400 mt-0.5">{w.address}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "" }); }}
+                    className="text-xs text-violet-600 hover:underline">Edit</button>
+                  <button onClick={() => deleteWarehouse(w.id)}
+                    className="text-xs text-red-500 hover:underline">Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Operations */}
+      {tab === 3 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-2xl">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -259,7 +325,7 @@ export default function CompanySettingsPage() {
       )}
 
       {/* Tab: Categories */}
-      {tab === 3 && (
+      {tab === 4 && (
         <div className="space-y-4 max-w-2xl">
           <div className="flex gap-2">
             <input value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} placeholder="Category name"
@@ -325,7 +391,7 @@ export default function CompanySettingsPage() {
       )}
 
       {/* Tab: Options Library */}
-      {tab === 4 && (
+      {tab === 5 && (
         <div className="space-y-4 max-w-2xl">
           {/* Pending review */}
           {pendingOptions.length > 0 && (
