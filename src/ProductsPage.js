@@ -317,6 +317,22 @@ export default function ProductsPage() {
     }));
   };
 
+  // Split a review row whose colour holds several options (e.g. "Natural / Walnut")
+  // into one row per colour. Saves current edits first so nothing is lost.
+  const splitReviewRow = async (row) => {
+    const headers = await authHeaders();
+    const rowEdits = importRows.map(r => ({
+      id: r.id, product_code: r.product_code, product_name: r.product_name,
+      color: r.color, size: r.size, supplier_name: r.supplier_name,
+      unit_cost: r.unit_cost, unit_price: r.unit_price, action: r._action,
+    }));
+    await fetch(`${API}/catalogue-import/${importJobId}/rows`, { method: "PUT", headers, body: JSON.stringify({ rows: rowEdits }) });
+    const res = await fetch(`${API}/catalogue-import/${importJobId}/rows/${row.id}/split`, { method: "POST", headers });
+    const d = await res.json();
+    if (res.ok && d.rows) setImportRows(d.rows.map(r => ({ ...r, _action: r.action })));
+    else if (!res.ok) setImportError(d.error || "Failed to split row");
+  };
+
   // Reload suppliers after upload so a newly-saved costing rule is reflected
   useEffect(() => { if (importStep === "review") loadSuppliers(); }, [importStep, loadSuppliers]);
 
@@ -709,6 +725,13 @@ export default function ProductsPage() {
                             <td className="px-3 py-2">
                               <input value={r.color || ""} onChange={e => updateImportRow(i, "color", e.target.value)}
                                 className="w-24 px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                              {r.id && (r.color || "").includes("/") && (
+                                <button type="button" onClick={() => splitReviewRow(r)}
+                                  title="Split this colour into separate product variants"
+                                  className="block mt-1 text-[11px] text-violet-600 hover:text-violet-800">
+                                  Split colours →
+                                </button>
+                              )}
                             </td>
                             <td className="px-3 py-2">
                               <input value={r.supplier_name || ""} onChange={e => updateImportRow(i, "supplier_name", e.target.value)}
