@@ -150,6 +150,23 @@ export default function ProductsPage() {
     loadProducts(page);
   };
 
+  const deleteProduct = async (p) => {
+    const label = `${p.code}${p.size ? " · " + p.size : ""}`;
+    if (!window.confirm(`Delete "${p.name}" (${label})? This cannot be undone.`)) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/products/${p.id}`, { method: "DELETE", headers });
+    if (res.ok) { setSelectedIds(prev => { const n = new Set(prev); n.delete(p.id); return n; }); loadProducts(page); }
+    else { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to delete"); }
+  };
+
+  const bulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.size} selected product(s)? This cannot be undone.`)) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/products/bulk-delete`, { method: "POST", headers, body: JSON.stringify({ ids: Array.from(selectedIds) }) });
+    if (res.ok) { clearSelection(); loadProducts(page); }
+    else { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to delete"); }
+  };
+
   // ── Add supplier/category inline ──────────────────────────────────
   const addSupplier = async () => {
     if (!newSupplier.trim()) return;
@@ -382,6 +399,9 @@ export default function ProductsPage() {
             <button onClick={openBulk} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
               Bulk Edit
             </button>
+            <button onClick={bulkDelete} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
+              Delete
+            </button>
             <button onClick={clearSelection} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
               Clear
             </button>
@@ -431,10 +451,14 @@ export default function ProductsPage() {
                     {p.is_active ? "Active" : "Inactive"}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={e => { e.stopPropagation(); toggleActive(p); }}
-                    className="text-xs text-gray-400 hover:text-violet-600 transition-colors">
+                    className="text-xs text-gray-400 hover:text-violet-600 transition-colors mr-3">
                     {p.is_active ? "Deactivate" : "Activate"}
+                  </button>
+                  <button onClick={e => { e.stopPropagation(); deleteProduct(p); }}
+                    className="text-xs text-gray-400 hover:text-red-600 transition-colors">
+                    Delete
                   </button>
                 </td>
               </tr>
