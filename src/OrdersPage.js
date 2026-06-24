@@ -559,7 +559,17 @@ export default function OrdersPage() {
                 <Field label="Contact" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Address" value={form.customer_address} onChange={v => setForm(f => ({ ...f, customer_address: v }))} />
+                <Field label="Address" value={form.customer_address} onChange={v => {
+                  setForm(f => {
+                    const updated = { ...f, customer_address: v };
+                    if (!f.country && v.length > 5) {
+                      const lower = v.toLowerCase();
+                      const match = countries.find(c => lower.includes(c.name.toLowerCase()) || lower.includes(c.code.toLowerCase()));
+                      if (match) { updated.country = match.code; updated.gst_rate = match.gst_rate ?? 0; }
+                    }
+                    return updated;
+                  });
+                }} />
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Country</label>
                   <select value={form.country} onChange={e => {
