@@ -13,7 +13,7 @@ const authHeaders = async () => ({
   Authorization: `Bearer ${await getToken()}`,
 });
 
-const EMPTY = { name: "", code: "", contact: "", cost_divisor: "" };
+const EMPTY = { name: "", code: "", contact: "", cost_divisor: "", color_mode: "combined" };
 
 export default function SuppliersPage() {
   const { user } = useAuth();
@@ -47,6 +47,7 @@ export default function SuppliersPage() {
     setForm({
       name: s.name || "", code: s.code || "", contact: s.contact || "",
       cost_divisor: s.cost_divisor != null ? String(s.cost_divisor) : "",
+      color_mode: s.color_mode === "split" ? "split" : "combined",
     });
     setError("");
     setDrawerOpen(true);
@@ -59,6 +60,7 @@ export default function SuppliersPage() {
     const body = {
       name: form.name.trim(), code: form.code.trim() || null, contact: form.contact.trim() || null,
       cost_divisor: form.cost_divisor === "" ? null : Number(form.cost_divisor),
+      color_mode: form.color_mode,
     };
     const url = editId ? `${API}/suppliers/${editId}` : `${API}/suppliers`;
     const method = editId ? "PUT" : "POST";
@@ -126,6 +128,7 @@ export default function SuppliersPage() {
                   {s.cost_divisor > 0
                     ? <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700">Price ÷ {s.cost_divisor}</span>
                     : <span className="text-gray-400 text-xs">Catalogue cost</span>}
+                  {s.color_mode === "split" && <span className="inline-block ml-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Split colours</span>}
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={() => openEdit(s)} className="text-xs text-gray-500 hover:text-violet-600 transition-colors mr-3">Edit</button>
@@ -164,6 +167,20 @@ export default function SuppliersPage() {
                   {Number(form.cost_divisor) > 0
                     ? `Catalogue import will set cost = price ÷ ${Number(form.cost_divisor)} (e.g. 2000 → ${(2000 / Number(form.cost_divisor)).toFixed(2)}).`
                     : "Leave blank to use the cost printed in the catalogue."}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Colour in catalogue</label>
+                <select value={form.color_mode} onChange={e => setForm(f => ({ ...f, color_mode: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                  <option value="combined">One combined colour (e.g. "Natural/White" = one two-tone product)</option>
+                  <option value="split">Separate variants (e.g. "Natural / Walnut" = two colour options)</option>
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  {form.color_mode === "split"
+                    ? "On import, a slash-separated colour is split into one product per colour."
+                    : "On import, a slash-separated colour is kept as a single colour value."}
                 </p>
               </div>
 
