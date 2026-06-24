@@ -580,7 +580,7 @@ export default function ProductsPage() {
       {importOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => !uploading && !committing && setImportOpen(false)} />
-          <div className="relative w-full max-w-2xl bg-white h-full overflow-y-auto shadow-2xl">
+          <div className="relative w-full max-w-5xl bg-white h-full overflow-y-auto shadow-2xl">
             <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-lg font-bold text-gray-900">Import Catalogue</h2>
               <button onClick={() => !uploading && !committing && setImportOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
