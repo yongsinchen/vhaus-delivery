@@ -511,24 +511,25 @@ export default function OrdersPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Sales Assistant(s)</label>
-                  <div className="flex flex-wrap gap-1 mb-1">
-                    {form.salesman_names.split("/").map(s => s.trim()).filter(Boolean).map((s, i) => (
+                  <div className="flex flex-wrap gap-1 mb-1 min-h-[24px]">
+                    {(form.salesman_names || "").split("/").map(s => s.trim()).filter(Boolean).map((s, i) => (
                       <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full text-xs">
                         {s}
-                        <button onClick={() => {
+                        <button type="button" onClick={() => {
                           const names = form.salesman_names.split("/").map(n => n.trim()).filter(Boolean).filter((_, j) => j !== i);
                           setForm(f => ({ ...f, salesman_names: names.join(" / ") }));
                         }} className="text-violet-400 hover:text-violet-700">×</button>
                       </span>
                     ))}
+                    {!(form.salesman_names || "").trim() && <span className="text-xs text-gray-400">No salesman selected</span>}
                   </div>
                   <select value="" onChange={e => {
-                    if (!e.target.value) return;
-                    const current = form.salesman_names.split("/").map(s => s.trim()).filter(Boolean);
-                    if (!current.includes(e.target.value)) {
-                      setForm(f => ({ ...f, salesman_names: [...current, e.target.value].join(" / ") }));
+                    const val = e.target.value;
+                    if (!val) return;
+                    const current = (form.salesman_names || "").split("/").map(s => s.trim()).filter(Boolean);
+                    if (!current.includes(val)) {
+                      setForm(f => ({ ...f, salesman_names: [...current, val].join(" / ") }));
                     }
-                    e.target.value = "";
                   }} className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-xs bg-white focus:outline-none focus:border-violet-400">
                     <option value="">+ Add salesman</option>
                     {salesmen.map(s => <option key={s} value={s}>{s}</option>)}
