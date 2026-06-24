@@ -4,8 +4,14 @@ import { useAuth, supabase } from "./AuthContext";
 const API = "https://vhaus-bot-production.up.railway.app";
 
 const getToken = async () => {
-  const { data } = await supabase.auth.getSession();
-  return data?.session?.access_token || "";
+  let { data } = await supabase.auth.getSession();
+  let session = data?.session;
+  // Refresh if the access token is expired or about to expire within 60s
+  if (session?.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    session = refreshed?.session || session;
+  }
+  return session?.access_token || "";
 };
 const authHeaders = async () => ({
   "Content-Type": "application/json",
