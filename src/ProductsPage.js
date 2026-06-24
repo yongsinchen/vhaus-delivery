@@ -62,12 +62,12 @@ export default function ProductsPage() {
   const [newSupplier, setNewSupplier] = useState("");
   const [newCategory, setNewCategory] = useState("");
 
-  // Supplier management drawer
-  const [supplierMgrOpen, setSupplierMgrOpen] = useState(false);
-  const [supplierForms, setSupplierForms] = useState({}); // id -> { name, code, contact, cost_divisor }
-  const [supplierSavingId, setSupplierSavingId] = useState(null);
-  const [newSupplierName, setNewSupplierName] = useState("");
-  const [newSupplierDivisor, setNewSupplierDivisor] = useState("");
+  // Bulk edit
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({ supplier: false, supplier_id: "", category: false, category_id: "", active: false, is_active: true, cost: false, cost_divisor: "3" });
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkError, setBulkError] = useState("");
 
   const loadSuppliers = useCallback(async () => {
     if (!companyId) return;
@@ -165,50 +165,46 @@ export default function ProductsPage() {
     if (res.ok) { setNewCategory(""); loadCategories(); }
   };
 
-  // ── Manage suppliers ──────────────────────────────────────────────
-  const openSupplierMgr = () => {
-    const forms = {};
-    suppliers.forEach(s => {
-      forms[s.id] = {
-        name: s.name || "", code: s.code || "", contact: s.contact || "",
-        cost_divisor: s.cost_divisor != null ? String(s.cost_divisor) : "",
-      };
+  // ── Bulk edit ─────────────────────────────────────────────────────
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+  const allOnPageSelected = products.length > 0 && products.every(p => selectedIds.has(p.id));
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      if (products.every(p => n.has(p.id))) products.forEach(p => n.delete(p.id));
+      else products.forEach(p => n.add(p.id));
+      return n;
     });
-    setSupplierForms(forms);
-    setNewSupplierName("");
-    setNewSupplierDivisor("");
-    setSupplierMgrOpen(true);
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const openBulk = () => {
+    setBulkForm({ supplier: false, supplier_id: "", category: false, category_id: "", active: false, is_active: true, cost: false, cost_divisor: "3" });
+    setBulkError("");
+    setBulkOpen(true);
   };
 
-  const setSupplierField = (id, field, value) => {
-    setSupplierForms(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-  };
-
-  const saveSupplier = async (id) => {
-    const f = supplierForms[id];
-    if (!f || !f.name.trim()) return;
-    setSupplierSavingId(id);
+  const applyBulk = async () => {
+    const set = {};
+    if (bulkForm.supplier) set.supplier_id = bulkForm.supplier_id || null;
+    if (bulkForm.category) set.category_id = bulkForm.category_id || null;
+    if (bulkForm.active) set.is_active = bulkForm.is_active;
+    const cost_divisor = bulkForm.cost ? bulkForm.cost_divisor : undefined;
+    if (Object.keys(set).length === 0 && !cost_divisor) { setBulkError("Pick at least one change to apply"); return; }
+    setBulkSaving(true); setBulkError("");
     const headers = await authHeaders();
-    const body = {
-      name: f.name.trim(), code: f.code.trim() || null, contact: f.contact.trim() || null,
-      cost_divisor: f.cost_divisor === "" ? null : Number(f.cost_divisor),
-    };
-    const res = await fetch(`${API}/suppliers/${id}`, { method: "PUT", headers, body: JSON.stringify(body) });
-    setSupplierSavingId(null);
-    if (res.ok) { await loadSuppliers(); loadProducts(page); }
-  };
-
-  const createSupplierFromMgr = async () => {
-    if (!newSupplierName.trim()) return;
-    const headers = await authHeaders();
-    const body = { name: newSupplierName.trim(), cost_divisor: newSupplierDivisor === "" ? null : Number(newSupplierDivisor) };
-    const res = await fetch(`${API}/suppliers`, { method: "POST", headers, body: JSON.stringify(body) });
-    if (res.ok) {
-      const { supplier } = await res.json();
-      setNewSupplierName(""); setNewSupplierDivisor("");
-      await loadSuppliers();
-      if (supplier) setSupplierForms(prev => ({ ...prev, [supplier.id]: { name: supplier.name || "", code: supplier.code || "", contact: supplier.contact || "", cost_divisor: supplier.cost_divisor != null ? String(supplier.cost_divisor) : "" } }));
-    }
+    const res = await fetch(`${API}/products/bulk`, {
+      method: "PATCH", headers,
+      body: JSON.stringify({ ids: Array.from(selectedIds), set, cost_divisor }),
+    });
+    const d = await res.json();
+    setBulkSaving(false);
+    if (!res.ok) { setBulkError(d.error || "Bulk update failed"); return; }
+    setBulkOpen(false);
+    clearSelection();
+    loadProducts(page);
   };
 
   // ── Catalogue import ──────────────────────────────────────────────
@@ -344,9 +340,6 @@ export default function ProductsPage() {
           <p className="text-sm text-gray-500">{total} product{total !== 1 ? "s" : ""}</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={openSupplierMgr} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
-            🏷 Suppliers
-          </button>
           <button onClick={openImport} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
             📄 Import Catalogue
           </button>
@@ -381,11 +374,30 @@ export default function ProductsPage() {
         </select>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-violet-50 border border-violet-200 rounded-xl px-4 py-2.5">
+          <span className="text-sm font-medium text-violet-800">{selectedIds.size} selected</span>
+          <div className="flex gap-2">
+            <button onClick={openBulk} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+              Bulk Edit
+            </button>
+            <button onClick={clearSelection} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto shadow-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-100 text-left text-xs text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 w-10">
+                <input type="checkbox" checked={allOnPageSelected} onChange={toggleSelectAll}
+                  title="Select all on this page" />
+              </th>
               <th className="px-4 py-3">Code</th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3 hidden md:table-cell">Supplier</th>
@@ -398,10 +410,13 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
-            {!loading && products.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {loading && <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+            {!loading && products.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
             {!loading && products.map(p => (
-              <tr key={p.id} className="border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer" onClick={() => openEdit(p)}>
+              <tr key={p.id} className={`border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer ${selectedIds.has(p.id) ? "bg-violet-50/50" : ""}`} onClick={() => openEdit(p)}>
+                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
+                </td>
                 <td className="px-4 py-3 font-mono text-xs text-violet-700 font-medium">{p.code}</td>
                 <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.suppliers?.name || "—"}</td>
@@ -713,77 +728,87 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* ── Supplier Management Drawer ─────────────────────────────── */}
-      {supplierMgrOpen && (
+      {/* ── Bulk Edit Drawer ───────────────────────────────────────── */}
+      {bulkOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setSupplierMgrOpen(false)} />
-          <div className="relative w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl">
+          <div className="absolute inset-0 bg-black/40" onClick={() => !bulkSaving && setBulkOpen(false)} />
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl">
             <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
-              <h2 className="text-lg font-bold text-gray-900">Suppliers</h2>
-              <button onClick={() => setSupplierMgrOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              <h2 className="text-lg font-bold text-gray-900">Bulk Edit</h2>
+              <button onClick={() => !bulkSaving && setBulkOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             <div className="px-6 py-4 space-y-4">
-              <p className="text-xs text-gray-500">
-                Set a cost rule per supplier. A divisor calculates each product's cost from its catalogue price
-                (e.g. 3 → price 2000 becomes cost 666.67). Leave it blank to use the cost printed in the catalogue.
-              </p>
+              {bulkError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{bulkError}</div>}
+              <p className="text-sm text-gray-500">Apply changes to <strong>{selectedIds.size}</strong> selected product{selectedIds.size !== 1 ? "s" : ""}. Only ticked fields are changed.</p>
 
-              {/* Add new supplier */}
-              <div className="rounded-xl border border-gray-200 p-3 space-y-2 bg-gray-50/50">
-                <label className="block text-xs font-medium text-gray-500">Add supplier</label>
-                <div className="flex gap-2">
-                  <input value={newSupplierName} onChange={e => setNewSupplierName(e.target.value)} placeholder="Supplier name"
-                    className="flex-1 px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
-                  <input value={newSupplierDivisor} onChange={e => setNewSupplierDivisor(e.target.value)} placeholder="÷ N" type="number" min="0" step="any"
-                    className="w-20 px-3 py-2 text-sm rounded-xl border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
-                  <button onClick={createSupplierFromMgr} disabled={!newSupplierName.trim()}
-                    className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                    Add
-                  </button>
-                </div>
+              {/* Supplier */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.supplier} onChange={e => setBulkForm(f => ({ ...f, supplier: e.target.checked }))} />
+                  Set supplier
+                </label>
+                {bulkForm.supplier && (
+                  <select value={bulkForm.supplier_id} onChange={e => setBulkForm(f => ({ ...f, supplier_id: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="">None</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                )}
               </div>
 
-              {/* Existing suppliers */}
-              {suppliers.length === 0 && <p className="text-sm text-gray-400 text-center py-6">No suppliers yet</p>}
-              {suppliers.map(s => {
-                const f = supplierForms[s.id] || { name: s.name || "", code: "", contact: "", cost_divisor: "" };
-                return (
-                  <div key={s.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="col-span-2">
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Name</label>
-                        <input value={f.name} onChange={e => setSupplierField(s.id, "name", e.target.value)}
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Code</label>
-                        <input value={f.code} onChange={e => setSupplierField(s.id, "code", e.target.value)}
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Cost divisor</label>
-                        <input value={f.cost_divisor} onChange={e => setSupplierField(s.id, "cost_divisor", e.target.value)}
-                          type="number" min="0" step="any" placeholder="blank = catalogue cost"
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Contact</label>
-                        <input value={f.contact} onChange={e => setSupplierField(s.id, "contact", e.target.value)}
-                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
-                      </div>
+              {/* Category */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.category} onChange={e => setBulkForm(f => ({ ...f, category: e.target.checked }))} />
+                  Set category
+                </label>
+                {bulkForm.category && (
+                  <select value={bulkForm.category_id} onChange={e => setBulkForm(f => ({ ...f, category_id: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="">None</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+              </div>
+
+              {/* Active status */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.active} onChange={e => setBulkForm(f => ({ ...f, active: e.target.checked }))} />
+                  Set status
+                </label>
+                {bulkForm.active && (
+                  <select value={bulkForm.is_active ? "true" : "false"} onChange={e => setBulkForm(f => ({ ...f, is_active: e.target.value === "true" }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                )}
+              </div>
+
+              {/* Recalculate cost from price */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <input type="checkbox" checked={bulkForm.cost} onChange={e => setBulkForm(f => ({ ...f, cost: e.target.checked }))} />
+                  Recalculate cost from price
+                </label>
+                {bulkForm.cost && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <span>Cost = Price ÷</span>
+                      <input type="number" min="0" step="any" value={bulkForm.cost_divisor}
+                        onChange={e => setBulkForm(f => ({ ...f, cost_divisor: e.target.value }))}
+                        className="w-20 px-2 py-1 text-sm rounded-lg border border-gray-200 text-right focus:outline-none focus:border-violet-400" />
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">
-                        {Number(f.cost_divisor) > 0 ? `Cost = Price ÷ ${Number(f.cost_divisor)}` : "Uses catalogue cost"}
-                      </span>
-                      <button onClick={() => saveSupplier(s.id)} disabled={supplierSavingId === s.id || !f.name.trim()}
-                        className="px-4 py-1.5 rounded-lg text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                        {supplierSavingId === s.id ? "Saving…" : "Save"}
-                      </button>
-                    </div>
+                    <p className="text-xs text-gray-400">Products without a price are left unchanged.</p>
                   </div>
-                );
-              })}
+                )}
+              </div>
+
+              <button onClick={applyBulk} disabled={bulkSaving}
+                className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                {bulkSaving ? "Applying…" : `Apply to ${selectedIds.size} product${selectedIds.size !== 1 ? "s" : ""}`}
+              </button>
             </div>
           </div>
         </div>

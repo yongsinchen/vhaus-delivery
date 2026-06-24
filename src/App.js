@@ -5,6 +5,7 @@ import UserManagement from "./UserManagement";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import ResetPasswordPage from "./ResetPassword";
 import ProductsPage from "./ProductsPage";
+import SuppliersPage from "./SuppliersPage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -61,6 +62,7 @@ const NAV = [
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
   { id: "products",   label: "Products",         icon: "📦", canKey: null, manageOnly: true },
+  { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
 ];
 
@@ -1169,6 +1171,9 @@ export default function App() {
 
     // PRODUCTS
     if (page === "products") return <ProductsPage />;
+
+    // SUPPLIERS
+    if (page === "suppliers") return <SuppliersPage />;
 
     return null;
   };
