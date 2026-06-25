@@ -207,12 +207,23 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
 }
 
 // -- Print CSS ---------------------------------------------------------
-const PRINT_STYLE = `@media print { body * { visibility: hidden; } .print-area, .print-area * { visibility: visible; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } thead { display: table-header-group; } tr { page-break-inside: avoid; } table { page-break-after: auto; } }`;
+const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .print-area, .print-area * { visibility: visible !important; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } .order-block { page-break-inside: avoid; } .no-print { display: none !important; } }`;
 
 // -- Team Print View ---------------------------------------------------
 function TeamPrintView({ team, onClose }) {
   const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
-  const handlePrint = () => { setTimeout(() => window.print(), 300); window.onafterprint = () => onClose(); };
+  const handlePrint = () => {
+    const printArea = document.querySelector(".print-area");
+    if (!printArea) return;
+    const w = window.open("", "_blank");
+    if (!w) { alert("Allow pop-ups to print"); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Delivery Schedule</title>
+    <style>@page{size:A4 landscape;margin:8mm}body{font-family:Arial,sans-serif;margin:0;padding:8px}
+    .order-block{page-break-inside:avoid}table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10px}</style>
+    </head><body>${printArea.innerHTML}</body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => { w.print(); w.onafterprint = () => w.close(); }, 500);
+    onClose();
+  };
   const dateStr = team.team_date || "-";
   const vehicleStr = [team.vehicle_plate, team.driver_name, team.area].filter(Boolean).join(" / ");
   const allRows = [];
@@ -265,7 +276,7 @@ function TeamPrintView({ team, onClose }) {
                 const hasBalance = parseFloat(o.balance) > 0;
                 const tripLabel = sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-";
                 return (
-                  <table key={gi} style={{...TS, pageBreakInside:"avoid"}}>{COL}<tbody>
+                  <table key={gi} className="order-block" style={TS}>{COL}<tbody>
                     {rows.map(({ item, idx, rowspan, isFirst }) => (
                       <tr key={idx} style={{verticalAlign:"top"}}>
                         {isFirst && <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden"}}>
