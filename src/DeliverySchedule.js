@@ -33,21 +33,26 @@ const parseItems = items => {
 };
 
 const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", status: "Active" };
-const EMPTY_ROUTE = { vehicle_id: "", lorry_plate: "", driver_name: "", area: "", notes: "" };
 
-// ── Trip Card (for multi-trip orders in unassigned/assigned) ──────
-function TripCard({ trip, routes, isLocked, onAssign, onDragStart }) {
+/** Derive a team-level status from its schedules */
+const deriveTeamStatus = (schedules) => {
+  if (!schedules || schedules.length === 0) return "Pending";
+  const statuses = schedules.map(s => s.status);
+  if (statuses.every(s => s === "Delivered")) return "Delivered";
+  if (statuses.some(s => s === "Out for Delivery")) return "Out for Delivery";
+  if (statuses.every(s => s === "Confirmed" || s === "Delivered")) return "Confirmed";
+  return "Pending";
+};
+
+// -- Trip Card (for multi-trip orders in unassigned) -------------------
+function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
   const order = trip.orders || {};
   const items = parseItems(order.items);
   const [showItems, setShowItems] = useState(false);
 
   return (
-    <div
-      className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
-      draggable
-      onDragStart={onDragStart}
-    >
-      {/* Header */}
+    <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
+      draggable onDragStart={onDragStart}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-purple-700 text-xs">{trip.so_number}</span>
@@ -58,23 +63,14 @@ function TripCard({ trip, routes, isLocked, onAssign, onDragStart }) {
         </div>
         {parseFloat(order.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {order.balance}</span>}
       </div>
-
       <p className="text-xs font-medium text-gray-700">{order.customer_name || "-"}</p>
       <p className="text-xs text-gray-400 leading-tight truncate">{order.address}</p>
       {order.time_slot && <p className="text-xs text-indigo-600 font-medium">{order.time_slot}</p>}
-
-      {/* Commission note — only trip 1 earns commission */}
-      {trip.trip_no === 1 && (
-        <p className="text-xs text-green-600 font-medium mt-0.5">💰 Commission trip</p>
-      )}
-      {trip.trip_no > 1 && (
-        <p className="text-xs text-gray-400 mt-0.5">No commission (trip {trip.trip_no})</p>
-      )}
-
+      {trip.trip_no === 1 && <p className="text-xs text-green-600 font-medium mt-0.5">Commission trip</p>}
+      {trip.trip_no > 1 && <p className="text-xs text-gray-400 mt-0.5">No commission (trip {trip.trip_no})</p>}
       <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-
       <button onClick={() => setShowItems(p => !p)} className="text-xs text-gray-400 hover:text-purple-600 mt-1">
-        👁 {showItems ? "Hide Items" : "View Items"}
+        {showItems ? "Hide Items" : "View Items"}
       </button>
       {showItems && (
         <div className="bg-white border border-gray-100 rounded p-2 mt-1 space-y-1">
@@ -85,16 +81,13 @@ function TripCard({ trip, routes, isLocked, onAssign, onDragStart }) {
           ))}
         </div>
       )}
-
-      {/* Assign dropdown */}
-      {routes && routes.length > 0 && !isLocked && (
+      {teams && teams.length > 0 && !isLocked && (
         <select
           onChange={e => { if (e.target.value) onAssign(e.target.value, trip.id, "trip"); }}
-          className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600"
-        >
-          <option value="">Assign to route...</option>
-          {routes.filter(r => r.status === "Pending").map(r => (
-            <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>
+          className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+          <option value="">Assign to team...</option>
+          {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending").map(t => (
+            <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
           ))}
         </select>
       )}
@@ -102,37 +95,32 @@ function TripCard({ trip, routes, isLocked, onAssign, onDragStart }) {
   );
 }
 
-// ── Assigned Order Card ───────────────────────────────────────────
-function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragStart, onDragOver, onDrop, onSaved, isTrip }) {
-  const o = isTrip ? (ro.orders || {}) : ro.orders;
-  const [scheduledTime, setScheduledTime] = useState(ro.scheduled_time_range || "");
-  const [editingTime, setEditingTime] = useState(!ro.scheduled_time_range);
-  const [routeNote, setRouteNote] = useState(ro.route_note || "");
+// -- Assigned Order Card -----------------------------------------------
+function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDragOver, onDrop, onSaved, isTrip }) {
+  const o = schedule.orders || {};
+  const [notes, setNotes] = useState(schedule.notes || "");
   const [showItems, setShowItems] = useState(false);
   const [saving, setSaving] = useState(false);
-  if (!o) return null;
+  if (!o || !o.so_number) return null;
 
   const items = parseItems(o.items);
   const preferredTime = o.time_slot || "";
-  const tripInfo = isTrip ? ro : null;
+  const tripInfo = isTrip ? schedule : null;
 
-  const saveScheduledTime = async () => {
-    if (!scheduledTime.trim()) return;
-    setSaving(true);
-    await af(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scheduled_time_range: scheduledTime })
+  const saveNotes = async (val) => {
+    setNotes(val);
+    await af(`${API}/delivery-schedules/${schedule.id}`, {
+      method: "PATCH", body: JSON.stringify({ notes: val })
     });
-    setSaving(false); setEditingTime(false);
-    if (onSaved) onSaved();
   };
 
-  const saveRouteNote = async (val) => {
-    setRouteNote(val);
-    await af(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ route_note: val })
+  const saveSlot = async (val) => {
+    setSaving(true);
+    await af(`${API}/delivery-schedules/${schedule.id}`, {
+      method: "PATCH", body: JSON.stringify({ slot: val })
     });
+    setSaving(false);
+    if (onSaved) onSaved();
   };
 
   return (
@@ -145,25 +133,25 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
     >
       {/* Row 1 */}
       <div className="flex items-center gap-1.5 mb-1.5">
-        {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab">⋮⋮</span>}
+        {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab">&#8942;&#8942;</span>}
         <span className="text-xs text-gray-400 font-medium flex-shrink-0">#{index + 1}</span>
         <span className={`font-bold text-xs flex-shrink-0 ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
         {isTrip && tripInfo && (
-          <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0 ${tripStatusColor(tripInfo.status)}`}>
+          <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0 ${tripStatusColor(tripInfo.trip_status)}`}>
             Trip {tripInfo.trip_no}/{tripInfo.total_trips}
           </span>
         )}
         <span className="text-xs font-medium text-gray-700 truncate flex-1">{o.customer_name}</span>
         {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs font-medium flex-shrink-0">RM {o.balance}</span>}
         {!isLocked && (
-          <button onClick={() => onUnassign(routeId, o.id)} className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0" title="Unassign">x</button>
+          <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0" title="Unassign">x</button>
         )}
       </div>
 
       {/* Commission badge */}
       {isTrip && tripInfo && (
         <p className={`text-xs font-medium mb-1 ${tripInfo.trip_no === 1 ? "text-green-600" : "text-gray-400"}`}>
-          {tripInfo.trip_no === 1 ? "💰 Commission trip" : `No commission (trip ${tripInfo.trip_no})`}
+          {tripInfo.trip_no === 1 ? "Commission trip" : `No commission (trip ${tripInfo.trip_no})`}
         </p>
       )}
 
@@ -177,29 +165,21 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
             : <span className="text-xs text-gray-300">-</span>}
         </div>
         {!isLocked && (
-          editingTime ? (
-            <div className="flex items-center gap-1">
-              <input value={scheduledTime} onChange={e => setScheduledTime(e.target.value)}
-                placeholder="Actual scheduled time..."
-                className={`flex-1 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 min-w-0 ${scheduledTime ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-gray-200 text-gray-500"}`}
-              />
-              {preferredTime && <button onClick={() => setScheduledTime(preferredTime)} className="text-xs bg-purple-100 text-purple-700 hover:bg-purple-200 px-1.5 py-1 rounded flex-shrink-0">Use</button>}
-              <button onClick={saveScheduledTime} disabled={saving} className="text-xs bg-blue-600 text-white hover:bg-blue-700 px-2 py-1 rounded flex-shrink-0 disabled:opacity-50">{saving ? "..." : "Save"}</button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 flex-1 truncate">⏰ {scheduledTime}</span>
-              <button onClick={() => setEditingTime(true)} className="text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 px-2 py-1 rounded flex-shrink-0">Edit</button>
-            </div>
-          )
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-400 flex-shrink-0">Slot:</span>
+            <input value={schedule.slot || ""} onChange={e => saveSlot(e.target.value)} placeholder="e.g. 10am-12pm"
+              className={`text-xs border rounded px-1.5 py-0.5 w-28 ${saving ? "opacity-50" : ""}`} />
+            {preferredTime && !schedule.slot && <button onClick={() => saveSlot(preferredTime)} className="text-xs text-purple-600 hover:underline">Use preferred</button>}
+          </div>
         )}
-        {isLocked && scheduledTime && <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">⏰ {scheduledTime}</span>}
+        {isLocked && schedule.slot && <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">Slot: {schedule.slot}</span>}
+        {schedule.is_ready && <span className="text-xs text-green-700 font-medium bg-green-50 border border-green-200 rounded px-1.5 py-0.5 inline-block ml-1">Ready</span>}
         {o.remark && <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded p-2 text-xs"><span className="font-semibold">Remark: </span>{o.remark}</div>}
       </div>
 
       <div className="space-y-1">
         <button onClick={() => setShowItems(p => !p)} className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1">
-          👁️ <span>{showItems ? "Hide Items" : "View Items"}</span>
+          <span>{showItems ? "Hide Items" : "View Items"}</span>
         </button>
         {showItems && (
           <div className="bg-white border border-gray-100 rounded-lg p-2 space-y-1.5">
@@ -214,34 +194,34 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
           </div>
         )}
         {!isLocked && (
-          <input value={routeNote} onChange={e => setRouteNote(e.target.value)}
-            onBlur={e => saveRouteNote(e.target.value)}
-            placeholder="Route note (optional)"
+          <input value={notes} onChange={e => setNotes(e.target.value)}
+            onBlur={e => saveNotes(e.target.value)}
+            placeholder="Note (optional)"
             className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
           />
         )}
-        {isLocked && routeNote && <p className="text-xs text-gray-400 italic">{routeNote}</p>}
+        {isLocked && notes && <p className="text-xs text-gray-400 italic">{notes}</p>}
       </div>
     </div>
   );
 }
 
-// ── Print CSS ─────────────────────────────────────────────────────
+// -- Print CSS ---------------------------------------------------------
 const PRINT_STYLE = `@media print { body * { visibility: hidden; } .print-area, .print-area * { visibility: visible; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } }`;
 
-// ── Route Print View ──────────────────────────────────────────────
-function RoutePrintView({ route, onClose }) {
+// -- Team Print View ---------------------------------------------------
+function TeamPrintView({ team, onClose }) {
   const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
   const handlePrint = () => { setTimeout(() => window.print(), 300); window.onafterprint = () => onClose(); };
-  const dateStr = route.delivery_date || "-";
-  const vehicleStr = [route.lorry_plate, route.driver_name, route.area].filter(Boolean).join(" / ");
+  const dateStr = team.team_date || "-";
+  const vehicleStr = [team.vehicle_plate, team.driver_name, team.area].filter(Boolean).join(" / ");
   const allRows = [];
-  (route.orders || []).forEach(ro => {
-    const o = ro.orders;
+  (team.schedules || []).forEach(sc => {
+    const o = sc.orders;
     if (!o) return;
     const items = parseItemsSafe(o.items);
     const displayItems = items.length > 0 ? items : [{}];
-    displayItems.forEach((item, idx) => { allRows.push({ o, ro, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
+    displayItems.forEach((item, idx) => { allRows.push({ o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
   });
 
   return (
@@ -249,10 +229,10 @@ function RoutePrintView({ route, onClose }) {
       <style>{PRINT_STYLE}</style>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl">
         <div className="flex items-center justify-between px-6 py-3 border-b no-print">
-          <h3 className="font-bold text-gray-800">🖨️ Print Preview — {route.lorry_plate || "Route"}</h3>
+          <h3 className="font-bold text-gray-800">Print Preview — {team.vehicle_plate || "Team"}</h3>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
-            <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">🖨️ Print</button>
+            <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Print</button>
           </div>
         </div>
         <div className="print-area p-4">
@@ -271,11 +251,11 @@ function RoutePrintView({ route, onClose }) {
             <tbody>
               {allRows.length === 0 && <tr><td colSpan={15} style={{ border:"1px solid #000", padding:"6px", textAlign:"center", color:"#888" }}>No orders assigned.</td></tr>}
               {allRows.map((row, i) => {
-                const { o, ro, item, idx, rowspan, isFirst } = row;
+                const { o, sc, item, idx, rowspan, isFirst } = row;
                 const hasBalance = parseFloat(o.balance) > 0;
-                const tripLabel = ro.trip_no ? `Trip ${ro.trip_no}/${ro.total_trips}` : "-";
+                const tripLabel = sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-";
                 return (
-                  <tr key={`${o.id}-${idx}`} style={{ verticalAlign:"top" }}>
+                  <tr key={`${sc.id}-${idx}`} style={{ verticalAlign:"top" }}>
                     {isFirst && (
                       <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", minWidth:"140px", verticalAlign:"top" }}>
                         <div style={{ fontWeight:"bold" }}>{o.so_number}</div>
@@ -283,13 +263,13 @@ function RoutePrintView({ route, onClose }) {
                         {o.contact && <div style={{ color:"#555" }}>{o.contact}</div>}
                         {o.address && <div style={{ color:"#555", fontSize:"9px" }}>{o.address}</div>}
                         {hasBalance && <div style={{ color:"red", fontWeight:"bold" }}>Bal: RM {o.balance}</div>}
-                        {ro.scheduled_time_range && <div style={{ color:"#1e40af", fontWeight:"bold" }}>⏰ {ro.scheduled_time_range}</div>}
+                        {sc.slot && <div style={{ color:"#1e40af", fontWeight:"bold" }}>Slot: {sc.slot}</div>}
                       </td>
                     )}
-                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top", fontSize:"9px", color:ro.trip_no > 1 ? "#6b7280" : "#059669" }}>{tripLabel}{ro.trip_no === 1 ? "\n💰" : ""}</td>}
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top", fontSize:"9px", color: sc.trip_no > 1 ? "#6b7280" : "#059669" }}>{tripLabel}</td>}
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", minWidth:"28px" }}></td>
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", minWidth:"28px" }}></td>
-                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top" }}>{route.lorry_plate || "-"}</td>}
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top" }}>{team.vehicle_plate || "-"}</td>}
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{idx + 1}</td>
                     <td style={{ border:"1px solid #000", padding:"3px 4px" }}>{item.itemCode || ""}</td>
                     <td style={{ border:"1px solid #000", padding:"3px 4px", minWidth:"120px" }}>{item.itemName || ""}</td>
@@ -299,7 +279,7 @@ function RoutePrintView({ route, onClose }) {
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.supplierSentDate || ""}</td>
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}></td>
                     <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.arrivalDate ? item.arrivalDate : <span style={{ color:"red", fontWeight:"bold" }}>No arrival</span>}</td>
-                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", verticalAlign:"top", minWidth:"80px" }}>{o.remark && <div>{o.remark}</div>}{ro.route_note && <div style={{ color:"#555", fontStyle:"italic" }}>{ro.route_note}</div>}</td>}
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", verticalAlign:"top", minWidth:"80px" }}>{o.remark && <div>{o.remark}</div>}{sc.notes && <div style={{ color:"#555", fontStyle:"italic" }}>{sc.notes}</div>}</td>}
                   </tr>
                 );
               })}
@@ -312,6 +292,7 @@ function RoutePrintView({ route, onClose }) {
   );
 }
 
+// -- Vehicle Modal (unchanged) -----------------------------------------
 function VehicleModal({ vehicles, onClose, onRefresh }) {
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
@@ -319,11 +300,11 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
   const [editVehicle, setEditVehicle] = useState({});
   const createVehicle = async () => {
     if (!newVehicle.driver_name && !newVehicle.vehicle_plate) return alert("Please enter driver name or vehicle plate.");
-    await af(`${API}/delivery/vehicles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newVehicle) });
+    await af(`${API}/delivery/vehicles`, { method: "POST", body: JSON.stringify(newVehicle) });
     setNewVehicle({ ...EMPTY_VEHICLE }); setShowAddVehicle(false); onRefresh();
   };
   const saveVehicle = async (id) => {
-    await af(`${API}/delivery/vehicles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editVehicle) });
+    await af(`${API}/delivery/vehicles/${id}`, { method: "PATCH", body: JSON.stringify(editVehicle) });
     setEditVehicleId(null); onRefresh();
   };
   const deleteVehicle = async (id) => {
@@ -334,7 +315,7 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b">
-          <h3 className="font-bold text-gray-800 text-base">🚛 Manage Vehicles</h3>
+          <h3 className="font-bold text-gray-800 text-base">Manage Vehicles</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold">x</button>
         </div>
         <div className="px-6 py-4">
@@ -383,14 +364,14 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
                 ) : (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-sm text-gray-800">🚛 {v.vehicle_plate || "No Plate"}</span>
-                      {v.driver_name && <span className="text-xs text-gray-500">👤 {v.driver_name}</span>}
+                      <span className="font-semibold text-sm text-gray-800">{v.vehicle_plate || "No Plate"}</span>
+                      {v.driver_name && <span className="text-xs text-gray-500">{v.driver_name}</span>}
                       {v.vehicle_type && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{v.vehicle_type}</span>}
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${v.status === "Active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>{v.status}</span>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditVehicleId(v.id); setEditVehicle({...v}); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
-                      <button onClick={() => deleteVehicle(v.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
+                      <button onClick={() => { setEditVehicleId(v.id); setEditVehicle({...v}); }} className="text-gray-400 hover:text-blue-600 text-xs">Edit</button>
+                      <button onClick={() => deleteVehicle(v.id)} className="text-gray-400 hover:text-red-500 text-xs">Delete</button>
                     </div>
                   </div>
                 )}
@@ -406,51 +387,42 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
   );
 }
 
-function AddRouteModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
-  const [newRoute, setNewRoute] = useState({ ...EMPTY_ROUTE });
-  const onVehicleSelect = (vehicleId) => {
-    const v = activeVehicles.find(v => String(v.id) === String(vehicleId));
-    if (v) setNewRoute(p => ({ ...p, vehicle_id: v.id, lorry_plate: v.vehicle_plate || "", driver_name: v.driver_name || "" }));
-    else setNewRoute(p => ({ ...p, vehicle_id: "" }));
-  };
+// -- Add Team Modal (replaces AddRouteModal) ---------------------------
+function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
+  const [vehicleId, setVehicleId] = useState("");
+  const selectedVehicle = activeVehicles.find(v => String(v.id) === String(vehicleId));
+
   const handleCreate = async () => {
-    if (!newRoute.lorry_plate && !newRoute.driver_name) return alert("Please select a vehicle or enter lorry plate / driver name.");
-    const res = await onCreate(newRoute);
+    if (!vehicleId) return alert("Please select a vehicle.");
+    const res = await onCreate({ vehicle_id: parseInt(vehicleId), driver_id: selectedVehicle?.driver_id || null, helper_id: null });
     if (res && res.error) alert(res.error);
   };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
-        <h3 className="font-bold text-gray-800 mb-4">Add New Route</h3>
+        <h3 className="font-bold text-gray-800 mb-4">Add New Team</h3>
         <div className="mb-3">
           <label className="text-xs text-gray-500 block mb-0.5">Select Vehicle (Active only)</label>
-          <select value={newRoute.vehicle_id} onChange={e => onVehicleSelect(e.target.value)} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <select value={vehicleId} onChange={e => setVehicleId(e.target.value)} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
             <option value="">-- Select Vehicle --</option>
             {activeVehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_plate ? `${v.vehicle_plate} — ` : ""}{v.driver_name || "Unknown driver"}{v.vehicle_type ? ` (${v.vehicle_type})` : ""}</option>)}
           </select>
           {activeVehicles.length === 0 && <p className="text-xs text-orange-500 mt-1">No active vehicles. <button onClick={onGoToVehicles} className="underline">Add vehicle first</button></p>}
         </div>
-        <p className="text-xs text-gray-400 mb-2">Or enter manually:</p>
-        <div className="space-y-2">
-          {[{k:"lorry_plate",l:"Lorry Plate No"},{k:"driver_name",l:"Driver Name"},{k:"area",l:"Area / Zone"},{k:"notes",l:"Notes"}].map(({k,l}) => (
-            <div key={k}><label className="text-xs text-gray-500 block mb-0.5">{l}</label><input value={newRoute[k]} onChange={e => setNewRoute(p => ({...p,[k]:e.target.value}))} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" /></div>
-          ))}
-        </div>
         <div className="flex gap-3 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-          <button onClick={handleCreate} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Create Route</button>
+          <button onClick={handleCreate} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Create Team</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────
-
-// ── Auto Scheduler Modal ──────────────────────────────────────────
+// -- Auto Scheduler Modal (kept as-is, uses old endpoints - TODO: migrate) --
 function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   const API_URL = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
-  const [step, setStep] = useState("loading"); // loading | duration | preview | approving
+  const [step, setStep] = useState("loading");
   const [orders, setOrders] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [settings, setSettings] = useState(null);
@@ -458,13 +430,12 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   const [error, setError] = useState("");
   const [generating, setGenerating] = useState(false);
 
-  useEffect(() => {
-    loadOrders();
-  }, []); // eslint-disable-line
+  useEffect(() => { loadOrders(); }, []); // eslint-disable-line
 
   const loadOrders = async () => {
     setStep("loading");
     try {
+      // TODO: migrate auto-schedule endpoints to use delivery_teams/delivery_schedules
       const res = await fetch(`${API_URL}/auto-schedule/orders?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       if (data.error) { setError(data.error); setStep("error"); return; }
@@ -480,18 +451,16 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   };
 
   const generateSchedule = async () => {
-    setGenerating(true);
-    setError("");
+    setGenerating(true); setError("");
     try {
+      // TODO: migrate to new delivery tables
       const res = await fetch(`${API_URL}/auto-schedule/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date, company_id: companyId, orders, vehicles, settings }),
       });
       const data = await res.json();
       if (!data.success) { setError(data.error || "Failed to generate schedule"); setGenerating(false); return; }
-      setSchedule(data.schedule);
-      setStep("preview");
+      setSchedule(data.schedule); setStep("preview");
     } catch (e) { setError(e.message); }
     setGenerating(false);
   };
@@ -500,14 +469,13 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
     setStep("approving");
     try {
       const durations = orders.map(o => ({
-        itemType: o.itemType,
-        itemKeywords: o.itemKeywords,
+        itemType: o.itemType, itemKeywords: o.itemKeywords,
         area: schedule?.vehicles?.flatMap(v => v.stops).find(s => s.so_number === o.so_number)?.area || "",
         duration_minutes: o.estimatedDuration,
       }));
+      // TODO: migrate to new delivery tables
       const res = await fetch(`${API_URL}/auto-schedule/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date, company_id: companyId, schedule, durations }),
       });
       const data = await res.json();
@@ -516,32 +484,23 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
     } catch (e) { setError(e.message); setStep("preview"); }
   };
 
-  const timeColor = (type) => type === "Wardrobe" ? "text-orange-600" : type === "Service" ? "text-purple-600" : "text-blue-600";
   const typeBadge = (type) => type === "Wardrobe" ? "bg-orange-100 text-orange-700" : type === "Service" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700";
+  const timeColor = (type) => type === "Wardrobe" ? "text-orange-600" : type === "Service" ? "text-purple-600" : "text-blue-600";
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center z-50 pt-6 px-4 pb-6 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-blue-600 to-blue-500 rounded-t-2xl">
           <div>
-            <h2 className="text-white font-bold text-base">⚡ Auto-Schedule</h2>
+            <h2 className="text-white font-bold text-base">Auto-Schedule</h2>
             <p className="text-blue-100 text-xs mt-0.5">{date} · {vehicles.length} vehicle(s) available</p>
           </div>
-          <button onClick={onClose} className="text-white hover:text-blue-200 text-2xl font-bold leading-none">×</button>
+          <button onClick={onClose} className="text-white hover:text-blue-200 text-2xl font-bold leading-none">&times;</button>
         </div>
-
         <div className="px-6 py-5">
-          {/* Loading */}
           {step === "loading" && <div className="text-center py-12 text-gray-400">Loading orders...</div>}
-
-          {/* Error */}
           {step === "error" && <div className="text-center py-8"><p className="text-red-600 mb-4">{error}</p><button onClick={loadOrders} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg">Retry</button></div>}
-
-          {/* Empty */}
-          {step === "empty" && <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">📦</div><p>No unassigned orders for {date}.</p></div>}
-
-          {/* Step 1: Duration input */}
+          {step === "empty" && <div className="text-center py-12 text-gray-400"><p>No unassigned orders for {date}.</p></div>}
           {step === "duration" && (
             <div>
               <p className="text-sm text-gray-500 mb-4">Set estimated duration for each order. AI will use this to build the optimal schedule.</p>
@@ -556,21 +515,16 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${typeBadge(o.itemType)}`}>{o.itemType}</span>
                           <span className="text-xs text-gray-500">{o.customer_name}</span>
                         </div>
-                        {o.time_slot && <span className="text-xs text-indigo-600 font-medium">⏰ {o.time_slot}</span>}
+                        {o.time_slot && <span className="text-xs text-indigo-600 font-medium">{o.time_slot}</span>}
                       </div>
-                      <p className="text-xs text-gray-400 mb-1 truncate">📍 {o.address}</p>
-                      <p className="text-xs text-gray-400 mb-2 truncate">📦 {items.map(i => i.itemName).filter(Boolean).join(", ") || "-"}</p>
+                      <p className="text-xs text-gray-400 mb-1 truncate">{o.address}</p>
+                      <p className="text-xs text-gray-400 mb-2 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ") || "-"}</p>
                       <div className="flex items-center gap-3">
                         <label className="text-xs font-medium text-gray-600 whitespace-nowrap">Duration (min):</label>
-                        <input
-                          type="number"
-                          value={o.estimatedDuration}
-                          onChange={e => updateDuration(o.so_number, e.target.value)}
-                          min="15" max="480" step="15"
-                          className="w-24 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                        />
+                        <input type="number" value={o.estimatedDuration} onChange={e => updateDuration(o.so_number, e.target.value)}
+                          min="15" max="480" step="15" className="w-24 border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                         <span className={`text-xs font-medium ${timeColor(o.itemType)}`}>
-                          ≈ {Math.floor(o.estimatedDuration / 60)}h {o.estimatedDuration % 60 > 0 ? `${o.estimatedDuration % 60}m` : ""}
+                          {Math.floor(o.estimatedDuration / 60)}h {o.estimatedDuration % 60 > 0 ? `${o.estimatedDuration % 60}m` : ""}
                           {o.suggestedDuration === o.estimatedDuration && " (AI suggested)"}
                         </span>
                       </div>
@@ -582,20 +536,18 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
               <div className="flex gap-3 justify-end mt-4">
                 <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
                 <button onClick={generateSchedule} disabled={generating || orders.some(o => !o.estimatedDuration)} className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
-                  {generating ? "⏳ Generating..." : "⚡ Generate Schedule"}
+                  {generating ? "Generating..." : "Generate Schedule"}
                 </button>
               </div>
             </div>
           )}
-
-          {/* Step 2: Preview */}
           {step === "preview" && schedule && (
             <div>
               <p className="text-sm text-gray-500 mb-1">{schedule.summary}</p>
               {schedule.overflow?.length > 0 && (
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
-                  <p className="text-xs font-bold text-orange-700 mb-1">⚠️ {schedule.overflow.length} order(s) cannot fit today:</p>
-                  {schedule.overflow.map(o => <p key={o.so_number} className="text-xs text-orange-600">• SO {o.so_number} — {o.reason}</p>)}
+                  <p className="text-xs font-bold text-orange-700 mb-1">{schedule.overflow.length} order(s) cannot fit today:</p>
+                  {schedule.overflow.map(o => <p key={o.so_number} className="text-xs text-orange-600">SO {o.so_number} — {o.reason}</p>)}
                 </div>
               )}
               <div className="space-y-4 max-h-96 overflow-y-auto">
@@ -603,27 +555,23 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
                   <div key={vi} className="border border-gray-200 rounded-xl overflow-hidden">
                     <div className="bg-blue-50 px-4 py-2 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-blue-800">🚛 {v.vehicle_plate || "Vehicle " + (vi+1)}</span>
-                        {v.driver_name && <span className="text-xs text-gray-500">👤 {v.driver_name}</span>}
+                        <span className="text-sm font-bold text-blue-800">{v.vehicle_plate || "Vehicle " + (vi+1)}</span>
+                        {v.driver_name && <span className="text-xs text-gray-500">{v.driver_name}</span>}
                       </div>
-                      <div className="text-xs text-gray-500">
-                        {v.stops?.length} stops · Return: {v.return_time}
-                      </div>
+                      <div className="text-xs text-gray-500">{v.stops?.length} stops · Return: {v.return_time}</div>
                     </div>
                     <div className="divide-y divide-gray-100">
                       {v.stops?.map((stop, si) => (
                         <div key={si} className="px-4 py-2.5 flex items-start gap-3">
-                          <div className="text-xs text-blue-600 font-bold w-24 flex-shrink-0 pt-0.5">
-                            {stop.start_time} - {stop.end_time}
-                          </div>
+                          <div className="text-xs text-blue-600 font-bold w-24 flex-shrink-0 pt-0.5">{stop.start_time} - {stop.end_time}</div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-gray-800">{stop.so_number}</span>
                               <span className="text-xs text-gray-600">{stop.customer_name}</span>
-                              {stop.area && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">📍 {stop.area}</span>}
+                              {stop.area && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{stop.area}</span>}
                             </div>
                             <p className="text-xs text-gray-400 truncate mt-0.5">{stop.address}</p>
-                            {stop.notes && <p className="text-xs text-orange-600 mt-0.5">📝 {stop.notes}</p>}
+                            {stop.notes && <p className="text-xs text-orange-600 mt-0.5">{stop.notes}</p>}
                           </div>
                           <div className="text-xs text-gray-400 flex-shrink-0">{stop.duration_minutes}min</div>
                         </div>
@@ -631,7 +579,7 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
                     </div>
                     {v.warnings?.length > 0 && (
                       <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-100">
-                        {v.warnings.map((w, wi) => <p key={wi} className="text-xs text-yellow-700">⚠️ {w}</p>)}
+                        {v.warnings.map((w, wi) => <p key={wi} className="text-xs text-yellow-700">{w}</p>)}
                       </div>
                     )}
                   </div>
@@ -639,19 +587,16 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
               </div>
               {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
               <div className="flex gap-3 justify-between mt-4">
-                <button onClick={() => setStep("duration")} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">← Adjust Durations</button>
+                <button onClick={() => setStep("duration")} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Adjust Durations</button>
                 <div className="flex gap-3">
                   <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                  <button onClick={approveSchedule} className="px-5 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">✅ Approve & Create Routes</button>
+                  <button onClick={approveSchedule} className="px-5 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">Approve & Create Routes</button>
                 </div>
               </div>
             </div>
           )}
-
-          {/* Approving */}
           {step === "approving" && (
             <div className="text-center py-12">
-              <div className="text-4xl mb-3">⚡</div>
               <p className="text-gray-600 font-medium">Creating routes...</p>
               <p className="text-xs text-gray-400 mt-1">Setting up delivery schedule and confirming routes.</p>
             </div>
@@ -662,69 +607,91 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   );
 }
 
+// -- Main Component ----------------------------------------------------
 export default function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [routes, setRoutes] = useState([]);
+  const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
   const [trips, setTrips] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showAddRoute, setShowAddRoute] = useState(false);
+  const [showAddTeam, setShowAddTeam] = useState(false);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
-  const [editRouteId, setEditRouteId] = useState(null);
-  const [editRoute, setEditRoute] = useState({});
   const [dragOrder, setDragOrder] = useState(null);
   const [draggingAssigned, setDraggingAssigned] = useState(null);
-  const [printRoute, setPrintRoute] = useState(null);
+  const [printTeam, setPrintTeam] = useState(null);
   const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
+  const [serviceOrders, setServiceOrders] = useState([]);
+  const [unscheduledServices, setUnscheduledServices] = useState([]);
+
+  /** Load teams + schedules, group schedules into teams */
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [routeRes, unassignedRes, tripsRes] = await Promise.all([
-        af(`${API}/delivery/routes?date=${date}`),
-        af(`${API}/delivery/unassigned?date=${date}`),
+      const qs = companyId ? `&company_id=${companyId}` : "";
+      const [teamsRes, schedulesRes, unassignedRes, tripsRes] = await Promise.all([
+        af(`${API}/delivery-teams?date=${date}${qs}`),
+        af(`${API}/delivery-schedules?date=${date}${qs}`),
+        af(`${API}/delivery/unassigned?date=${date}${qs}`),
         af(`${API}/order-trips?date=${date}`),
       ]);
-      const [routeData, unassignedData, tripsData] = await Promise.all([
-        routeRes.json(), unassignedRes.json(), tripsRes.json()
+      const [teamsData, schedulesData, unassignedData, tripsData] = await Promise.all([
+        teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
       ]);
-      setRoutes(Array.isArray(routeData) ? routeData : []);
+
+      const teamsList = teamsData.teams || (Array.isArray(teamsData) ? teamsData : []);
+      const schedulesList = schedulesData.schedules || (Array.isArray(schedulesData) ? schedulesData : []);
+
+      // Enrich teams with vehicle info and group schedules
+      const enriched = teamsList.map(team => {
+        const teamSchedules = schedulesList
+          .filter(s => s.team_id === team.id)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        // Look up vehicle info
+        const v = vehicles.find(v => v.id === team.vehicle_id);
+        return {
+          ...team,
+          vehicle_plate: v?.vehicle_plate || team.vehicle_plate || "",
+          driver_name: v?.driver_name || team.driver_name || "",
+          vehicle_type: v?.vehicle_type || "",
+          schedules: teamSchedules,
+          // Derive area from first schedule or team itself
+          area: teamSchedules[0]?.area || "",
+        };
+      });
+
+      setTeams(enriched);
       setUnassigned(Array.isArray(unassignedData) ? unassignedData : []);
       setTrips(Array.isArray(tripsData) ? tripsData : []);
     } catch (e) { console.error(e); }
     setLoading(false);
-  }, [date]);
+  }, [date, companyId, vehicles]);
 
   const loadVehicles = useCallback(async () => {
     try { const res = await af(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
     catch (e) { console.error(e); }
   }, []);
 
-  const [serviceOrders, setServiceOrders] = useState([]);
-  const [unscheduledServices, setUnscheduledServices] = useState([]);
-
   const loadServiceOrders = useCallback(async () => {
     try {
-      // Services scheduled for this date (already have delivery_date set)
       const res = await af(`${API}/delivery/unassigned?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
 
-      // All service orders with no date yet — shown separately so admin can schedule them
       const res2 = await af(`${API}/services/unscheduled${companyId ? `?company_id=${companyId}` : ""}`);
       const data2 = await res2.json();
       setUnscheduledServices(Array.isArray(data2) ? data2 : []);
     } catch (e) { console.error("loadServiceOrders error:", e); }
   }, [date, companyId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
+  useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
 
   const activeVehicles = vehicles.filter(v => v.status === "Active");
 
-  // Build combined unassigned list: regular orders + service orders + scheduled trips
+  // Combined unassigned list: regular orders + service orders + trips
   const combinedUnassigned = [
     ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service").map(o => ({ ...o, _type: "order" })),
     ...serviceOrders.map(o => ({ ...o, _type: "service" })),
@@ -735,131 +702,125 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     return aTime.localeCompare(bTime);
   });
 
-  const createRoute = async (newRoute) => {
-    const res = await af(`${API}/delivery/routes`, { method: "POST", body: JSON.stringify({ ...newRoute, delivery_date: date }) });
+  // -- CRUD: Teams ------------------------------------------------------
+  const createTeam = async (payload) => {
+    const res = await af(`${API}/delivery-teams`, { method: "POST", body: JSON.stringify({ ...payload, team_date: date }) });
     const data = await res.json();
     if (res.status === 409 || data.error) return { error: data.error };
-    setShowAddRoute(false); loadData();
+    setShowAddTeam(false); loadData();
   };
 
-  const updateRoute = async (id) => {
-    await af(`${API}/delivery/routes/${id}`, { method: "PATCH", body: JSON.stringify(editRoute) });
-    setEditRouteId(null); loadData();
-  };
-
-  const deleteRoute = async (id) => {
-    if (!window.confirm("Delete this route?")) return;
-    const res = await af(`${API}/delivery/routes/${id}`, { method: "DELETE" });
+  const deleteTeam = async (id) => {
+    if (!window.confirm("Delete this team and all its schedules?")) return;
+    const res = await af(`${API}/delivery-teams/${id}`, { method: "DELETE" });
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
     loadData();
   };
 
-  const assignItem = async (routeId, id, type, setDateOnAssign = false) => {
-    const route = routes.find(r => r.id === routeId);
-    const seqNo = (route?.orders?.length || 0) + 1;
+  // -- CRUD: Schedules (assign / unassign / reorder) --------------------
+  const assignItem = async (teamId, id, type, setDateOnAssign = false) => {
+    const team = teams.find(t => t.id === parseInt(teamId));
+    const sortOrder = (team?.schedules?.length || 0) + 1;
 
-    // If assigning an unscheduled service order, set its delivery_date to current date
     if (setDateOnAssign && type === "order") {
-      await fetch(`${API}/orders/${id}/set-date`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delivery_date: date }),
+      await af(`${API}/orders/${id}/set-date`, {
+        method: "PATCH", body: JSON.stringify({ delivery_date: date }),
       }).catch(() => {});
-      // Direct Supabase update via API — use the existing order update endpoint
-      // We'll handle this via the backend endpoint we'll add
     }
 
     if (type === "trip") {
-      // Assign trip — update trip status to Assigned + set scheduled_date
       await af(`${API}/order-trips/${id}`, { method: "PATCH", body: JSON.stringify({ status: "Assigned", scheduled_date: date }) });
-      // Also add to delivery_route_orders using the SO's order id
       const trip = trips.find(t => t.id === id);
       if (trip) {
         const tripOrder = unassigned.find(o => o.so_number === trip.so_number);
         if (tripOrder) {
-          await af(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, sequence_no: seqNo }) });
+          await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, team_id: parseInt(teamId), scheduled_date: date, sort_order: sortOrder }) });
         }
       }
     } else {
-      const res = await af(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", body: JSON.stringify({ order_id: id, sequence_no: seqNo }) });
+      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: id, team_id: parseInt(teamId), scheduled_date: date, sort_order: sortOrder }) });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
     }
     loadData();
   };
 
-  const unassignOrder = async (routeId, orderId) => {
-    const res = await af(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
+  const unassignOrder = async (scheduleId) => {
+    const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "DELETE" });
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
     loadData();
   };
 
-  const updateStatus = async (routeId, status) => {
-    await af(`${API}/delivery/routes/${routeId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  const updateScheduleStatus = async (scheduleId, status) => {
+    await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  };
+
+  const updateAllSchedulesStatus = async (teamId, status) => {
+    const team = teams.find(t => t.id === teamId);
+    if (!team) return;
+    await Promise.all((team.schedules || []).map(s => updateScheduleStatus(s.id, status)));
     await loadData();
   };
 
-  const updateSeq = async (routeId, orderId, seq) => {
-    await af(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "PATCH", body: JSON.stringify({ sequence_no: parseInt(seq) }) });
-  };
-
-  const handleAssignedDragStart = (routeId, fromIndex) => setDraggingAssigned({ routeId, fromIndex });
-  const handleAssignedDrop = async (routeId, toIndex) => {
-    if (!draggingAssigned || draggingAssigned.routeId !== routeId) return;
+  // Drag-drop reorder within a team
+  const handleAssignedDragStart = (teamId, fromIndex) => setDraggingAssigned({ teamId, fromIndex });
+  const handleAssignedDrop = async (teamId, toIndex) => {
+    if (!draggingAssigned || draggingAssigned.teamId !== teamId) return;
     const { fromIndex } = draggingAssigned;
     if (fromIndex === toIndex) { setDraggingAssigned(null); return; }
-    const route = routes.find(r => r.id === routeId);
-    if (!route) return;
-    const newOrders = [...route.orders];
-    const [moved] = newOrders.splice(fromIndex, 1);
-    newOrders.splice(toIndex, 0, moved);
-    setRoutes(prev => prev.map(r => r.id === routeId ? { ...r, orders: newOrders } : r));
+    const team = teams.find(t => t.id === teamId);
+    if (!team) return;
+    const newSchedules = [...team.schedules];
+    const [moved] = newSchedules.splice(fromIndex, 1);
+    newSchedules.splice(toIndex, 0, moved);
+    // Optimistic update
+    setTeams(prev => prev.map(t => t.id === teamId ? { ...t, schedules: newSchedules } : t));
     setDraggingAssigned(null);
-    await Promise.all(newOrders.map((ro, i) => updateSeq(routeId, ro.orders?.id || ro.order_id, i + 1)));
+    // Persist sort_order
+    await Promise.all(newSchedules.map((s, i) =>
+      af(`${API}/delivery-schedules/${s.id}`, { method: "PATCH", body: JSON.stringify({ sort_order: i + 1 }) })
+    ));
     loadData();
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-4">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <h2 className="text-base font-bold text-gray-700">🚚 Delivery Schedule</h2>
+        <h2 className="text-base font-bold text-gray-700">Delivery Schedule</h2>
         <div className="flex items-center gap-3 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
-          <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">🔄 Refresh</button>
-          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">🚛 Manage Vehicles</button>
-          <button onClick={() => setShowAddRoute(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Route</button>
+          <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
+          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>
+          <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>
         </div>
       </div>
 
       {loading && <div className="text-center py-8 text-gray-400 text-sm">Loading...</div>}
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
-      {showAddRoute && <AddRouteModal activeVehicles={activeVehicles} onClose={() => setShowAddRoute(false)} onCreate={createRoute} onGoToVehicles={() => { setShowAddRoute(false); setShowVehicleModal(true); }} />}
-      {printRoute && <RoutePrintView route={printRoute} onClose={() => setPrintRoute(null)} />}
+      {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
+      {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
       {showAutoScheduler && (
-        <AutoSchedulerModal
-          date={date}
-          companyId={companyId}
+        <AutoSchedulerModal date={date} companyId={companyId}
           onClose={() => setShowAutoScheduler(false)}
-          onApproved={() => { loadData(); loadServiceOrders(); }}
-        />
+          onApproved={() => { loadData(); loadServiceOrders(); }} />
       )}
 
       <div className="flex flex-col xl:flex-row gap-4">
-        {/* Unassigned Panel — mixed orders + trips */}
+        {/* Unassigned Panel */}
         <div className="xl:w-72 flex-shrink-0">
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
             <div className="px-4 py-3 border-b bg-orange-50 rounded-t-xl">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-orange-700">
-                  📦 Unassigned <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{combinedUnassigned.length}</span>
+                  Unassigned <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{combinedUnassigned.length}</span>
                 </h3>
               </div>
               <div className="flex gap-2 mt-1 flex-wrap">
-                <span className="text-xs text-gray-500">🔵 Delivery</span>
-                <span className="text-xs text-purple-600">🟣 Service</span>
-                <span className="text-xs text-purple-400">🔷 Trips</span>
+                <span className="text-xs text-gray-500">Delivery</span>
+                <span className="text-xs text-purple-600">Service</span>
+                <span className="text-xs text-purple-400">Trips</span>
               </div>
             </div>
             <div className="p-3 space-y-2 max-h-screen overflow-y-auto">
@@ -868,16 +829,10 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                 : combinedUnassigned.map(item => {
                     if (item._type === "trip") {
                       return (
-                        <TripCard
-                          key={`trip-${item.id}`}
-                          trip={item}
-                          routes={routes}
-                          onAssign={assignItem}
-                          onDragStart={() => setDragOrder({ ...item, _type: "trip" })}
-                        />
+                        <TripCard key={`trip-${item.id}`} trip={item} teams={teams}
+                          onAssign={assignItem} onDragStart={() => setDragOrder({ ...item, _type: "trip" })} />
                       );
                     }
-                    // Service order card
                     if (item._type === "service") {
                       const items = parseItems(item.items);
                       return (
@@ -894,22 +849,21 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                           <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
                           <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
                           {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
-                          {item.service_note && <p className="text-xs text-purple-600 mt-0.5 truncate">📝 {item.service_note}</p>}
+                          {item.service_note && <p className="text-xs text-purple-600 mt-0.5 truncate">{item.service_note}</p>}
                           <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                          {routes.length > 0 && (
+                          {teams.length > 0 && (
                             <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
                               className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                              <option value="">Assign to route...</option>
-                              {routes.filter(r => r.status === "Pending" || r.status === "Confirmed").map(r => (
-                                <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}{r.status === "Confirmed" ? " ✅" : ""}</option>
+                              <option value="">Assign to team...</option>
+                              {teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; }).map(t => (
+                                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}{deriveTeamStatus(t.schedules) === "Confirmed" ? " (confirmed)" : ""}</option>
                               ))}
                             </select>
                           )}
                         </div>
                       );
                     }
-
-                    // Regular delivery order card
+                    // Regular delivery order
                     const items = parseItems(item.items);
                     return (
                       <div key={`order-${item.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
@@ -922,12 +876,12 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                         <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
                         {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
                         <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                        {routes.length > 0 && (
+                        {teams.length > 0 && (
                           <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
                             className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                            <option value="">Assign to route...</option>
-                            {routes.filter(r => r.status === "Pending").map(r => (
-                              <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>
+                            <option value="">Assign to team...</option>
+                            {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending").map(t => (
+                              <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
                             ))}
                           </select>
                         )}
@@ -945,19 +899,18 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
               <div className="px-4 py-3 border-b bg-violet-50 rounded-t-xl">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-violet-700">
-                    🔧 Unscheduled Services <span className="ml-1 bg-violet-200 text-violet-800 text-xs px-2 py-0.5 rounded-full">{unscheduledServices.length}</span>
+                    Unscheduled Services <span className="ml-1 bg-violet-200 text-violet-800 text-xs px-2 py-0.5 rounded-full">{unscheduledServices.length}</span>
                   </h3>
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5">Drag to route — date auto-set to {date}</p>
+                <p className="text-xs text-gray-400 mt-0.5">Drag to team — date auto-set to {date}</p>
               </div>
               <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
                 {unscheduledServices.map(item => {
-                  const items = typeof item.items === "string" ? JSON.parse(item.items || "[]") : (item.items || []);
+                  const items = parseItems(item.items);
                   return (
                     <div key={`usvc-${item.id}`}
                       className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
-                      draggable
-                      onDragStart={() => setDragOrder({ ...item, _type: "order", _setDate: true })}>
+                      draggable onDragStart={() => setDragOrder({ ...item, _type: "order", _setDate: true })}>
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
@@ -968,15 +921,14 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                       </div>
                       <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
                       <p className="text-xs text-gray-400 leading-tight truncate">{item.address}</p>
-                      {item.service_note && <p className="text-xs text-violet-600 mt-0.5 truncate">📝 {item.service_note}</p>}
+                      {item.service_note && <p className="text-xs text-violet-600 mt-0.5 truncate">{item.service_note}</p>}
                       <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                      {routes.length > 0 && (
-                        <select
-                          onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order", true); }}
+                      {teams.length > 0 && (
+                        <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order", true); }}
                           className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                          <option value="">Schedule to route...</option>
-                          {routes.filter(r => r.status === "Pending" || r.status === "Confirmed").map(r => (
-                            <option key={r.id} value={r.id}>{r.lorry_plate || r.driver_name} {r.area ? `(${r.area})` : ""}</option>
+                          <option value="">Schedule to team...</option>
+                          {teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; }).map(t => (
+                            <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
                           ))}
                         </select>
                       )}
@@ -988,103 +940,87 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
           </div>
         )}
 
-        {/* Route Cards */}
+        {/* Team Cards (replaces Route Cards) */}
         <div className="flex-1 min-w-0">
-          {routes.length === 0 && !loading && (
+          {teams.length === 0 && !loading && (
             <div className="text-center py-12 text-gray-400">
-              <div className="text-4xl mb-2">🚛</div>
-              <p className="text-sm">No routes created for this date.</p>
-              <p className="text-xs mt-1">Click "+ Add Route" to get started.</p>
+              <p className="text-sm">No teams created for this date.</p>
+              <p className="text-xs mt-1">Click "+ Add Team" to get started.</p>
             </div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {routes.map(route => {
-              const isLocked = route.status === "Out for Delivery" || route.status === "Delivered";
-              const isConfirmed = route.status === "Confirmed";
+            {teams.map(team => {
+              const teamStatus = deriveTeamStatus(team.schedules);
+              const isLocked = teamStatus === "Out for Delivery" || teamStatus === "Delivered";
+              const isConfirmed = teamStatus === "Confirmed";
               return (
-                <div key={route.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
+                <div key={team.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
                   onDragOver={e => { e.preventDefault(); }}
                   onDrop={() => {
                     if (!dragOrder || isLocked || isConfirmed) return;
-                    assignItem(route.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
+                    assignItem(team.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
                     setDragOrder(null);
                   }}>
-                  {/* Route Header */}
-                  {editRouteId === route.id ? (
-                    <div className="px-4 py-3 border-b space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        {[{k:"lorry_plate",l:"Lorry Plate"},{k:"driver_name",l:"Driver"},{k:"area",l:"Area"},{k:"notes",l:"Notes"}].map(({k,l}) => (
-                          <div key={k}><label className="text-xs text-gray-400">{l}</label><input value={editRoute[k]||""} onChange={e => setEditRoute(p => ({...p,[k]:e.target.value}))} className="w-full border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300" /></div>
-                        ))}
+                  {/* Team Header */}
+                  <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : isConfirmed ? "bg-green-50" : "bg-blue-50"}`}>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-blue-800 text-sm">{team.vehicle_plate || "No Plate"}</span>
+                          {team.driver_name && <span className="text-xs text-gray-600">{team.driver_name}</span>}
+                          {team.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">{team.area}</span>}
+                          {isLocked && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium">Locked</span>}
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">{team.schedules?.length || 0} stops</p>
                       </div>
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => setEditRouteId(null)} className="text-xs px-3 py-1 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
-                        <button onClick={() => updateRoute(route.id)} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex flex-col items-end gap-1">
+                          <select value={teamStatus}
+                            onChange={e => updateAllSchedulesStatus(team.id, e.target.value)}
+                            className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(teamStatus)}`}>
+                            {isLocked
+                              ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
+                              : isConfirmed
+                              ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
+                              : ["Pending","Confirmed"].concat(team.team_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
+                            }
+                          </select>
+                          {!isLocked && !isConfirmed && team.team_date !== todayMY && (
+                            <p className="text-xs text-orange-400 text-right">Out for Delivery only on delivery date.</p>
+                          )}
+                          {isConfirmed && (
+                            <p className="text-xs text-green-600 text-right font-medium">Confirmed — set to Pending to edit</p>
+                          )}
+                        </div>
+                        <button onClick={() => setPrintTeam({ ...team, team_date: team.team_date || date })} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">Print</button>
+                        {!isLocked && !isConfirmed && (
+                          <button onClick={() => deleteTeam(team.id)} className="text-gray-400 hover:text-red-500 text-xs">Delete</button>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : isConfirmed ? "bg-green-50" : "bg-blue-50"}`}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-blue-800 text-sm">🚛 {route.lorry_plate || "No Plate"}</span>
-                            {route.driver_name && <span className="text-xs text-gray-600">👤 {route.driver_name}</span>}
-                            {route.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">📍 {route.area}</span>}
-                            {isLocked && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium">🔒 Locked</span>}
-                          </div>
-                          {route.notes && <p className="text-xs text-gray-500 mt-1">{route.notes}</p>}
-                          <p className="text-xs text-gray-400 mt-0.5">{route.orders?.length || 0} stops</p>
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap justify-end">
-                          <div className="flex flex-col items-end gap-1">
-                            <select value={route.status} onChange={e => updateStatus(route.id, e.target.value)}
-                              className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(route.status)}`}>
-                              {isLocked
-                                ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
-                                : isConfirmed
-                                ? ["Confirmed","Pending"].concat(route.delivery_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
-                                : ["Pending","Confirmed"].concat(route.delivery_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
-                              }
-                            </select>
-                            {!isLocked && !isConfirmed && route.delivery_date !== todayMY && (
-                              <p className="text-xs text-orange-400 text-right">Out for Delivery only on delivery date.</p>
-                            )}
-                            {isConfirmed && (
-                              <p className="text-xs text-green-600 text-right font-medium">🔒 Confirmed — set to Pending to edit</p>
-                            )}
-                          </div>
-                          <button onClick={() => setPrintRoute(route)} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">🖨️</button>
-                          {!isLocked && !isConfirmed && <>
-                            <button onClick={() => { setEditRouteId(route.id); setEditRoute({...route}); }} className="text-gray-400 hover:text-blue-600 text-xs">✏️</button>
-                            <button onClick={() => deleteRoute(route.id)} className="text-gray-400 hover:text-red-500 text-xs">🗑️</button>
-                          </>}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  </div>
 
-                  {/* Assigned Orders */}
+                  {/* Assigned Schedules */}
                   <div className="p-3 space-y-2 min-h-16">
-                    {(!route.orders || route.orders.length === 0) && (
+                    {(!team.schedules || team.schedules.length === 0) && (
                       <p className="text-xs text-gray-300 text-center py-3">
-                        {isLocked ? "No orders in this route." : isConfirmed ? "Route confirmed — unlock to Pending to edit." : "Drop orders or trips here"}
+                        {isLocked ? "No orders in this team." : isConfirmed ? "Team confirmed — unlock to Pending to edit." : "Drop orders or trips here"}
                       </p>
                     )}
-                    {route.orders?.map((ro, index) => {
-                      // Check if this is a multi-trip order
-                      const linkedTrip = trips.find(t => t.so_number === ro.orders?.so_number);
+                    {team.schedules?.map((sc, index) => {
+                      const linkedTrip = trips.find(t => t.so_number === sc.orders?.so_number);
                       return (
                         <AssignedOrderCard
-                          key={ro.id}
-                          ro={linkedTrip ? { ...ro, ...linkedTrip, orders: ro.orders } : ro}
-                          routeId={route.id}
+                          key={sc.id}
+                          schedule={linkedTrip ? { ...sc, trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : sc}
+                          teamId={team.id}
                           index={index}
                           isLocked={isLocked}
                           isTrip={!!linkedTrip}
                           onUnassign={unassignOrder}
-                          onDragStart={(fromIndex) => handleAssignedDragStart(route.id, fromIndex)}
+                          onDragStart={(fromIndex) => handleAssignedDragStart(team.id, fromIndex)}
                           onDragOver={() => {}}
-                          onDrop={(toIndex) => handleAssignedDrop(route.id, toIndex)}
+                          onDrop={(toIndex) => handleAssignedDrop(team.id, toIndex)}
                           onSaved={loadData}
                         />
                       );
