@@ -198,34 +198,44 @@ export default function WarehousePage() {
 
   // ── Pick list loader ──────────────────────────────────────
   const printPickList = () => {
-    // Group by customer/SO for cleaner print
-    const grouped = {};
+    // Group by date → then by SO within each date
+    const byDate = {};
     for (const item of pickItems) {
-      const key = item._so_number || item.so_number || "Unknown";
-      if (!grouped[key]) grouped[key] = { customer: item._customer || item.customer_name || "", date: item._delivery_date || "", items: [] };
-      grouped[key].items.push(item);
+      const date = item._delivery_date || "No Date";
+      const so = item._so_number || item.so_number || "Unknown";
+      if (!byDate[date]) byDate[date] = {};
+      if (!byDate[date][so]) byDate[date][so] = { customer: item._customer || item.customer_name || "", items: [] };
+      byDate[date][so].items.push(item);
     }
-    const rows = Object.entries(grouped).map(([so, g]) =>
-      g.items.map((item, i) =>
-        `<tr>
-          ${i === 0 ? `<td rowspan="${g.items.length}" style="border:1px solid #ddd;padding:6px 8px;vertical-align:top;font-weight:700">${so}<br><span style="font-weight:400;font-size:11px;color:#666">${g.customer}</span><br><span style="font-weight:400;font-size:10px;color:#999">${g.date}</span></td>` : ""}
-          <td style="border:1px solid #ddd;padding:6px 8px">${item._product_code || item.product_code || ""}</td>
-          <td style="border:1px solid #ddd;padding:6px 8px">${item._product_name || item.product_name || ""}</td>
-          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center">${item.location_code || "-"}</td>
-          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center">${item.qr_code || "-"}</td>
-          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center;width:40px">☐</td>
-        </tr>`
-      ).join("")
-    ).join("");
+    const sortedDates = Object.keys(byDate).sort();
+    let html = "";
+    for (const date of sortedDates) {
+      const dayLabel = date !== "No Date" ? new Date(date + "T00:00").toLocaleDateString("en-MY", { weekday: "long", year: "numeric", month: "short", day: "numeric" }) : "No Date";
+      const soEntries = Object.entries(byDate[date]);
+      const dayItemCount = soEntries.reduce((s, [, g]) => s + g.items.length, 0);
+      html += `<tr><td colspan="6" style="background:#7C3AED;color:#fff;padding:8px 10px;font-weight:700;font-size:13px">${dayLabel} — ${soEntries.length} orders · ${dayItemCount} items</td></tr>`;
+      for (const [so, g] of soEntries) {
+        html += g.items.map((item, i) =>
+          `<tr style="${i % 2 ? "background:#f9f9f9" : ""}">
+            ${i === 0 ? `<td rowspan="${g.items.length}" style="border:1px solid #ddd;padding:6px 8px;vertical-align:top;font-weight:700;background:#FAFAFE">${so}<br><span style="font-weight:400;font-size:11px;color:#666">${g.customer}</span></td>` : ""}
+            <td style="border:1px solid #ddd;padding:6px 8px">${item._product_code || item.product_code || ""}</td>
+            <td style="border:1px solid #ddd;padding:6px 8px">${item._product_name || item.product_name || ""}</td>
+            <td style="border:1px solid #ddd;padding:6px 8px;text-align:center;font-family:monospace;font-weight:700;color:#7C3AED">${item.location_code || "-"}</td>
+            <td style="border:1px solid #ddd;padding:6px 8px;text-align:center;font-size:9px;color:#999">${item.qr_code || "-"}</td>
+            <td style="border:1px solid #ddd;padding:6px 8px;text-align:center;width:36px;font-size:16px">☐</td>
+          </tr>`
+        ).join("");
+      }
+    }
     const w = window.open("", "_blank");
     if (!w) { toast.warning("Allow pop-ups to print"); return; }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pick List</title>
-    <style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:15px}
-    h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#666;margin:0 0 12px;font-weight:400}
-    table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:8px;text-align:left;font-size:11px}
-    td{font-size:11px}tr:nth-child(even){background:#f9f9f9}</style></head>
-    <body><h1>Pick List</h1><h2>${new Date().toLocaleDateString("en-MY")} · ${pickItems.length} items · Next ${pickDays} day${pickDays > 1 ? "s" : ""}</h2>
-    <table><thead><tr><th>SO / Customer</th><th>Code</th><th>Product</th><th>Location</th><th>QR</th><th>✓</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    <style>@page{size:A4 landscape;margin:8mm}body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:12px}
+    h1{font-size:18px;margin:0 0 3px}h2{font-size:12px;color:#666;margin:0 0 10px;font-weight:400}
+    table{border-collapse:collapse;width:100%}th{background:#4C1D95;color:#fff;padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
+    td{font-size:11px}</style></head>
+    <body><h1>🏭 Pick List</h1><h2>Printed ${new Date().toLocaleDateString("en-MY")} · ${pickItems.length} total items · Next ${pickDays} day${pickDays > 1 ? "s" : ""}</h2>
+    <table><thead><tr><th>SO / Customer</th><th>Code</th><th>Product</th><th>Location</th><th>QR</th><th style="text-align:center">✓</th></tr></thead><tbody>${html}</tbody></table></body></html>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
   };
 
@@ -409,26 +419,46 @@ export default function WarehousePage() {
 
           {pickLoading && <div className="text-center text-gray-400 py-8">Loading pick list…</div>}
           {!pickLoading && pickItems.length === 0 && <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">📋</div><p>No items to pick for upcoming deliveries</p></div>}
-          {!pickLoading && pickItems.length > 0 && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
-              {pickItems.map(item => (
-                <div key={item.id} className={`flex items-center justify-between px-4 py-3 ${item.status === "picked" ? "opacity-50" : item.status === "no_package" ? "opacity-60 bg-amber-50" : ""}`}>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{item._product_code || item.product_code || ""} {item._product_name || item.product_name || ""}</p>
-                    <p className="text-xs text-gray-500">
-                      {(item._customer || item.customer_name) && <span className="text-violet-600">{item._customer || item.customer_name} · </span>}
-                      SO: {item._so_number || item.so_number || ""} {item.carton_number ? `· Carton ${item.carton_number}/${item.total_cartons}` : ""}
-                      {item._delivery_date && <span className="ml-1 text-gray-400">· {item._delivery_date}</span>}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {item.location_code && <span className="text-xs font-mono font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-lg">{item.location_code}</span>}
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.status === "no_package" ? "bg-amber-100 text-amber-700" : PKG_STATUS[item.status] || "bg-gray-100"}`}>{item.status === "no_package" ? "No QR" : item.status}</span>
-                  </div>
+          {!pickLoading && pickItems.length > 0 && (() => {
+            // Group by date → SO
+            const byDate = {};
+            for (const item of pickItems) {
+              const d = item._delivery_date || "No Date";
+              if (!byDate[d]) byDate[d] = {};
+              const so = item._so_number || item.so_number || "?";
+              if (!byDate[d][so]) byDate[d][so] = { customer: item._customer || item.customer_name || "", items: [] };
+              byDate[d][so].items.push(item);
+            }
+            return Object.keys(byDate).sort().map(date => (
+              <div key={date} className="space-y-2">
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs font-bold text-white bg-violet-600 px-3 py-1 rounded-full">{date !== "No Date" ? new Date(date + "T00:00").toLocaleDateString("en-MY", { weekday: "short", month: "short", day: "numeric" }) : "No Date"}</span>
+                  <span className="text-xs text-gray-400">{Object.keys(byDate[date]).length} orders</span>
                 </div>
-              ))}
-            </div>
-          )}
+                {Object.entries(byDate[date]).map(([so, g]) => (
+                  <div key={so} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex items-center justify-between">
+                      <div><span className="text-sm font-bold text-violet-700">{so}</span><span className="text-sm text-gray-600 ml-2">{g.customer}</span></div>
+                      <span className="text-xs text-gray-400">{g.items.length} item{g.items.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {g.items.map(item => (
+                        <div key={item.id} className={`flex items-center justify-between px-4 py-2.5 ${item.status === "picked" ? "opacity-40" : item.status === "no_package" ? "bg-amber-50/50" : ""}`}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">{item._product_code || item.product_code || ""} {item._product_name || item.product_name || ""}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {item.location_code && <span className="text-xs font-mono font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-lg">{item.location_code}</span>}
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.status === "no_package" ? "bg-amber-100 text-amber-700" : PKG_STATUS[item.status] || "bg-gray-100"}`}>{item.status === "no_package" ? "No QR" : item.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ));
+          })()}
         </div>
       )}
 
