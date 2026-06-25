@@ -322,6 +322,18 @@ export default function CompanySettingsPage() {
                     {w.address && <p className="text-xs text-gray-400">{w.address}</p>}
                   </div>
                   <div className="flex gap-2">
+                    <button onClick={async () => {
+                      const headers = await authHeaders();
+                      const res = await fetch(`${API}/warehouses/${w.id}/rack-qrs`, { headers });
+                      const d = await res.json();
+                      const racks = d.racks || [];
+                      if (racks.length === 0) { alert("No racks to print"); return; }
+                      const html = racks.map(r => `<div class="label"><div class="qr"><img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(r.qr_code)}" /></div><div class="info"><div class="code">${r.qr_code}</div><div class="zone">${r.zone_name}</div><div class="rack">${r.code}</div></div></div>`).join("");
+                      const pw = window.open("", "_blank");
+                      if (!pw) return;
+                      pw.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rack QRs — ${w.name}</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;margin:0;padding:10px}.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.label{border:2px solid #333;border-radius:10px;padding:16px;text-align:center;page-break-inside:avoid}.qr img{width:120px;height:120px}.code{font-family:monospace;font-size:9px;color:#7C3AED;margin-top:6px}.zone{font-size:14px;color:#555;margin-top:4px}.rack{font-size:24px;font-weight:900;color:#111}</style></head><body><h2 style="text-align:center;margin-bottom:12px">${w.name} — Rack Labels</h2><div class="grid">${html}</div></body></html>`);
+                      pw.document.close(); pw.focus(); setTimeout(() => pw.print(), 500);
+                    }} className="text-xs text-violet-600 hover:underline">🏷 Print Rack QRs</button>
                     <button onClick={() => { setWhEditId(w.id); setWhForm({ name: w.name, type: w.type, address: w.address || "", pic: w.pic || "", contact: w.contact || "" }); }}
                       className="text-xs text-violet-600 hover:underline">Edit</button>
                     <button onClick={() => deleteWarehouse(w.id)}
