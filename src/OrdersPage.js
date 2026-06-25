@@ -152,8 +152,8 @@ function printSalesOrder(order, signatureDataUrl, co) {
   const deposit = Number(order.deposit) || 0;
   const subtotal = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : gross;
   const afterDisc = subtotal - discount;
-  const orderGstRate = Number(order.gst_rate) || 0;
-  const orderGst = Number(order.gst_amount) || Math.round(afterDisc * orderGstRate) / 100;
+  const orderGstRate = order.gst_waived ? 0 : (Number(order.gst_rate) || 0);
+  const orderGst = order.gst_waived ? 0 : (order.gst_amount != null ? Number(order.gst_amount) : Math.round(afterDisc * orderGstRate) / 100);
   const total = afterDisc + orderGst;
   const balance = total - deposit;
   const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString("en-MY") : new Date().toLocaleDateString("en-MY");
@@ -413,7 +413,7 @@ export default function OrdersPage() {
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
         custom_dimensions: it.custom_dimensions || "",
-        custom_specs: (it.custom_dimensions || "").includes(": ") ? (it.custom_dimensions || "").split(" | ").map(s => { const [l, ...v] = s.split(": "); return { label: l || "", value: v.join(": ") || "" }; }) : [],
+        custom_specs: (it.custom_dimensions || "").includes(": ") ? (it.custom_dimensions || "").split(" | ").map(s => { const [l, ...v] = s.split(": "); return { label: l || "", value: v.join(": ") || "" }; }) : (it.custom_dimensions ? [{ label: "Specs", value: it.custom_dimensions }] : []),
         quantity: it.quantity ?? 1,
         unit_price: it.unit_price ?? "", unit_cost: it.unit_cost ?? "",
         attachment_url: it.attachment_url || "", notes: it.notes || "",
@@ -639,7 +639,7 @@ export default function OrdersPage() {
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold text-gray-900">RM {Number(o.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
                   <button onClick={e => { e.stopPropagation(); setSignOrder(o); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
@@ -679,7 +679,7 @@ export default function OrdersPage() {
                       if (!res.ok) { alert(d.error || "Failed"); return; }
                       printDeliveryNote(d, editingOrder, companyInfo);
                     }} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">🚚 Generate DO</button>
-                    <button onClick={() => setSignOrder({ ...editingOrder, ...form, items: form.items })}
+                    <button onClick={() => setSignOrder({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   </>
                 )}
