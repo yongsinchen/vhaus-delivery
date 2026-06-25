@@ -197,6 +197,38 @@ export default function WarehousePage() {
   };
 
   // ── Pick list loader ──────────────────────────────────────
+  const printPickList = () => {
+    // Group by customer/SO for cleaner print
+    const grouped = {};
+    for (const item of pickItems) {
+      const key = item._so_number || item.so_number || "Unknown";
+      if (!grouped[key]) grouped[key] = { customer: item._customer || item.customer_name || "", date: item._delivery_date || "", items: [] };
+      grouped[key].items.push(item);
+    }
+    const rows = Object.entries(grouped).map(([so, g]) =>
+      g.items.map((item, i) =>
+        `<tr>
+          ${i === 0 ? `<td rowspan="${g.items.length}" style="border:1px solid #ddd;padding:6px 8px;vertical-align:top;font-weight:700">${so}<br><span style="font-weight:400;font-size:11px;color:#666">${g.customer}</span><br><span style="font-weight:400;font-size:10px;color:#999">${g.date}</span></td>` : ""}
+          <td style="border:1px solid #ddd;padding:6px 8px">${item._product_code || item.product_code || ""}</td>
+          <td style="border:1px solid #ddd;padding:6px 8px">${item._product_name || item.product_name || ""}</td>
+          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center">${item.location_code || "-"}</td>
+          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center">${item.qr_code || "-"}</td>
+          <td style="border:1px solid #ddd;padding:6px 8px;text-align:center;width:40px">☐</td>
+        </tr>`
+      ).join("")
+    ).join("");
+    const w = window.open("", "_blank");
+    if (!w) { toast.warning("Allow pop-ups to print"); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pick List</title>
+    <style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:15px}
+    h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;color:#666;margin:0 0 12px;font-weight:400}
+    table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:8px;text-align:left;font-size:11px}
+    td{font-size:11px}tr:nth-child(even){background:#f9f9f9}</style></head>
+    <body><h1>Pick List</h1><h2>${new Date().toLocaleDateString("en-MY")} · ${pickItems.length} items · Next ${pickDays} day${pickDays > 1 ? "s" : ""}</h2>
+    <table><thead><tr><th>SO / Customer</th><th>Code</th><th>Product</th><th>Location</th><th>QR</th><th>✓</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
   const loadPickList = async () => {
     if (!companyId) return;
     setPickLoading(true);
@@ -366,7 +398,8 @@ export default function WarehousePage() {
               <option value={7}>Next 7 days</option>
             </select>
             <button onClick={loadPickList} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
-            <span className="text-xs text-gray-500">{pickItems.filter(p => p.status === "stored").length} to pick · {pickItems.filter(p => p.status === "picked").length} picked</span>
+            {pickItems.length > 0 && <button onClick={() => printPickList()} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Pick List</button>}
+            <span className="text-xs text-gray-500">{pickItems.filter(p => p.status === "put_away" || p.status === "stored" || p.status === "no_package").length} to pick · {pickItems.filter(p => p.status === "picked").length} picked</span>
           </div>
 
           {/* Camera for pick scanning */}
