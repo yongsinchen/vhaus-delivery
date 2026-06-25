@@ -646,6 +646,10 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   const [serviceOrders, setServiceOrders] = useState([]);
   const [unscheduledServices, setUnscheduledServices] = useState([]);
+  const [readiness, setReadiness] = useState(null);
+  const [suggestions, setSuggestions] = useState(null);
+  const [showReadiness, setShowReadiness] = useState(false);
+  const [showSuggest, setShowSuggest] = useState(false);
 
   /** Load teams + schedules, group schedules into teams */
   const loadData = useCallback(async () => {
@@ -705,6 +709,22 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   }, [date, companyId]);
 
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
+
+  const loadReadiness = async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/delivery-readiness?company_id=${companyId}&date=${date}&days=3`);
+    const d = await res.json();
+    setReadiness(d);
+    setShowReadiness(true);
+  };
+
+  const loadSuggestions = async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/scheduling-suggest?company_id=${companyId}&date=${date}`);
+    const d = await res.json();
+    setSuggestions(d);
+    setShowSuggest(true);
+  };
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
 
@@ -811,6 +831,8 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
         <div className="flex items-center gap-3 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
+          <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
+          <button onClick={loadSuggestions} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>
           <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>
           <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>
         </div>
@@ -824,6 +846,102 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
         <AutoSchedulerModal date={date} companyId={companyId}
           onClose={() => setShowAutoScheduler(false)}
           onApproved={() => { loadData(); loadServiceOrders(); }} />
+      )}
+
+      {/* Readiness Modal */}
+      {showReadiness && readiness && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-8 px-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mb-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h3 className="font-bold text-gray-900">Delivery Readiness Check</h3>
+                <p className="text-xs text-gray-500">{readiness.ready}/{readiness.total} orders ready · Next 3 days</p>
+              </div>
+              <button onClick={() => setShowReadiness(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+            </div>
+            <div className="p-4 space-y-2 max-h-[70vh] overflow-y-auto">
+              {(readiness.orders || []).map(o => (
+                <div key={o.order_id} className={`rounded-xl border p-3 ${o.is_ready ? "border-emerald-200 bg-emerald-50" : o.alerts.some(a => a.severity === "high") ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-violet-700">{o.so_number}</span>
+                      <span className="text-sm text-gray-700">{o.customer_name}</span>
+                      <span className="text-xs text-gray-400">{o.delivery_date}</span>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.is_ready ? "bg-emerald-200 text-emerald-800" : "bg-red-200 text-red-800"}`}>{o.is_ready ? "Ready" : "Not Ready"}</span>
+                  </div>
+                  <div className="flex gap-3 text-xs text-gray-500">
+                    <span>Items: {o.arrived_items}/{o.total_items} arrived</span>
+                    <span>Packed: {o.packed} Stored: {o.stored} Picked: {o.picked}</span>
+                  </div>
+                  {o.alerts.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {o.alerts.map((a, i) => (
+                        <div key={i} className={`text-xs flex items-center gap-1 ${a.severity === "high" ? "text-red-700 font-medium" : a.severity === "medium" ? "text-amber-700" : "text-gray-500"}`}>
+                          <span>{a.severity === "high" ? "🔴" : a.severity === "medium" ? "🟡" : "🔵"}</span>
+                          <span>{a.message}</span>
+                        </div>
+                      ))}
+                      {o.missing_items.length > 0 && <p className="text-xs text-red-600 ml-4">{o.missing_items.join(", ")}</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Smart Assign Modal */}
+      {showSuggest && suggestions && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-8 px-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mb-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h3 className="font-bold text-gray-900">🧠 Smart Assign — {date}</h3>
+                <p className="text-xs text-gray-500">{suggestions.unassigned_count} unassigned orders grouped by area</p>
+              </div>
+              <button onClick={() => setShowSuggest(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+            </div>
+            <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+              {suggestions.unassigned_count === 0 && <p className="text-center text-gray-400 py-8">All orders already assigned!</p>}
+              {(suggestions.suggestions || []).map(sg => (
+                <div key={sg.area} className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-violet-50 px-4 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-violet-700">📍 {sg.area}</span>
+                      <span className="text-xs text-gray-500">{sg.order_count} orders · {sg.item_count} items</span>
+                    </div>
+                    <button onClick={async () => {
+                      if (teams.length === 0) { alert("Create a team first"); return; }
+                      const teamId = teams[0]?.id;
+                      if (!teamId) return;
+                      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
+                      for (const o of sg.orders) {
+                        await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
+                      }
+                      loadData();
+                      loadSuggestions();
+                    }} className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Assign All to First Team</button>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {sg.orders.map(o => (
+                      <div key={o.id} className="px-4 py-2 flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-bold text-gray-800">{o.so_number}</span>
+                          <span className="text-xs text-gray-600 ml-2">{o.customer_name}</span>
+                          {o.time_slot && <span className="text-xs text-violet-600 ml-2">{o.time_slot}</span>}
+                          {o._has_balance && <span className="text-xs text-red-500 ml-2">RM {o.balance}</span>}
+                        </div>
+                        <span className="text-xs text-gray-400">{o._item_count} items</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="flex flex-col xl:flex-row gap-4">
