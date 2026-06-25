@@ -538,19 +538,27 @@ export default function OrdersPage() {
     const items = order.sales_order_items || order.items || [];
     const productIds = items.map(i => i.product_id).filter(Boolean);
     if (productIds.length === 0) { alert("No products linked to items"); return; }
-    const res = await fetch(`${API}/products?company_id=${companyId}&limit=999`);
-    const d = await res.json();
-    const prodMap = new Map((d.products || []).map(p => [p.id, p]));
+    // Fetch products and suppliers separately to avoid PostgREST join issues
+    const [prodRes, supRes] = await Promise.all([
+      fetch(`${API}/products?company_id=${companyId}&limit=999`),
+      fetch(`${API}/suppliers?company_id=${companyId}`),
+    ]);
+    const prodData = await prodRes.json();
+    const supData = await supRes.json();
+    const supMap = new Map((supData.suppliers || []).map(s => [s.id, s]));
+    const prodMap = new Map((prodData.products || []).map(p => [p.id, p]));
     const groups = {};
     const noSupplier = [];
     for (const item of items) {
       const prod = prodMap.get(item.product_id);
-      const sid = prod?.suppliers?.id;
-      if (!sid) { noSupplier.push(item); continue; }
-      if (!groups[sid]) groups[sid] = { name: prod.suppliers.name, items: [] };
+      // Try product's direct supplier_id, then the joined suppliers object
+      const sid = prod?.supplier_id || prod?.suppliers?.id;
+      const sup = supMap.get(sid);
+      if (!sid || !sup) { noSupplier.push(item); continue; }
+      if (!groups[sid]) groups[sid] = { name: sup.name, items: [] };
       groups[sid].items.push(item);
     }
-    const allIds = new Set(items.filter(i => prodMap.get(i.product_id)?.suppliers?.id).map(i => i.id));
+    const allIds = new Set(items.filter(i => { const p = prodMap.get(i.product_id); return p?.supplier_id || p?.suppliers?.id; }).map(i => i.id));
     setPOSelectedItems(allIds);
     setPOModal({ order, groups, noSupplier });
   };
