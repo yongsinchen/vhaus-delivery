@@ -29,6 +29,7 @@ export default function WarehousePage() {
   // Scan & Store — two-scan mode
   const [scanMode, setScanMode] = useState("item"); // "item" or "rack"
   const [pendingItem, setPendingItem] = useState(null); // item waiting for rack scan
+  const pendingItemRef = useRef(null);
   const [scanMsg, setScanMsg] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef(null);
@@ -149,21 +150,22 @@ export default function WarehousePage() {
     const headers = await authHeaders();
     if (tab === 1) {
       // Scan & Store — two-scan flow
+      const pending = pendingItemRef.current;
       if (qr.startsWith("RACK-")) {
-        if (!pendingItem) { setScanMsg("⚠️ Scan an ITEM first, then the rack"); setTimeout(() => setScanMsg(""), 2000); return; }
-        const res = await fetch(`${API}/packings/${pendingItem.id}/put-away`, { method: "PATCH", headers, body: JSON.stringify({ rack_qr_code: qr }) });
+        if (!pending) { setScanMsg("⚠️ Scan an ITEM first, then the rack"); setTimeout(() => setScanMsg(""), 2000); return; }
+        const res = await fetch(`${API}/packings/${pending.id}/put-away`, { method: "PATCH", headers, body: JSON.stringify({ rack_qr_code: qr }) });
         const d = await res.json();
         if (!res.ok) { setScanMsg(`❌ ${d.error || "Failed"}`); setTimeout(() => setScanMsg(""), 3000); return; }
-        setScanMsg(`✅ ${pendingItem._product_name || pendingItem._product_code || "Item"} → ${d.location_code || qr}`);
+        setScanMsg(`✅ ${pending._product_name || pending._product_code || "Item"} → ${d.location_code || qr}`);
         setTimeout(() => setScanMsg(""), 3000);
-        setPendingItem(null); setScanMode("item");
+        pendingItemRef.current = null; setPendingItem(null); setScanMode("item");
       } else {
         const res = await fetch(`${API}/packings/validate/${encodeURIComponent(qr)}`, { headers });
         const d = await res.json();
         if (!d.packing) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
         const p = d.packing;
         if (p.status === "put_away" || p.status === "stored") { setScanMsg(`⏭ Already stored at ${p.location_code || "unknown"}`); setTimeout(() => setScanMsg(""), 2000); return; }
-        setPendingItem(p); setScanMode("rack");
+        pendingItemRef.current = p; setPendingItem(p); setScanMode("rack");
         setScanMsg(`📦 ${p._product_name || p._product_code || qr} — Now scan the RACK`);
       }
     } else if (tab === 2) {
@@ -345,7 +347,7 @@ export default function WarehousePage() {
                 <p className="text-xs text-amber-700 font-bold">Pending: scan the RACK where you're placing this item</p>
                 <p className="text-sm font-medium text-gray-900">{pendingItem.product_code} {pendingItem.product_name}</p>
                 <p className="text-xs text-gray-500">Carton {pendingItem.carton_number}/{pendingItem.total_cartons}</p>
-                <button onClick={() => { setPendingItem(null); setScanMode("item"); setScanMsg(""); }} className="text-xs text-gray-500 underline mt-1">Cancel</button>
+                <button onClick={() => { pendingItemRef.current = null; setPendingItem(null); setScanMode("item"); setScanMsg(""); }} className="text-xs text-gray-500 underline mt-1">Cancel</button>
               </div>
             )}
             {cameraUI}
