@@ -85,7 +85,7 @@ export default function WarehousePage() {
     if (!selectedDO) return;
     const headers = await authHeaders();
     const payload = { supplier_delivery_id: selectedDO.id, items: labelItems.map(it => ({ product_code: it.item_code || it.product_code, product_name: it.item_name || it.product_name, so_number: it.so_number, carton_count: Number(it.carton_count) || 1, warehouse_id: labelWarehouse || null })) };
-    const res = await fetch(`${API}/package-labels/generate`, { method: "POST", headers, body: JSON.stringify(payload) });
+    const res = await fetch(`${API}/packings/generate`, { method: "POST", headers, body: JSON.stringify(payload) });
     const d = await res.json();
     if (!res.ok) {
       if (d.error?.includes("already generated")) { toast.warning("Labels already generated — reprinting"); if (labels.length > 0) printLabels(labels, selectedDO); }
@@ -146,55 +146,51 @@ export default function WarehousePage() {
 
   // ── Two-scan handler: item QR → rack QR ───────────────────
   const handleQRScan = async (qr) => {
+    const headers = await authHeaders();
     if (tab === 1) {
-      // Scan & Store tab — two-scan flow
+      // Scan & Store — two-scan flow
       if (qr.startsWith("RACK-")) {
-        // It's a rack QR
         if (!pendingItem) { setScanMsg("⚠️ Scan an ITEM first, then the rack"); setTimeout(() => setScanMsg(""), 2000); return; }
-        const headers = await authHeaders();
-        const res = await fetch(`${API}/package-labels/${pendingItem.id}/store`, { method: "PATCH", headers, body: JSON.stringify({ rack_qr_code: qr }) });
+        const res = await fetch(`${API}/packings/${pendingItem.id}/put-away`, { method: "PATCH", headers, body: JSON.stringify({ rack_qr_code: qr }) });
         const d = await res.json();
         if (!res.ok) { setScanMsg(`❌ ${d.error || "Failed"}`); setTimeout(() => setScanMsg(""), 3000); return; }
-        setScanMsg(`✅ ${pendingItem.product_name || pendingItem.product_code} → ${d.label?.location_code || qr}`);
+        setScanMsg(`✅ ${pendingItem._product_name || pendingItem._product_code || "Item"} → ${d.location_code || qr}`);
         setTimeout(() => setScanMsg(""), 3000);
-        setPendingItem(null);
-        setScanMode("item");
+        setPendingItem(null); setScanMode("item");
       } else {
-        // It's an item QR — look it up
-        const headers = await authHeaders();
-        const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(qr)}`, { headers });
+        const res = await fetch(`${API}/packings/validate/${encodeURIComponent(qr)}`, { headers });
         const d = await res.json();
-        if (!res.ok || !d.label) { setScanMsg(`❌ Item not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
-        if (d.label.status === "stored") { setScanMsg(`⏭ Already stored at ${d.label.location_code}`); setTimeout(() => setScanMsg(""), 2000); return; }
-        setPendingItem(d.label);
-        setScanMode("rack");
-        setScanMsg(`📦 ${d.label.product_name} (${d.label.carton_number}/${d.label.total_cartons}) — Now scan the RACK`);
+        if (!d.packing) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
+        const p = d.packing;
+        if (p.status === "put_away" || p.status === "stored") { setScanMsg(`⏭ Already stored at ${p.location_code || "unknown"}`); setTimeout(() => setScanMsg(""), 2000); return; }
+        setPendingItem(p); setScanMode("rack");
+        setScanMsg(`📦 ${p._product_name || p._product_code || qr} — Now scan the RACK`);
       }
     } else if (tab === 2) {
-      // Pick list — scan to pick
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(qr)}`, { headers });
+      // Pick — scan to pick
+      const res = await fetch(`${API}/packings/validate/${encodeURIComponent(qr)}`, { headers });
       const d = await res.json();
-      if (!d.label) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
-      if (d.label.status === "picked") { setScanMsg(`⏭ Already picked`); setTimeout(() => setScanMsg(""), 2000); return; }
-      if (d.label.status !== "stored") { setScanMsg(`⚠️ Item not stored yet (${d.label.status})`); setTimeout(() => setScanMsg(""), 2000); return; }
-      await fetch(`${API}/package-labels/${d.label.id}/pick`, { method: "PATCH", headers });
-      setScanMsg(`✅ Picked: ${d.label.product_name} from ${d.label.location_code}`);
+      if (!d.packing) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
+      const p = d.packing;
+      if (p.status === "picked" || p.status === "loaded") { setScanMsg(`⏭ Already ${p.status}`); setTimeout(() => setScanMsg(""), 2000); return; }
+      if (p.status !== "put_away" && p.status !== "stored") { setScanMsg(`⚠️ Not stored yet (${p.status})`); setTimeout(() => setScanMsg(""), 2000); return; }
+      await fetch(`${API}/packings/${p.id}/pick`, { method: "PATCH", headers });
+      setScanMsg(`✅ Picked: ${p._product_name || qr} from ${p.location_code || ""}`);
       setTimeout(() => setScanMsg(""), 3000);
-      setPickItems(prev => prev.map(p => p.id === d.label.id ? { ...p, status: "picked" } : p));
+      setPickItems(prev => prev.map(i => i.id === p.id || i.qr_code === p.qr_code ? { ...i, status: "picked" } : i));
     } else if (tab === 3) {
-      // Loading — scan to load
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(qr)}`, { headers });
+      // Load — scan to load + validate team
+      const res = await fetch(`${API}/packings/validate/${encodeURIComponent(qr)}`, { headers });
       const d = await res.json();
-      if (!d.label) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
-      if (d.label.status === "loaded") { setScanMsg(`⏭ Already loaded`); setTimeout(() => setScanMsg(""), 2000); return; }
-      if (d.label.status !== "picked") { setScanMsg(`⚠️ Item not picked yet (${d.label.status})`); setTimeout(() => setScanMsg(""), 2000); return; }
-      const lRes = await fetch(`${API}/package-labels/${d.label.id}/load`, { method: "PATCH", headers, body: JSON.stringify({ route_id: loadRoute || null }) });
+      if (!d.packing) { setScanMsg(`❌ Not found: ${qr}`); setTimeout(() => setScanMsg(""), 2000); return; }
+      const p = d.packing;
+      if (p.status === "loaded") { setScanMsg(`⏭ Already loaded`); setTimeout(() => setScanMsg(""), 2000); return; }
+      if (p.status !== "picked") { setScanMsg(`⚠️ Not picked yet (${p.status})`); setTimeout(() => setScanMsg(""), 2000); return; }
+      const lRes = await fetch(`${API}/packings/${p.id}/load`, { method: "PATCH", headers, body: JSON.stringify({ team_id: loadRoute || null }) });
       const lData = await lRes.json();
       if (lData.warning) { setScanMsg(`⚠️ ${lData.warning}`); setTimeout(() => setScanMsg(""), 4000); }
-      else { setScanMsg(`✅ Loaded: ${d.label.product_name}`); setTimeout(() => setScanMsg(""), 3000); }
-      setLoadingItems(prev => prev.map(p => p.id === d.label.id ? { ...p, status: "loaded" } : p));
+      else { setScanMsg(`✅ Loaded: ${p._product_name || qr}`); setTimeout(() => setScanMsg(""), 3000); }
+      setLoadingItems(prev => prev.map(i => i.id === p.id || i.qr_code === p.qr_code ? { ...i, status: "loaded" } : i));
     }
   };
 
@@ -203,7 +199,7 @@ export default function WarehousePage() {
     if (!companyId) return;
     setPickLoading(true);
     const headers = await authHeaders();
-    const res = await fetch(`${API}/pick-list?company_id=${companyId}&days=${pickDays}`, { headers });
+    const res = await fetch(`${API}/unified-pick-list?company_id=${companyId}&days=${pickDays}`, { headers });
     const d = await res.json();
     setPickItems(d.items || []);
     setPickLoading(false);
@@ -213,14 +209,14 @@ export default function WarehousePage() {
   const loadLoadingList = async () => {
     if (!companyId) return;
     const headers = await authHeaders();
-    // Load routes for the date
-    const rRes = await fetch(`${API}/delivery/routes?date=${loadDate}`, { headers });
+    // Load teams for the date
+    const rRes = await fetch(`${API}/delivery-teams?company_id=${companyId}&date=${loadDate}`, { headers });
     const rData = await rRes.json();
-    setRoutes(Array.isArray(rData) ? rData : []);
+    setRoutes(rData.teams || []);
     // Load items
-    const params = new URLSearchParams({ company_id: companyId, date: loadDate });
-    if (loadRoute) params.set("route_id", loadRoute);
-    const res = await fetch(`${API}/loading-list?${params}`, { headers });
+    const params = new URLSearchParams({ date: loadDate });
+    if (loadRoute) params.set("team_id", loadRoute);
+    const res = await fetch(`${API}/unified-loading-list?${params}`, { headers });
     const d = await res.json();
     setLoadingItems(d.items || []);
   };
@@ -383,10 +379,10 @@ export default function WarehousePage() {
               {pickItems.map(item => (
                 <div key={item.id} className={`flex items-center justify-between px-4 py-3 ${item.status === "picked" ? "opacity-50" : ""}`}>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{item.product_code} {item.product_name}</p>
+                    <p className="text-sm font-medium text-gray-900">{item._product_code || item.product_code || ""} {item._product_name || item.product_name || ""}</p>
                     <p className="text-xs text-gray-500">
-                      {item.customer_name && <span className="text-violet-600">{item.customer_name} · </span>}
-                      SO: {item.so_number} · Carton {item.carton_number}/{item.total_cartons}
+                      {(item._customer || item.customer_name) && <span className="text-violet-600">{item._customer || item.customer_name} · </span>}
+                      SO: {item._so_number || item.so_number || ""} {item.carton_number ? `· Carton ${item.carton_number}/${item.total_cartons}` : ""}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -407,7 +403,7 @@ export default function WarehousePage() {
             <input type="date" value={loadDate} onChange={e => setLoadDate(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
             <select value={loadRoute} onChange={e => setLoadRoute(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
               <option value="">All routes</option>
-              {routes.map(r => <option key={r.id} value={r.id}>{r.route_name || r.vehicle_plate || `Route ${String(r.id).slice(0,6)}`}</option>)}
+              {routes.map(r => <option key={r.id} value={r.id}>{r.delivery_vehicles?.vehicle_plate || r.driver_name || `Team ${String(r.id).slice(0,6)}`}</option>)}
             </select>
             <button onClick={loadLoadingList} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
           </div>
@@ -439,10 +435,10 @@ export default function WarehousePage() {
               {loadingItems.map(item => (
                 <div key={item.id} className={`flex items-center justify-between px-4 py-3 ${item.status === "loaded" ? "opacity-50" : ""}`}>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{item.product_code} {item.product_name}</p>
+                    <p className="text-sm font-medium text-gray-900">{item._product_code || item.product_code || ""} {item._product_name || item.product_name || ""}</p>
                     <p className="text-xs text-gray-500">
-                      {item.customer_name && <span className="text-violet-600">{item.customer_name} · </span>}
-                      SO: {item.so_number} · Carton {item.carton_number}/{item.total_cartons}
+                      {(item._customer || item.customer_name) && <span className="text-violet-600">{item._customer || item.customer_name} · </span>}
+                      SO: {item._so_number || item.so_number || ""} {item.carton_number ? `· Carton ${item.carton_number}/${item.total_cartons}` : ""}
                     </p>
                   </div>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${PKG_STATUS[item.status] || "bg-gray-100"}`}>{item.status}</span>
