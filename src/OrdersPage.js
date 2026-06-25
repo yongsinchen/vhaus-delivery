@@ -35,7 +35,7 @@ const EMPTY_ORDER = {
   customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
-  discount: "", deposit: "", payment_method: "",
+  discount: "", deposit: "", payment_method: "", payment_proofs: [],
   branch_id: "", salesman_names: "",
   country: "", gst_rate: 0, gst_waived: false,
 };
@@ -407,7 +407,7 @@ export default function OrdersPage() {
       delivery_date: o.delivery_date || "",
       delivery_time_slot: o.delivery_time_slot || "",
       remark: o.remark || "",
-      discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "",
+      discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "", payment_proofs: (() => { try { return JSON.parse(o.payment_proofs || "[]"); } catch { return []; } })(),
       branch_id: o.branch_id || "", salesman_names: o.salesman_name || "",
       country: o.country || "", gst_rate: o.gst_rate ?? 0, gst_waived: o.gst_waived || false,
       items: (o.sales_order_items || []).map(it => ({
@@ -471,9 +471,36 @@ export default function OrdersPage() {
   const balanceVal = totalAfterDiscount - depositVal;
 
   const saveOrder = async () => {
+    // ── Base validation (all statuses) ──
     if (!form.customer_name.trim()) { setFormError("Customer name is required"); return; }
     if (!form.country) { setFormError("Please select a country"); return; }
     if (form.items.length === 0) { setFormError("Add at least one product"); return; }
+    // Discount cannot exceed subtotal
+    const calcSubtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
+    if ((Number(form.discount) || 0) > calcSubtotal) { setFormError("Discount cannot exceed subtotal (RM " + calcSubtotal.toFixed(2) + ")"); return; }
+    // Deposit cannot exceed total
+    const calcTotal = calcSubtotal - (Number(form.discount) || 0) + (form.gst_waived ? 0 : gstAmount);
+    if ((Number(form.deposit) || 0) > calcTotal) { setFormError("Deposit cannot exceed total (RM " + calcTotal.toFixed(2) + ")"); return; }
+    // Items with qty 0
+    if (form.items.some(it => (Number(it.quantity) || 0) <= 0)) { setFormError("All items must have quantity > 0"); return; }
+
+    // ── Confirmation validation (when setting to confirmed) ──
+    if (form.status === "confirmed") {
+      const missing = [];
+      const noPriceItems = form.items.filter(it => !it.unit_price && it.unit_price !== 0);
+      if (noPriceItems.length > 0) missing.push(`${noPriceItems.length} item(s) have no price`);
+      if (!form.payment_method) missing.push("Payment method");
+      if (!(Number(form.deposit) > 0)) missing.push("Deposit amount (must be > 0)");
+      if ((form.payment_proofs || []).length === 0) missing.push("Payment proof (upload receipt/transfer screenshot)");
+      if (!form.customer_contact?.trim()) missing.push("Customer contact number");
+      if (!form.customer_address?.trim()) missing.push("Delivery address");
+      if (!form.salesman_names?.trim()) missing.push("Salesman");
+      if (missing.length > 0) {
+        setFormError("Cannot confirm order. Missing:\n• " + missing.join("\n• "));
+        return;
+      }
+    }
+
     // Warn when editing a confirmed/delivered order
     if (editId && ["confirmed", "delivered"].includes(editingOrder?.status)) {
       if (!window.confirm("This order is already " + editingOrder.status + ". Saving changes will set it to 'Amended' and require manager re-approval.\n\nContinue?")) return;
@@ -488,7 +515,7 @@ export default function OrdersPage() {
       delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
       discount: form.discount === "" ? 0 : Number(form.discount),
       deposit: form.deposit === "" ? 0 : Number(form.deposit),
-      payment_method: form.payment_method || null,
+      payment_method: form.payment_method || null, payment_proofs: JSON.stringify(form.payment_proofs || []),
       branch_id: form.branch_id || null,
       salesman_names: form.salesman_names || null,
       country: form.country || null,
@@ -596,8 +623,19 @@ export default function OrdersPage() {
   };
 
   const changeStatus = async (o, status) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
+    if (status === "cancelled") {
+      const reason = window.prompt("Cancel reason (required):");
+      if (!reason?.trim()) return;
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status, cancel_reason: reason.trim() }) });
+      const d = await res.json();
+      if (!res.ok) { alert(d.error || "Failed"); return; }
+    } else {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
+      const d = await res.json();
+      if (!res.ok) { alert(d.error || "Failed"); return; }
+    }
     loadOrders();
   };
 
@@ -911,6 +949,32 @@ export default function OrdersPage() {
                   <option value="">—</option>
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
+              </div>
+
+              {/* Payment Proofs */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Proof {form.status === "confirmed" && <span className="text-red-500">*</span>}</label>
+                <div className="space-y-1">
+                  {(form.payment_proofs || []).map((url, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2 py-1">
+                      <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-violet-600 underline truncate">{url.split("/").pop()}</a>
+                      <button type="button" onClick={() => setForm(f => ({ ...f, payment_proofs: f.payment_proofs.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600">✕</button>
+                    </div>
+                  ))}
+                </div>
+                <label className="mt-1 flex items-center gap-2 text-xs text-violet-600 cursor-pointer hover:text-violet-800">
+                  <span>+ Upload receipt</span>
+                  <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async e => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const token = await getToken();
+                    const fd = new FormData(); fd.append("file", file);
+                    const res = await fetch(`${API}/sales-orders/upload-attachment`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                    const d = await res.json();
+                    if (d.url) setForm(f => ({ ...f, payment_proofs: [...(f.payment_proofs || []), d.url] }));
+                    else alert(d.error || "Upload failed");
+                    e.target.value = "";
+                  }} />
+                </label>
               </div>
 
               {/* Status + notes */}
