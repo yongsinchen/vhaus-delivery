@@ -407,7 +407,7 @@ export default function WarehousePage() {
             <input type="date" value={loadDate} onChange={e => setLoadDate(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
             <select value={loadRoute} onChange={e => setLoadRoute(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
               <option value="">All routes</option>
-              {routes.map(r => <option key={r.id} value={r.id}>{r.route_name || r.vehicle_plate || `Route ${r.id.slice(0,6)}`}</option>)}
+              {routes.map(r => <option key={r.id} value={r.id}>{r.route_name || r.vehicle_plate || `Route ${String(r.id).slice(0,6)}`}</option>)}
             </select>
             <button onClick={loadLoadingList} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
           </div>
