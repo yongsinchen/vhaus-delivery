@@ -86,7 +86,9 @@ export function AuthProvider({ children }) {
     if (!authUser) { setUser(null); setLoading(false); return; }
     try {
       // Use backend API with service role key to bypass RLS recursion
-      const res = await fetch(`${process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app"}/auth/profile?uid=${authUser.id}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || "";
+      const res = await fetch(`${process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app"}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) { console.error("Profile fetch failed:", res.status); setUser(null); setLoading(false); return; }
       const data = await res.json();
       setUser({ ...data, email: authUser.email });
