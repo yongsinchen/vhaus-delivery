@@ -59,8 +59,8 @@ export default function PurchaseOrdersPage() {
 
   useEffect(() => {
     if (!companyId) return;
-    fetch(`${API}/suppliers?company_id=${companyId}`).then(r => r.json()).then(d => setSuppliers(d.suppliers || []));
-    fetch(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => setCompanySettings(d.settings || {}));
+    authHeaders().then(h => { fetch(`${API}/suppliers?company_id=${companyId}`, { headers: h }).then(r => r.json()).then(d => setSuppliers(d.suppliers || [])); });
+    authHeaders().then(h => { fetch(`${API}/company-settings?company_id=${companyId}`, { headers: h }).then(r => r.json()).then(d => setCompanySettings(d.settings || {})); });
   }, [companyId]);
 
   const openDetail = async (po) => {

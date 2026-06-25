@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
 
 const API = "https://vhaus-bot-production.up.railway.app";
+const af = async (url, opts = {}) => { const { data } = await supabase.auth.getSession(); const token = data?.session?.access_token; return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } }); };
 
 const getToken = async () => {
   let { data } = await supabase.auth.getSession();
@@ -48,7 +49,7 @@ export default function InventoryPage() {
 
   const loadWarehouses = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/warehouses?company_id=${companyId}`);
+    const res = await af(`${API}/warehouses?company_id=${companyId}`);
     const d = await res.json();
     setWarehouses(d.warehouses || []);
   }, [companyId]);
@@ -59,7 +60,7 @@ export default function InventoryPage() {
     const params = new URLSearchParams({ company_id: companyId });
     if (filterWarehouse) params.set("warehouse_id", filterWarehouse);
     if (filterLowStock) params.set("low_stock", "true");
-    const res = await fetch(`${API}/inventory?${params}`);
+    const res = await af(`${API}/inventory?${params}`);
     const d = await res.json();
     setInventory(d.inventory || []);
     setLoading(false);
@@ -69,14 +70,14 @@ export default function InventoryPage() {
     if (!companyId) return;
     const params = new URLSearchParams({ company_id: companyId, limit: "200" });
     if (filterWarehouse) params.set("warehouse_id", filterWarehouse);
-    const res = await fetch(`${API}/stock-movements?${params}`);
+    const res = await af(`${API}/stock-movements?${params}`);
     const d = await res.json();
     setMovements(d.movements || []);
   }, [companyId, filterWarehouse]);
 
   const loadProducts = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/products?company_id=${companyId}&limit=999&is_active=true`);
+    const res = await af(`${API}/products?company_id=${companyId}&limit=999&is_active=true`);
     const d = await res.json();
     setProducts(d.products || []);
   }, [companyId]);

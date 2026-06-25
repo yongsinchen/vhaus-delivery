@@ -14,6 +14,11 @@ import WarehousePage from "./WarehousePage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
+const authFetch = async (url, opts = {}) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+};
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
 
@@ -314,7 +319,7 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
             <input value={productSearch} onChange={async e => {
               setProductSearch(e.target.value);
               if (e.target.value.length >= 2) {
-                const res = await fetch(`${BACKEND}/products?company_id=${companyId}&search=${encodeURIComponent(e.target.value)}&limit=10&is_active=true`);
+                const res = await authFetch(`${BACKEND}/products?company_id=${companyId}&search=${encodeURIComponent(e.target.value)}&limit=10&is_active=true`);
                 const d = await res.json();
                 setProductResults(d.products || []);
               } else setProductResults([]);
@@ -443,14 +448,14 @@ export default function App() {
     setSpLoading(true);
     try {
       const url = companyId ? `${BACKEND}/service-pending?company_id=${companyId}` : `${BACKEND}/service-pending`;
-      const d = await fetch(url).then(r => r.json());
+      const d = await authFetch(url).then(r => r.json());
       setServicePending(Array.isArray(d) ? d : []);
     } catch(e) {} setSpLoading(false);
   };
 
   const loadDoReview = async () => {
     setDoReviewLoading(true);
-    try { const d = await fetch(`${BACKEND}/do-review`).then(r => r.json()); setDoReview(Array.isArray(d) ? d : []); }
+    try { const d = await authFetch(`${BACKEND}/do-review`).then(r => r.json()); setDoReview(Array.isArray(d) ? d : []); }
     catch(e) {} setDoReviewLoading(false);
   };
 
@@ -460,7 +465,7 @@ export default function App() {
       const params = new URLSearchParams();
       if (companyId) params.set("company_id", companyId);
       if (isSalesman && user?.salesman_name) params.set("salesman", user.salesman_name);
-      const d = await fetch(`${BACKEND}/services?${params}`).then(r => r.json());
+      const d = await authFetch(`${BACKEND}/services?${params}`).then(r => r.json());
       setServices(Array.isArray(d) ? d.map(fromDb) : []);
     } catch(e) { console.error(e); }
     setServicesLoading(false);
@@ -474,7 +479,7 @@ export default function App() {
       if (supplierFilter) params.set("supplier", supplierFilter);
       if (doDateFrom) params.set("from_date", doDateFrom);
       if (doDateTo) params.set("to_date", doDateTo);
-      const d = await fetch(`${BACKEND}/supplier-deliveries?${params}`).then(r => r.json());
+      const d = await authFetch(`${BACKEND}/supplier-deliveries?${params}`).then(r => r.json());
       setSupplierDOs(Array.isArray(d) ? d : []);
     } catch(e) { console.error(e); }
     setSupplierDOsLoading(false);
@@ -487,7 +492,7 @@ export default function App() {
     loadServicePending();
     loadDoReview();
     loadServices();
-    if (companyId) fetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
+    if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
   }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
@@ -523,7 +528,8 @@ export default function App() {
   };
 
   const resolveDoReview = async (id, soNumber=null, itemCode=null) => {
-    const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ so_number: soNumber, item_code: itemCode }) }).then(r=>r.json());
+    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+    const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, { method:"PATCH", headers:{"Content-Type":"application/json", Authorization: `Bearer ${token}`}, body: JSON.stringify({ so_number: soNumber, item_code: itemCode }) }).then(r=>r.json());
     if (res.success) { loadDoReview(); loadOrders(); } else alert("Failed: "+(res.error||"Unknown"));
   };
   const addToStockDoReview = async (id, product_id, warehouse_id, quantity) => {
@@ -535,7 +541,8 @@ export default function App() {
 
   const dismissDoReview = async id => {
     if (!window.confirm("Dismiss this item?")) return;
-    const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method:"PATCH" }).then(r=>r.json());
+    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+    const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method:"PATCH", headers:{Authorization:`Bearer ${token}`} }).then(r=>r.json());
     if (res.success) loadDoReview();
   };
   const confirmConvert = async () => {
@@ -1043,7 +1050,7 @@ export default function App() {
                     <tbody className="divide-y divide-gray-50">
                       {supplierDOs.map((d,i)=>(
                         <tr key={i} className="hover:bg-gray-50 cursor-pointer" onClick={async ()=>{
-                          const res = await fetch(`${BACKEND}/supplier-deliveries/${d.id}`);
+                          const res = await authFetch(`${BACKEND}/supplier-deliveries/${d.id}`);
                           const data = await res.json();
                           setDoDetail({ ...d, ...data.delivery, items: data.items || [] });
                         }}>

@@ -71,14 +71,16 @@ export default function ProductsPage() {
 
   const loadSuppliers = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/suppliers?company_id=${companyId}`);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/suppliers?company_id=${companyId}`, { headers });
     const d = await res.json();
     setSuppliers(d.suppliers || []);
   }, [companyId]);
 
   const loadCategories = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/categories?company_id=${companyId}`);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/categories?company_id=${companyId}`, { headers });
     const d = await res.json();
     setCategories(d.categories || []);
   }, [companyId]);
@@ -86,12 +88,13 @@ export default function ProductsPage() {
   const loadProducts = useCallback(async (p = 1) => {
     if (!companyId) return;
     setLoading(true);
+    const headers = await authHeaders();
     const params = new URLSearchParams({ company_id: companyId, page: p, limit: 50 });
     if (search) params.set("search", search);
     if (filterSupplier) params.set("supplier_id", filterSupplier);
     if (filterCategory) params.set("category_id", filterCategory);
     if (filterActive !== "all") params.set("is_active", filterActive);
-    const res = await fetch(`${API}/products?${params}`);
+    const res = await fetch(`${API}/products?${params}`, { headers });
     const d = await res.json();
     setProducts(d.products || []);
     setTotal(d.total || 0);

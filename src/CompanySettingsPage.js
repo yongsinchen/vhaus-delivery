@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
 
+const af = async (url, opts = {}) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+};
+
 const API = "https://vhaus-bot-production.up.railway.app";
 
 const getToken = async () => {
@@ -63,7 +69,7 @@ export default function CompanySettingsPage() {
 
   const loadSettings = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/company-settings?company_id=${companyId}`);
+    const res = await af(`${API}/company-settings?company_id=${companyId}`);
     const d = await res.json();
     if (d.settings && d.settings.company_id) {
       setSettings(prev => ({ ...prev, ...d.settings }));
@@ -72,21 +78,21 @@ export default function CompanySettingsPage() {
 
   const loadBranches = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/branches?company_id=${companyId}`);
+    const res = await af(`${API}/branches?company_id=${companyId}`);
     const d = await res.json();
     setBranches(d.branches || []);
   }, [companyId]);
 
   const loadCategories = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/categories?company_id=${companyId}`);
+    const res = await af(`${API}/categories?company_id=${companyId}`);
     const d = await res.json();
     setCategories(d.categories || []);
   }, [companyId]);
 
   const loadWarehouses = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/warehouses?company_id=${companyId}`);
+    const res = await af(`${API}/warehouses?company_id=${companyId}`);
     const d = await res.json();
     setWhouses(d.warehouses || []);
   }, [companyId]);
@@ -94,8 +100,8 @@ export default function CompanySettingsPage() {
   const loadSpecOptions = useCallback(async () => {
     if (!companyId) return;
     const [allRes, pendRes] = await Promise.all([
-      fetch(`${API}/spec-options?company_id=${companyId}`),
-      fetch(`${API}/spec-options/pending?company_id=${companyId}`),
+      af(`${API}/spec-options?company_id=${companyId}`),
+      af(`${API}/spec-options/pending?company_id=${companyId}`),
     ]);
     const allD = await allRes.json();
     const pendD = await pendRes.json();
@@ -124,7 +130,7 @@ export default function CompanySettingsPage() {
 
   // ── Zones & Racks ──────────────────────────────────────────────────
   const loadZones = async (whId) => {
-    const res = await fetch(`${API}/warehouses/${whId}/zones`);
+    const res = await af(`${API}/warehouses/${whId}/zones`);
     const d = await res.json();
     setZones(d.zones || []);
   };

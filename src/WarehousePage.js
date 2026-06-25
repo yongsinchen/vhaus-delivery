@@ -48,7 +48,8 @@ export default function WarehousePage() {
   const loadDOs = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const res = await fetch(`${API}/supplier-deliveries?company_id=${companyId}&limit=50`);
+    const token = await getToken();
+    const res = await fetch(`${API}/supplier-deliveries?company_id=${companyId}&limit=50`, { headers: { Authorization: `Bearer ${token}` } });
     const d = await res.json();
     setDos(d || []);
     setLoading(false);
@@ -56,7 +57,8 @@ export default function WarehousePage() {
 
   const loadWarehouses = useCallback(async () => {
     if (!companyId) return;
-    const res = await fetch(`${API}/warehouses?company_id=${companyId}`);
+    const token = await getToken();
+    const res = await fetch(`${API}/warehouses?company_id=${companyId}`, { headers: { Authorization: `Bearer ${token}` } });
     const d = await res.json();
     setWarehouses(d.warehouses || []);
   }, [companyId]);
@@ -65,12 +67,12 @@ export default function WarehousePage() {
 
   const selectDO = async (d) => {
     setSelectedDO(d);
-    const res = await fetch(`${API}/supplier-deliveries/${d.id}`);
+    const res = await fetch(`${API}/supplier-deliveries/${d.id}`, { headers: await authHeaders() });
     const data = await res.json();
     const items = (data.items || []).map(it => ({ ...it, carton_count: 1 }));
     setLabelItems(items);
     // Load existing labels for this DO
-    const lRes = await fetch(`${API}/package-labels?supplier_delivery_id=${d.id}`);
+    const lRes = await fetch(`${API}/package-labels?supplier_delivery_id=${d.id}`, { headers: await authHeaders() });
     const lData = await lRes.json();
     setLabels(lData.labels || []);
   };
@@ -141,7 +143,8 @@ export default function WarehousePage() {
       setTimeout(() => setScanMsg(""), 2000);
       return;
     }
-    const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(code.trim())}`);
+    const hdrs = await authHeaders();
+    const res = await fetch(`${API}/package-labels/validate/${encodeURIComponent(code.trim())}`, { headers: hdrs });
     const d = await res.json();
     if (!res.ok || !d.label) {
       setScanMsg(`❌ Not found: ${code.trim()}`);
