@@ -135,7 +135,7 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
             <Row label="Salesman" value={o.salesman} />
             <div className="col-span-2 sm:col-span-3 bg-gray-50 rounded-xl p-3">
               <p className="text-xs text-gray-400 mb-0.5">Address</p>
-              <p className="text-sm font-medium text-gray-800">{o.address || "-"}</p>
+              <p className="text-sm font-medium text-gray-800 whitespace-pre-line">{(o.address || "-").replace(/\s*(ADDRESS \d+:\s*)/gi, "\n$1").trim()}</p>
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -659,12 +659,15 @@ export default function App() {
               {todayOrders.map(o => (
                 <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors" onClick={() => handleView(o)}>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
+                        {o.type === "Service" && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Service</span>}
+                      </div>
                       <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 truncate">{o.address}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{(o.address || "").replace(/ADDRESS \d+:\s*/gi, "").trim()}</p>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
                       {o.timeSlot && <Badge color="violet">⏰ {o.timeSlot}</Badge>}
                       {parseFloat(o.balance) > 0 && <span className="text-xs font-bold text-red-600">RM {o.balance}</span>}
@@ -672,8 +675,8 @@ export default function App() {
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {o.items?.filter(i=>i.itemName).map((item,i) => (
-                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
-                        {item.arrivalDate ? "✓" : "✗"} {item.itemName}
+                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                        {item.arrivalDate ? "✓" : "·"} {item.itemName}
                       </span>
                     ))}
                   </div>
@@ -916,7 +919,7 @@ export default function App() {
                           <div><span className="font-bold text-violet-700 text-sm">{o.soNumber}</span><p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p></div>
                           <div>{o.deliveryDate ? <Badge color="blue">📅 {fmt(o.deliveryDate)}</Badge> : <Badge color="amber">No date set</Badge>}</div>
                         </div>
-                        <p className="text-xs text-gray-400 truncate mb-2">{o.address}</p>
+                        <p className="text-xs text-gray-400 truncate mb-2">{(o.address || "").replace(/ADDRESS \d+:\s*/gi, "").trim()}</p>
                         <div className="space-y-1">
                           {o.items?.filter(i=>i.itemName).map((item,i) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
@@ -948,7 +951,7 @@ export default function App() {
                           <div><span className="font-bold text-violet-700 text-sm">{o.soNumber}</span><p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p></div>
                           {o.deliveryDate ? <Badge color="blue">📅 {fmt(o.deliveryDate)}</Badge> : <Badge color="amber">No date</Badge>}
                         </div>
-                        <p className="text-xs text-gray-400 truncate mb-2">{o.address}</p>
+                        <p className="text-xs text-gray-400 truncate mb-2">{(o.address || "").replace(/ADDRESS \d+:\s*/gi, "").trim()}</p>
                         <div className="space-y-1">
                           {o.items?.filter(i=>i.itemName).map((item,i) => (
                             <div key={i} className="flex items-center gap-2 text-xs">
