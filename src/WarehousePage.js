@@ -15,7 +15,8 @@ const getToken = async () => {
 };
 const authHeaders = async () => ({ "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` });
 
-const TABS = ["Incoming DOs", "Generate Labels", "Scan & Assign", "Confirm Received"];
+const TABS = ["Receive DOs", "Scan & Receive"];
+const DO_STATUS_STYLE = { Processed: "bg-gray-100 text-gray-600", Reviewed: "bg-blue-100 text-blue-700", Labeled: "bg-violet-100 text-violet-700", Completed: "bg-emerald-100 text-emerald-700" };
 
 export default function WarehousePage() {
   const { user } = useAuth();
@@ -264,21 +265,10 @@ export default function WarehousePage() {
 
   // Cleanup on tab switch or unmount
   useEffect(() => {
-    if (tab !== 2) stopCamera();
+    if (tab !== 1) stopCamera();
     return () => { scanningRef.current = false; stopCamera(); };
   }, [tab]); // eslint-disable-line
 
-  const confirmAllReceived = async () => {
-    if (!selectedDO) return;
-    if (!labelWarehouse) { alert("Select a warehouse first"); return; }
-    if (!window.confirm(`Confirm all items received for DO #${selectedDO.do_number}? This will add items to stock.`)) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/package-labels/confirm-all`, { method: "POST", headers, body: JSON.stringify({ supplier_delivery_id: selectedDO.id, warehouse_id: labelWarehouse }) });
-    const d = await res.json();
-    if (!res.ok) { alert(d.error || "Failed"); return; }
-    alert(`${d.confirmed} labels confirmed, ${d.stocked} products stocked`);
-    selectDO(selectedDO);
-  };
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
@@ -293,51 +283,60 @@ export default function WarehousePage() {
         ))}
       </div>
 
-      {/* Incoming DOs */}
+      {/* Receive DOs — shows Reviewed + Labeled DOs with inline actions */}
       {tab === 0 && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {loading && <div className="text-center text-gray-400 py-8">Loading…</div>}
-          {!loading && dos.length === 0 && <div className="text-center text-gray-400 py-8">No supplier DOs</div>}
-          {!loading && dos.map(d => (
-            <div key={d.id} onClick={() => { selectDO(d); setTab(1); }}
-              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
-              <div className="flex items-center justify-between">
-                <div>
+          {!loading && dos.filter(d => ["Reviewed", "Labeled"].includes(d.status)).length === 0 && (
+            <div className="text-center py-12 text-gray-400">
+              <div className="text-3xl mb-2">📦</div>
+              <p className="font-medium">No DOs ready for receiving</p>
+              <p className="text-xs mt-1">DOs appear here after office admin finishes reviewing</p>
+              {dos.filter(d => d.status === "Processed").length > 0 && (
+                <p className="text-xs text-amber-600 mt-2">{dos.filter(d => d.status === "Processed").length} DO(s) still being reviewed by office</p>
+              )}
+            </div>
+          )}
+          {!loading && dos.filter(d => ["Reviewed", "Labeled", "Completed"].includes(d.status)).map(d => (
+            <div key={d.id} className={`bg-white rounded-2xl border shadow-sm p-4 ${selectedDO?.id === d.id ? "border-violet-300 ring-2 ring-violet-100" : "border-gray-100"}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
                   <span className="font-mono text-sm text-violet-700 font-medium">{d.do_number || "-"}</span>
-                  <span className="ml-2 text-sm text-gray-700 font-medium">{d.supplier || ""}</span>
+                  <span className="text-sm text-gray-700">{d.supplier || ""}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${DO_STATUS_STYLE[d.status] || "bg-gray-100 text-gray-600"}`}>{d.status}</span>
                 </div>
                 <span className="text-xs text-gray-400">{d.do_date || ""}</span>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {/* Generate Labels */}
-      {tab === 1 && (
-        <div className="space-y-4">
-          {!selectedDO ? (
-            <div className="text-center text-gray-400 py-8">Select a DO from "Incoming DOs" first</div>
-          ) : (
-            <>
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-bold text-gray-900">DO #{selectedDO.do_number}</h3>
-                    <p className="text-sm text-gray-500">{selectedDO.supplier}</p>
-                  </div>
+              {/* Inline actions based on status */}
+              {d.status === "Reviewed" && (
+                <div className="mt-2">
+                  <button onClick={() => selectDO(d)} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">🏷 Generate Labels</button>
+                </div>
+              )}
+              {d.status === "Labeled" && (
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => selectDO(d)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">View Labels</button>
+                  <button onClick={() => { selectDO(d); setTab(1); }} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">📷 Scan & Receive</button>
+                </div>
+              )}
+              {d.status === "Completed" && (
+                <div className="mt-2 text-xs text-emerald-600 font-medium">✓ All items received</div>
+              )}
+
+              {/* Expanded: label generation or label list */}
+              {selectedDO?.id === d.id && d.status === "Reviewed" && (
+                <div className="mt-3 border-t border-gray-100 pt-3 space-y-2">
                   <select value={labelWarehouse} onChange={e => setLabelWarehouse(e.target.value)}
-                    className="px-3 py-1.5 rounded-xl border border-gray-200 text-sm bg-white">
+                    className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm bg-white">
                     <option value="">Select warehouse</option>
                     {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select>
-                </div>
-                <div className="space-y-2">
                   {labelItems.map((it, i) => (
-                    <div key={i} className="flex items-center gap-2 border border-gray-100 rounded-xl p-2">
+                    <div key={i} className="flex items-center gap-2 border border-gray-50 rounded-lg p-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-900 truncate">{it.item_name || "-"}</p>
-                        <p className="text-xs text-gray-400">{it.item_code || ""} {it.so_number ? `· SO: ${it.so_number}` : ""}</p>
+                        <p className="text-xs text-gray-400">{it.item_code || ""}</p>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="text-xs text-gray-500">Cartons:</span>
@@ -349,39 +348,38 @@ export default function WarehousePage() {
                       </div>
                     </div>
                   ))}
-                </div>
-                <div className="flex items-center justify-between mt-3">
-                  <span className="text-xs text-gray-500">Total labels: {labelItems.reduce((s, it) => s + (Number(it.carton_count) || 1), 0)}</span>
-                  <button onClick={generateLabels} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">🏷 Generate & Print</button>
-                </div>
-              </div>
-
-              {/* Existing labels */}
-              {labels.length > 0 && (
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-sm font-bold text-gray-700">Generated Labels ({labels.length})</h4>
-                    <button onClick={() => printLabels(labels, selectedDO)} className="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">🖨 Reprint All</button>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">Total: {labelItems.reduce((s, it) => s + (Number(it.carton_count) || 1), 0)} labels</span>
+                    <button onClick={generateLabels} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">🏷 Generate & Print</button>
                   </div>
-                  <div className="space-y-1">
+                </div>
+              )}
+
+              {/* Show existing labels */}
+              {selectedDO?.id === d.id && labels.length > 0 && d.status !== "Reviewed" && (
+                <div className="mt-3 border-t border-gray-100 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-gray-600">{labels.length} Labels</span>
+                    <button onClick={() => printLabels(labels, selectedDO)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">🖨 Reprint</button>
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
                     {labels.map(l => (
-                      <div key={l.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50 last:border-0">
+                      <div key={l.id} className="flex items-center justify-between text-xs py-1">
                         <span className="font-mono text-violet-600">{l.qr_code}</span>
-                        <span className="text-gray-700">{l.product_code} {l.product_name}</span>
-                        <span className="text-gray-400">Carton {l.carton_number}/{l.total_cartons}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${l.status === "received" ? "bg-emerald-100 text-emerald-700" : l.status === "stored" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{l.status}</span>
+                        <span className="text-gray-600 truncate mx-2">{l.product_name}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full ${l.status === "received" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{l.status}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-            </>
-          )}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Scan & Assign */}
-      {tab === 2 && (
+      {/* Scan & Receive */}
+      {tab === 1 && (
         <div className="max-w-lg space-y-4">
           {/* Camera + input */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
@@ -467,34 +465,6 @@ export default function WarehousePage() {
         </div>
       )}
 
-      {/* Confirm Received */}
-      {tab === 3 && (
-        <div className="space-y-4">
-          {!selectedDO ? (
-            <div className="text-center text-gray-400 py-8">Select a DO from "Incoming DOs" first</div>
-          ) : (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-lg">
-              <h3 className="font-bold text-gray-900">Confirm All Received — DO #{selectedDO.do_number}</h3>
-              <p className="text-sm text-gray-500">{selectedDO.supplier} · {labels.length} labels generated</p>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Destination Warehouse</label>
-                <select value={labelWarehouse} onChange={e => setLabelWarehouse(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-                  <option value="">Select warehouse</option>
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
-              </div>
-              <div className="text-xs text-gray-400">
-                This will mark all {labels.filter(l => l.status === "pending").length} pending labels as "received" and add items to inventory stock.
-              </div>
-              <button onClick={confirmAllReceived} disabled={!labelWarehouse}
-                className="w-full py-2.5 rounded-xl text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                ✓ Confirm All Received & Stock In
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
