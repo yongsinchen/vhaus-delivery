@@ -630,36 +630,59 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     setLoading(true);
     try {
       const qs = companyId ? `&company_id=${companyId}` : "";
-      const [teamsRes, schedulesRes, unassignedRes, tripsRes] = await Promise.all([
+      const [teamsRes, schedulesRes, unassignedRes, tripsRes, routesRes] = await Promise.all([
         af(`${API}/delivery-teams?date=${date}${qs}`),
         af(`${API}/delivery-schedules?date=${date}${qs}`),
         af(`${API}/delivery/unassigned?date=${date}${qs}`),
         af(`${API}/order-trips?date=${date}`),
+        af(`${API}/delivery/routes?date=${date}`),
       ]);
-      const [teamsData, schedulesData, unassignedData, tripsData] = await Promise.all([
-        teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
+      const [teamsData, schedulesData, unassignedData, tripsData, routesData] = await Promise.all([
+        teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(), routesRes.json(),
       ]);
 
       const teamsList = teamsData.teams || (Array.isArray(teamsData) ? teamsData : []);
       const schedulesList = schedulesData.schedules || (Array.isArray(schedulesData) ? schedulesData : []);
 
-      // Enrich teams with vehicle info and group schedules
+      // Enrich new teams with vehicle info and group schedules
       const enriched = teamsList.map(team => {
         const teamSchedules = schedulesList
           .filter(s => s.team_id === team.id)
           .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-        // Look up vehicle info
         const v = vehicles.find(v => v.id === team.vehicle_id);
         return {
-          ...team,
+          ...team, _source: "new",
           vehicle_plate: v?.vehicle_plate || team.vehicle_plate || "",
           driver_name: v?.driver_name || team.driver_name || "",
           vehicle_type: v?.vehicle_type || "",
           schedules: teamSchedules,
-          // Derive area from first schedule or team itself
           area: teamSchedules[0]?.area || "",
         };
       });
+
+      // Also include old delivery_routes as "teams" for backward compat
+      const oldRoutes = Array.isArray(routesData) ? routesData : [];
+      for (const route of oldRoutes) {
+        // Skip if a new team already covers this vehicle
+        if (enriched.some(t => t.vehicle_plate === route.lorry_plate && t.schedules.length > 0)) continue;
+        const routeOrders = (route.orders || []).map((ro, i) => ({
+          id: `legacy-${route.id}-${ro.order_id || i}`,
+          order_id: ro.order_id, team_id: route.id,
+          scheduled_date: date, sort_order: ro.sequence_no || i,
+          status: route.status || "Pending", slot: ro.scheduled_time_range || "",
+          notes: ro.route_note || "", is_ready: false,
+          orders: ro.order || ro,
+        }));
+        if (routeOrders.length > 0 || oldRoutes.length > 0) {
+          enriched.push({
+            id: route.id, _source: "legacy",
+            vehicle_plate: route.lorry_plate || "", driver_name: route.driver_name || "",
+            vehicle_type: "", area: route.area || "", notes: route.notes || "",
+            team_date: date, status: route.status,
+            schedules: routeOrders,
+          });
+        }
+      }
 
       setTeams(enriched);
       setUnassigned(Array.isArray(unassignedData) ? unassignedData : []);
