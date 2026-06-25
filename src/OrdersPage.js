@@ -32,7 +32,7 @@ const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"];
 
 const EMPTY_ORDER = {
-  customer_name: "", customer_contact: "", customer_address: "",
+  order_number: "", customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "", payment_proofs: [],
@@ -510,6 +510,7 @@ export default function OrdersPage() {
     setFormError("");
     const headers = await authHeaders();
     const body = {
+      order_number: form.order_number?.trim() || undefined,
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
       customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
@@ -774,6 +775,11 @@ export default function OrdersPage() {
                   </select>
                 </div>
               </div>
+
+              {/* Order number (optional for paper SO) */}
+              {!editId && (
+                <Field label="Order Number (leave blank for auto)" value={form.order_number} onChange={v => setForm(f => ({ ...f, order_number: v }))} placeholder="e.g. 31120 or F-11150" />
+              )}
 
               {/* Customer info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
