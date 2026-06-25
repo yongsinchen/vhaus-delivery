@@ -17,6 +17,8 @@ export default function UserManagement() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [pwModal, setPwModal] = useState(null); // { id, name }
+  const [newPw, setNewPw] = useState("");
 
   const availableRoles = isMaster
     ? ["master", "manager", "company_admin", "salesman", "finance"]
@@ -114,9 +116,10 @@ export default function UserManagement() {
 
       // Update password if provided
       if (form.password.trim()) {
+        const token = (await supabase.auth.getSession()).data?.session?.access_token;
         const res = await fetch(`${BACKEND}/admin/users/${editId}/password`, {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ password: form.password.trim() }),
         });
         const d = await res.json();
@@ -219,6 +222,10 @@ export default function UserManagement() {
                 </div>
               </div>
               <div className="flex gap-2">
+                {(isMaster || currentUser?.role === "manager") && (
+                  <button onClick={() => { setPwModal({ id: u.id, name: u.name }); setNewPw(""); }}
+                    className="text-xs px-3 py-1.5 rounded-xl border border-amber-200 text-amber-600 hover:bg-amber-50">🔑 Password</button>
+                )}
                 <button onClick={() => toggleActive(u)}
                   className={`text-xs px-3 py-1.5 rounded-xl border transition-colors ${u.is_active ? "border-gray-200 text-gray-500 hover:bg-gray-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"}`}>
                   {u.is_active ? "Deactivate" : "Activate"}
@@ -328,6 +335,41 @@ export default function UserManagement() {
               <button onClick={handleSave} disabled={saving}
                 className="px-5 py-2 text-sm bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 font-medium">
                 {saving ? "Saving..." : editId ? "Update User" : "Create User"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {pwModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm">
+            <div className="px-6 py-4 border-b">
+              <h3 className="font-bold text-gray-900">Reset Password</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Set a new password for <b>{pwModal.name}</b></p>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+                placeholder="New password (min 6 characters)" autoFocus
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                onKeyDown={e => e.key === "Enter" && newPw.length >= 6 && document.getElementById("pw-save-btn")?.click()} />
+              {newPw && newPw.length < 6 && <p className="text-xs text-red-500">Minimum 6 characters</p>}
+            </div>
+            <div className="px-6 py-4 border-t flex gap-3 justify-end">
+              <button onClick={() => setPwModal(null)} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
+              <button id="pw-save-btn" disabled={newPw.length < 6} onClick={async () => {
+                const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                const res = await fetch(`${BACKEND}/admin/users/${pwModal.id}/password`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ password: newPw }),
+                });
+                const d = await res.json();
+                if (d.success) { setPwModal(null); setSuccessMsg(`Password reset for ${pwModal.name}`); setTimeout(() => setSuccessMsg(""), 3000); }
+                else alert(d.error || "Failed to reset password");
+              }} className="px-5 py-2 text-sm bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50 font-medium">
+                Reset Password
               </button>
             </div>
           </div>
