@@ -18,10 +18,11 @@ const authHeaders = async () => ({
   Authorization: `Bearer ${await getToken()}`,
 });
 
-const STATUSES = ["draft", "confirmed", "delivered", "cancelled"];
+const STATUSES = ["draft", "confirmed", "amended", "delivered", "cancelled"];
 const STATUS_STYLE = {
   draft: "bg-gray-100 text-gray-600",
   confirmed: "bg-violet-100 text-violet-700",
+  amended: "bg-amber-100 text-amber-700",
   delivered: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-red-100 text-red-600",
 };
@@ -473,6 +474,10 @@ export default function OrdersPage() {
     if (!form.customer_name.trim()) { setFormError("Customer name is required"); return; }
     if (!form.country) { setFormError("Please select a country"); return; }
     if (form.items.length === 0) { setFormError("Add at least one product"); return; }
+    // Warn when editing a confirmed/delivered order
+    if (editId && ["confirmed", "delivered"].includes(editingOrder?.status)) {
+      if (!window.confirm("This order is already " + editingOrder.status + ". Saving changes will set it to 'Amended' and require manager re-approval.\n\nContinue?")) return;
+    }
     setSaving(true);
     setFormError("");
     const headers = await authHeaders();
@@ -519,6 +524,9 @@ export default function OrdersPage() {
     const d = await res.json();
     setSaving(false);
     if (!res.ok) { setFormError(d.error || "Failed to save"); return; }
+    if (d.order?.status === "amended") {
+      alert("Order amended. Status changed to 'Amended' — manager approval required to re-confirm.");
+    }
     setDrawerOpen(false);
     loadOrders();
     if (!editId && d.order) {
