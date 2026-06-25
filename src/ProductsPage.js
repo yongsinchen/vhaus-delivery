@@ -662,7 +662,7 @@ export default function ProductsPage() {
                   {importProgress && importProgress.pages_total > 0 && (
                     <div className="mt-4 max-w-xs mx-auto">
                       <div className="flex justify-between text-xs text-gray-500 mb-1">
-                        <span>Page {importProgress.pages_processed} of {importProgress.pages_total}</span>
+                        <span>Batch {importProgress.pages_processed} of {importProgress.pages_total}</span>
                         <span>{Math.round((importProgress.pages_processed / importProgress.pages_total) * 100)}%</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
