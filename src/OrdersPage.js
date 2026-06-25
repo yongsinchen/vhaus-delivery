@@ -536,8 +536,6 @@ export default function OrdersPage() {
 
   const openSubmitPO = async (order) => {
     const items = order.sales_order_items || order.items || [];
-    const productIds = items.map(i => i.product_id).filter(Boolean);
-    if (productIds.length === 0) { alert("No products linked to items"); return; }
     // Fetch products and suppliers separately to avoid PostgREST join issues
     const [prodRes, supRes] = await Promise.all([
       fetch(`${API}/products?company_id=${companyId}&limit=999`),
@@ -545,20 +543,31 @@ export default function OrdersPage() {
     ]);
     const prodData = await prodRes.json();
     const supData = await supRes.json();
+    const allProducts = prodData.products || [];
     const supMap = new Map((supData.suppliers || []).map(s => [s.id, s]));
-    const prodMap = new Map((prodData.products || []).map(p => [p.id, p]));
+    const prodMap = new Map(allProducts.map(p => [p.id, p]));
+    // Build name/code lookup for items without product_id
+    const prodByName = new Map();
+    const prodByCode = new Map();
+    for (const p of allProducts) {
+      if (p.name) prodByName.set(p.name.toLowerCase().trim(), p);
+      if (p.code) prodByCode.set(p.code.toLowerCase().trim(), p);
+    }
     const groups = {};
     const noSupplier = [];
     for (const item of items) {
-      const prod = prodMap.get(item.product_id);
-      // Try product's direct supplier_id, then the joined suppliers object
+      // Try direct product_id first, then fuzzy match by name/code
+      let prod = prodMap.get(item.product_id);
+      if (!prod && item.product_name) prod = prodByName.get(item.product_name.toLowerCase().trim());
+      if (!prod && item.product_code) prod = prodByCode.get(item.product_code.toLowerCase().trim());
       const sid = prod?.supplier_id || prod?.suppliers?.id;
       const sup = supMap.get(sid);
       if (!sid || !sup) { noSupplier.push(item); continue; }
       if (!groups[sid]) groups[sid] = { name: sup.name, items: [] };
-      groups[sid].items.push(item);
+      groups[sid].items.push({ ...item, _matched_product: prod });
     }
-    const allIds = new Set(items.filter(i => { const p = prodMap.get(i.product_id); return p?.supplier_id || p?.suppliers?.id; }).map(i => i.id));
+    if (Object.keys(groups).length === 0 && noSupplier.length > 0) { alert("No items could be matched to a supplier. Link products in the order first."); return; }
+    const allIds = new Set(Object.values(groups).flatMap(g => g.items.map(i => i.id)));
     setPOSelectedItems(allIds);
     setPOModal({ order, groups, noSupplier });
   };
