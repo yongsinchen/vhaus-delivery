@@ -224,8 +224,8 @@ export default function WarehousePage() {
   useEffect(() => { if (tab === 2) loadPickList(); }, [tab, pickDays]); // eslint-disable-line
   useEffect(() => { if (tab === 3) loadLoadingList(); }, [tab, loadDate, loadRoute]); // eslint-disable-line
 
-  // ── Camera UI (shared across tabs 1,2,3) ──────────────────
-  const CameraView = () => (
+  // ── Camera UI (rendered inline, not as component, to keep ref stable) ──
+  const cameraUI = (
     <>
       <div className="relative rounded-xl overflow-hidden bg-black" style={{ aspectRatio: "4/3", minHeight: 200, display: cameraActive ? "block" : "none" }}>
         <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
@@ -348,7 +348,7 @@ export default function WarehousePage() {
                 <button onClick={() => { setPendingItem(null); setScanMode("item"); setScanMsg(""); }} className="text-xs text-gray-500 underline mt-1">Cancel</button>
               </div>
             )}
-            <CameraView />
+            {cameraUI}
           </div>
         </div>
       )}
@@ -369,7 +369,7 @@ export default function WarehousePage() {
 
           {/* Camera for pick scanning */}
           <div className="max-w-lg">
-            <CameraView />
+            {cameraUI}
           </div>
 
           {pickLoading && <div className="text-center text-gray-400 py-8">Loading pick list…</div>}
@@ -426,7 +426,7 @@ export default function WarehousePage() {
 
           {/* Camera for load scanning */}
           <div className="max-w-lg">
-            <CameraView />
+            {cameraUI}
           </div>
 
           {loadingItems.length === 0 && <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">🚛</div><p>No items to load for this date/route</p></div>}
