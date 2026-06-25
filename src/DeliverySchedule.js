@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
+import { supabase } from "./AuthContext";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
+const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
+const af = async (url, opts = {}) => { const token = await getToken(); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}` } }); };
 
 const statusColor = s => ({
   "Pending": "bg-yellow-100 text-yellow-800",
@@ -116,7 +119,7 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
   const saveScheduledTime = async () => {
     if (!scheduledTime.trim()) return;
     setSaving(true);
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
+    await af(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scheduled_time_range: scheduledTime })
     });
@@ -126,7 +129,7 @@ function AssignedOrderCard({ ro, routeId, index, isLocked, onUnassign, onDragSta
 
   const saveRouteNote = async (val) => {
     setRouteNote(val);
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
+    await af(`${API}/delivery/routes/${routeId}/orders/${o.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ route_note: val })
     });
@@ -316,16 +319,16 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
   const [editVehicle, setEditVehicle] = useState({});
   const createVehicle = async () => {
     if (!newVehicle.driver_name && !newVehicle.vehicle_plate) return alert("Please enter driver name or vehicle plate.");
-    await fetch(`${API}/delivery/vehicles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newVehicle) });
+    await af(`${API}/delivery/vehicles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newVehicle) });
     setNewVehicle({ ...EMPTY_VEHICLE }); setShowAddVehicle(false); onRefresh();
   };
   const saveVehicle = async (id) => {
-    await fetch(`${API}/delivery/vehicles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editVehicle) });
+    await af(`${API}/delivery/vehicles/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editVehicle) });
     setEditVehicleId(null); onRefresh();
   };
   const deleteVehicle = async (id) => {
     if (!window.confirm("Delete this vehicle?")) return;
-    await fetch(`${API}/delivery/vehicles/${id}`, { method: "DELETE" }); onRefresh();
+    await af(`${API}/delivery/vehicles/${id}`, { method: "DELETE" }); onRefresh();
   };
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
@@ -679,9 +682,9 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     setLoading(true);
     try {
       const [routeRes, unassignedRes, tripsRes] = await Promise.all([
-        fetch(`${API}/delivery/routes?date=${date}`),
-        fetch(`${API}/delivery/unassigned?date=${date}`),
-        fetch(`${API}/order-trips?date=${date}`),
+        af(`${API}/delivery/routes?date=${date}`),
+        af(`${API}/delivery/unassigned?date=${date}`),
+        af(`${API}/order-trips?date=${date}`),
       ]);
       const [routeData, unassignedData, tripsData] = await Promise.all([
         routeRes.json(), unassignedRes.json(), tripsRes.json()
@@ -694,7 +697,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   }, [date]);
 
   const loadVehicles = useCallback(async () => {
-    try { const res = await fetch(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
+    try { const res = await af(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
     catch (e) { console.error(e); }
   }, []);
 
@@ -704,12 +707,12 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   const loadServiceOrders = useCallback(async () => {
     try {
       // Services scheduled for this date (already have delivery_date set)
-      const res = await fetch(`${API}/delivery/unassigned?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
+      const res = await af(`${API}/delivery/unassigned?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
 
       // All service orders with no date yet — shown separately so admin can schedule them
-      const res2 = await fetch(`${API}/services/unscheduled${companyId ? `?company_id=${companyId}` : ""}`);
+      const res2 = await af(`${API}/services/unscheduled${companyId ? `?company_id=${companyId}` : ""}`);
       const data2 = await res2.json();
       setUnscheduledServices(Array.isArray(data2) ? data2 : []);
     } catch (e) { console.error("loadServiceOrders error:", e); }
@@ -733,20 +736,20 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   });
 
   const createRoute = async (newRoute) => {
-    const res = await fetch(`${API}/delivery/routes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...newRoute, delivery_date: date }) });
+    const res = await af(`${API}/delivery/routes`, { method: "POST", body: JSON.stringify({ ...newRoute, delivery_date: date }) });
     const data = await res.json();
     if (res.status === 409 || data.error) return { error: data.error };
     setShowAddRoute(false); loadData();
   };
 
   const updateRoute = async (id) => {
-    await fetch(`${API}/delivery/routes/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editRoute) });
+    await af(`${API}/delivery/routes/${id}`, { method: "PATCH", body: JSON.stringify(editRoute) });
     setEditRouteId(null); loadData();
   };
 
   const deleteRoute = async (id) => {
     if (!window.confirm("Delete this route?")) return;
-    const res = await fetch(`${API}/delivery/routes/${id}`, { method: "DELETE" });
+    const res = await af(`${API}/delivery/routes/${id}`, { method: "DELETE" });
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
     loadData();
@@ -769,17 +772,17 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
     if (type === "trip") {
       // Assign trip — update trip status to Assigned + set scheduled_date
-      await fetch(`${API}/order-trips/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Assigned", scheduled_date: date }) });
+      await af(`${API}/order-trips/${id}`, { method: "PATCH", body: JSON.stringify({ status: "Assigned", scheduled_date: date }) });
       // Also add to delivery_route_orders using the SO's order id
       const trip = trips.find(t => t.id === id);
       if (trip) {
         const tripOrder = unassigned.find(o => o.so_number === trip.so_number);
         if (tripOrder) {
-          await fetch(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order_id: tripOrder.id, sequence_no: seqNo }) });
+          await af(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, sequence_no: seqNo }) });
         }
       }
     } else {
-      const res = await fetch(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order_id: id, sequence_no: seqNo }) });
+      const res = await af(`${API}/delivery/routes/${routeId}/orders`, { method: "POST", body: JSON.stringify({ order_id: id, sequence_no: seqNo }) });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
     }
@@ -787,19 +790,19 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   };
 
   const unassignOrder = async (routeId, orderId) => {
-    const res = await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
+    const res = await af(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "DELETE" });
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
     loadData();
   };
 
   const updateStatus = async (routeId, status) => {
-    await fetch(`${API}/delivery/routes/${routeId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    await af(`${API}/delivery/routes/${routeId}`, { method: "PATCH", body: JSON.stringify({ status }) });
     await loadData();
   };
 
   const updateSeq = async (routeId, orderId, seq) => {
-    await fetch(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sequence_no: parseInt(seq) }) });
+    await af(`${API}/delivery/routes/${routeId}/orders/${orderId}`, { method: "PATCH", body: JSON.stringify({ sequence_no: parseInt(seq) }) });
   };
 
   const handleAssignedDragStart = (routeId, fromIndex) => setDraggingAssigned({ routeId, fromIndex });

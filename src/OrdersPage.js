@@ -331,12 +331,12 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!companyId) return;
-    fetch(`${API}/branches?company_id=${companyId}`).then(r => r.json()).then(d => setBranches(d.branches || []));
-    fetch(`${API}/admin/users/list?company_id=${companyId}`).then(r => r.json()).then(d => {
+    authHeaders().then(h => fetch(`${API}/branches?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => setBranches(d.branches || []));
+    authHeaders().then(h => fetch(`${API}/admin/users/list?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
       setSalesmen([...new Set(names)].sort());
     });
-    fetch(`${API}/spec-options?company_id=${companyId}`).then(r => r.json()).then(d => {
+    authHeaders().then(h => fetch(`${API}/spec-options?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       const map = {};
       (d.options || []).filter(o => o.is_approved).forEach(o => {
         if (!map[o.label]) map[o.label] = [];
@@ -344,12 +344,12 @@ export default function OrdersPage() {
       });
       setSpecOptionsMap(map);
     });
-    fetch(`${API}/categories?company_id=${companyId}`).then(r => r.json()).then(d => {
+    authHeaders().then(h => fetch(`${API}/categories?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       const map = {};
       (d.categories || []).forEach(c => { try { map[c.id] = JSON.parse(c.spec_labels || "[]"); } catch { map[c.id] = []; } });
       setCategorySpecs(map);
     });
-    fetch(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
+    authHeaders().then(h => fetch(`${API}/company-settings?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       if (d.settings && d.settings.company_name) {
         setCompanyInfo({
           name: d.settings.company_name || DEFAULT_COMPANY.name,
@@ -373,7 +373,8 @@ export default function OrdersPage() {
     setProductLoading(true);
     const params = new URLSearchParams({ company_id: companyId, limit: 30, is_active: "true" });
     if (q) params.set("search", q);
-    const res = await fetch(`${API}/products?${params}`);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/products?${params}`, { headers });
     const d = await res.json();
     setProducts(d.products || []);
     setProductLoading(false);
@@ -572,9 +573,10 @@ export default function OrdersPage() {
   const openSubmitPO = async (order) => {
     const items = order.sales_order_items || order.items || [];
     // Fetch products and suppliers separately to avoid PostgREST join issues
+    const headers = await authHeaders();
     const [prodRes, supRes] = await Promise.all([
-      fetch(`${API}/products?company_id=${companyId}&limit=999`),
-      fetch(`${API}/suppliers?company_id=${companyId}`),
+      fetch(`${API}/products?company_id=${companyId}&limit=999`, { headers }),
+      fetch(`${API}/suppliers?company_id=${companyId}`, { headers }),
     ]);
     const prodData = await prodRes.json();
     const supData = await supRes.json();
