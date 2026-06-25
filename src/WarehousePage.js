@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import { useToast } from "./UIComponents";
 import jsQR from "jsqr";
 
 const API = "https://vhaus-bot-production.up.railway.app";
@@ -20,6 +21,7 @@ const DO_STATUS_STYLE = { Processed: "bg-gray-100 text-gray-600", Reviewed: "bg-
 
 export default function WarehousePage() {
   const { user } = useAuth();
+  const toast = useToast();
   const companyId = user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -93,11 +95,17 @@ export default function WarehousePage() {
     };
     const res = await fetch(`${API}/package-labels/generate`, { method: "POST", headers, body: JSON.stringify(payload) });
     const d = await res.json();
-    if (!res.ok) { alert(d.error || "Failed"); return; }
-    // Print
+    if (!res.ok) {
+      if (d.error?.includes("already generated")) {
+        toast.warning("Labels already generated — reprinting existing labels");
+        if (labels.length > 0) printLabels(labels, selectedDO);
+        else { selectDO(selectedDO); }
+      } else { toast.error(d.error || "Failed to generate labels"); }
+      return;
+    }
     printLabels(d.labels || [], selectedDO);
-    alert(`${d.count} labels generated`);
-    selectDO(selectedDO); // reload labels
+    toast.success(`${d.count} labels generated`);
+    selectDO(selectedDO);
   };
 
   const printLabels = (lbls, doInfo) => {
@@ -116,7 +124,7 @@ export default function WarehousePage() {
       </div>
     `).join("");
     const w = window.open("", "_blank");
-    if (!w) { alert("Allow pop-ups"); return; }
+    if (!w) { toast.warning("Allow pop-ups to print labels"); return; }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Package Labels</title>
     <style>
       @page { size: A4; margin: 10mm; }
@@ -173,7 +181,7 @@ export default function WarehousePage() {
 
   const confirmBatch = async () => {
     if (scannedItems.length === 0) return;
-    if (!batchWh) { alert("Select a warehouse"); return; }
+    if (!batchWh) { toast.warning("Select a warehouse first"); return; }
     const headers = await authHeaders();
     let confirmed = 0;
     for (const item of scannedItems) {
@@ -193,7 +201,7 @@ export default function WarehousePage() {
       }
       confirmed++;
     }
-    alert(`${confirmed} packages confirmed & stocked`);
+    toast.success(`${confirmed} packages confirmed & stocked`);
     setScannedItems([]);
     scannedCodesRef.current.clear();
     setBatchLoc("");
@@ -248,7 +256,7 @@ export default function WarehousePage() {
       };
       requestAnimationFrame(scanFrame);
     } catch (err) {
-      alert("Camera error: " + (err.message || "Allow camera in Settings > Safari > Camera."));
+      toast.error("Camera error: " + (err.message || "Allow camera in Settings > Safari > Camera."));
     }
   };
 
