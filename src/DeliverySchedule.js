@@ -240,61 +240,68 @@ function TeamPrintView({ team, onClose }) {
             <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>V Haus Living (Pg) Delivery Schedule</h1>
             <p style={{ fontSize:"11px", margin:"2px 0 0 0", color:"#444" }}>Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}</p>
           </div>
-          {allRows.length === 0 && <p style={{ textAlign:"center", color:"#888", padding:"20px" }}>No orders assigned.</p>}
-          {(team.schedules || []).map((sc, si) => {
-            const o = sc.orders;
-            if (!o) return null;
-            const items = parseItemsSafe(o.items);
-            const displayItems = items.length > 0 ? items : [{}];
-            const hasBalance = parseFloat(o.balance) > 0;
-            const tripLabel = sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "";
-            return (
-              <div key={sc.id} style={{ pageBreakInside:"avoid", marginBottom:"2px" }}>
-                {/* Header row repeated per order group */}
-                {si === 0 && (
-                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"10px" }}>
-                    <thead><tr style={{ backgroundColor:"#c6efce", textAlign:"center" }}>
-                      {["SO / Customer","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"].map(h => (
-                        <th key={h} style={{ border:"1px solid #000", padding:"3px 4px", whiteSpace:"nowrap", fontWeight:"bold" }}>{h}</th>
-                      ))}
-                    </tr></thead>
-                  </table>
-                )}
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"10px" }}>
-                  <tbody>
-                    {displayItems.map((item, idx) => (
-                      <tr key={idx} style={{ verticalAlign:"top" }}>
-                        {idx === 0 && (
-                          <td rowSpan={displayItems.length} style={{ border:"1px solid #000", padding:"3px 4px", minWidth:"140px", verticalAlign:"top" }}>
-                            <div style={{ fontWeight:"bold" }}>{o.so_number}</div>
-                            <div>{o.customer_name}</div>
-                            {o.contact && <div style={{ color:"#555" }}>{o.contact}</div>}
-                            {o.address && <div style={{ color:"#555", fontSize:"9px" }}>{o.address}</div>}
-                            {hasBalance && <div style={{ color:"red", fontWeight:"bold" }}>Bal: RM {o.balance}</div>}
-                            {sc.slot && <div style={{ color:"#1e40af", fontWeight:"bold" }}>Slot: {sc.slot}</div>}
-                          </td>
-                        )}
-                        {idx === 0 && <td rowSpan={displayItems.length} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top", fontSize:"9px", color: sc.trip_no > 1 ? "#6b7280" : "#059669" }}>{tripLabel}</td>}
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", minWidth:"28px" }}></td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", minWidth:"28px" }}></td>
-                        {idx === 0 && <td rowSpan={displayItems.length} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top" }}>{team.vehicle_plate || "-"}</td>}
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{idx + 1}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px" }}>{item.itemCode || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", minWidth:"120px" }}>{item.itemName || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.unit || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px" }}>{item.supplier || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.itemOrderDate || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.supplierSentDate || ""}</td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}></td>
-                        <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.arrivalDate ? item.arrivalDate : <span style={{ color:"red", fontWeight:"bold" }}>No arrival</span>}</td>
-                        {idx === 0 && <td rowSpan={displayItems.length} style={{ border:"1px solid #000", padding:"3px 4px", verticalAlign:"top", minWidth:"80px" }}>{o.remark && <div>{o.remark}</div>}{sc.notes && <div style={{ color:"#555", fontStyle:"italic" }}>{sc.notes}</div>}</td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })}
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"10px", tableLayout:"fixed" }}>
+            <colgroup>
+              <col style={{ width:"14%" }} />{/* SO/Customer */}
+              <col style={{ width:"4%" }} />{/* Trip */}
+              <col style={{ width:"3.5%" }} />{/* Check */}
+              <col style={{ width:"3.5%" }} />{/* Naik */}
+              <col style={{ width:"6%" }} />{/* Plate */}
+              <col style={{ width:"3%" }} />{/* No. */}
+              <col style={{ width:"8%" }} />{/* Code */}
+              <col style={{ width:"18%" }} />{/* Item */}
+              <col style={{ width:"3%" }} />{/* Unit */}
+              <col style={{ width:"6%" }} />{/* Supplier */}
+              <col style={{ width:"6%" }} />{/* Order Date */}
+              <col style={{ width:"5.5%" }} />{/* Sent */}
+              <col style={{ width:"5.5%" }} />{/* JB Sent */}
+              <col style={{ width:"6.5%" }} />{/* Arrival */}
+              <col style={{ width:"7%" }} />{/* Remark */}
+            </colgroup>
+            <thead>
+              <tr style={{ backgroundColor:"#c6efce", textAlign:"center" }}>
+                {["SO / Customer","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"].map(h => (
+                  <th key={h} style={{ border:"1px solid #000", padding:"3px 4px", whiteSpace:"nowrap", fontWeight:"bold" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {allRows.length === 0 && <tr><td colSpan={15} style={{ border:"1px solid #000", padding:"6px", textAlign:"center", color:"#888" }}>No orders assigned.</td></tr>}
+              {allRows.map((row, i) => {
+                const { o, sc, item, idx, rowspan, isFirst } = row;
+                const hasBalance = parseFloat(o.balance) > 0;
+                const tripLabel = sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-";
+                return (
+                  <tr key={`${sc.id}-${idx}`} style={{ verticalAlign:"top", pageBreakInside:"avoid" }}>
+                    {isFirst && (
+                      <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", verticalAlign:"top", overflow:"hidden" }}>
+                        <div style={{ fontWeight:"bold" }}>{o.so_number}</div>
+                        <div>{o.customer_name}</div>
+                        {o.contact && <div style={{ color:"#555" }}>{o.contact}</div>}
+                        {o.address && <div style={{ color:"#555", fontSize:"9px", wordBreak:"break-word" }}>{o.address}</div>}
+                        {hasBalance && <div style={{ color:"red", fontWeight:"bold" }}>Bal: RM {o.balance}</div>}
+                        {sc.slot && <div style={{ color:"#1e40af", fontWeight:"bold" }}>Slot: {sc.slot}</div>}
+                      </td>
+                    )}
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top", fontSize:"9px", color: sc.trip_no > 1 ? "#6b7280" : "#059669" }}>{tripLabel}</td>}
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}></td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}></td>
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center", verticalAlign:"top" }}>{team.vehicle_plate || "-"}</td>}
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{idx + 1}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", overflow:"hidden" }}>{item.itemCode || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", overflow:"hidden", wordBreak:"break-word" }}>{item.itemName || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.unit || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px" }}>{item.supplier || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.itemOrderDate || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.supplierSentDate || ""}</td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}></td>
+                    <td style={{ border:"1px solid #000", padding:"3px 4px", textAlign:"center" }}>{item.arrivalDate ? item.arrivalDate : <span style={{ color:"red", fontWeight:"bold" }}>No arrival</span>}</td>
+                    {isFirst && <td rowSpan={rowspan} style={{ border:"1px solid #000", padding:"3px 4px", verticalAlign:"top", overflow:"hidden", wordBreak:"break-word" }}>{o.remark && <div>{o.remark}</div>}{sc.notes && <div style={{ color:"#555", fontStyle:"italic" }}>{sc.notes}</div>}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           <div style={{ marginTop:"8px", fontSize:"9px", color:"#888", textAlign:"right" }}>Printed: {new Date().toLocaleString("en-MY", { timeZone: "Asia/Kuala_Lumpur" })}</div>
         </div>
       </div>
