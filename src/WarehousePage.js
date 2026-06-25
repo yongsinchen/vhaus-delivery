@@ -379,17 +379,18 @@ export default function WarehousePage() {
           {!pickLoading && pickItems.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
               {pickItems.map(item => (
-                <div key={item.id} className={`flex items-center justify-between px-4 py-3 ${item.status === "picked" ? "opacity-50" : ""}`}>
+                <div key={item.id} className={`flex items-center justify-between px-4 py-3 ${item.status === "picked" ? "opacity-50" : item.status === "no_package" ? "opacity-60 bg-amber-50" : ""}`}>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900">{item._product_code || item.product_code || ""} {item._product_name || item.product_name || ""}</p>
                     <p className="text-xs text-gray-500">
                       {(item._customer || item.customer_name) && <span className="text-violet-600">{item._customer || item.customer_name} · </span>}
                       SO: {item._so_number || item.so_number || ""} {item.carton_number ? `· Carton ${item.carton_number}/${item.total_cartons}` : ""}
+                      {item._delivery_date && <span className="ml-1 text-gray-400">· {item._delivery_date}</span>}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {item.location_code && <span className="text-xs font-mono font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-lg">{item.location_code}</span>}
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PKG_STATUS[item.status] || "bg-gray-100"}`}>{item.status}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${item.status === "no_package" ? "bg-amber-100 text-amber-700" : PKG_STATUS[item.status] || "bg-gray-100"}`}>{item.status === "no_package" ? "No QR" : item.status}</span>
                   </div>
                 </div>
               ))}
