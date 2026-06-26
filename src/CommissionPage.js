@@ -179,8 +179,17 @@ export default function CommissionPage() {
       {/* TAB 1: All Commissions */}
       {tab === 1 && (
         <div className="space-y-2">
+          <div className="flex gap-2 mb-2">
+            <button onClick={async () => {
+              toast.info("Recalculating all commissions...");
+              const res = await af(`${API}/commissions/recalculate-all`, { method: "POST" });
+              const d = await res.json();
+              toast.success(`${d.calculated}/${d.total} orders calculated`);
+              loadCommissions();
+            }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
+          </div>
           {loading && <div className="text-center text-gray-400 py-8">Loading...</div>}
-          {!loading && commissions.length === 0 && <div className="text-center py-8 text-gray-400">No commissions yet. Commissions are auto-calculated when payments are recorded.</div>}
+          {!loading && commissions.length === 0 && <div className="text-center py-8 text-gray-400">No commissions yet. Set up rules first, then click "Recalculate All Orders".</div>}
           {commissions.map(c => (
             <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
               <div>
