@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce } from "./UIComponents";
+import { useDebounce, useToast } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -282,6 +282,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
 
 export default function OrdersPage() {
   const { user } = useAuth();
+  const toast = useToast();
   const companyId = user?.company_id;
 
   const [orders, setOrders] = useState([]);
@@ -408,19 +409,33 @@ export default function OrdersPage() {
     return () => clearTimeout(t);
   }, [pickerOpen, productSearch, searchProducts]);
 
+  // ── Fetch full order (shared helper) ────────────────────────────
+  // Returns full order with sales_order_items, payment_proofs, signature.
+  // Skips fetch if already loaded. Also returns legacy_order for arrival data.
+  const getFullOrder = async (order) => {
+    if (order.sales_order_items) return { order, legacy_order: null };
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
+      if (!res.ok) { toast.error("Failed to load order detail"); return { order, legacy_order: null }; }
+      const d = await res.json();
+      return { order: d.order || order, legacy_order: d.legacy_order || null };
+    } catch { toast.error("Network error loading order"); return { order, legacy_order: null }; }
+  };
+
+  const parseLegacyArrival = (legacyOrder) => {
+    if (!legacyOrder) return null;
+    const items = typeof legacyOrder.items === "string" ? JSON.parse(legacyOrder.items || "[]") : (legacyOrder.items || []);
+    return { orderId: legacyOrder.id, items: Array.isArray(items) ? items : [] };
+  };
+
   // ── Order View (read-only detail) ──────────────────────────────
   const openView = async (o) => {
-    setViewingOrder(o); // show immediately with list data
+    setViewingOrder(o); // show instantly with list data
     setViewArrival(null);
-    // Fetch full detail (items, proofs, signature, arrival) in background
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/sales-orders/${o.id}`, { headers });
-    const d = await res.json();
-    if (d.order) setViewingOrder(d.order); // enrich with full data
-    if (d.legacy_order) {
-      const items = typeof d.legacy_order.items === "string" ? JSON.parse(d.legacy_order.items || "[]") : (d.legacy_order.items || []);
-      setViewArrival({ orderId: d.legacy_order.id, items: Array.isArray(items) ? items : [] });
-    }
+    const { order: full, legacy_order } = await getFullOrder(o);
+    setViewingOrder(full);
+    setViewArrival(parseLegacyArrival(legacy_order));
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
@@ -437,37 +452,24 @@ export default function OrdersPage() {
     setEditId(o.id);
     setDrawerOpen(true);
     setArrivalItems(null);
-    // Fetch full order detail (items, proofs, signature) if not already loaded
-    let fullOrder = o;
-    if (!o.sales_order_items) {
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/sales-orders/${o.id}`, { headers });
-      const d = await res.json();
-      if (d.order) fullOrder = d.order;
-      if (d.legacy_order) {
-        const items = typeof d.legacy_order.items === "string" ? JSON.parse(d.legacy_order.items || "[]") : (d.legacy_order.items || []);
-        setArrivalItems({ orderId: d.legacy_order.id, items: Array.isArray(items) ? items : [] });
-      }
-    } else if (o.order_number) {
-      supabase.from("orders").select("id, items").eq("so_number", o.order_number).maybeSingle().then(({ data }) => {
-        if (data) { const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []); setArrivalItems({ orderId: data.id, items: Array.isArray(items) ? items : [] }); }
-      });
-    }
+    const { order: fullOrder, legacy_order } = await getFullOrder(o);
     setEditingOrder(fullOrder);
+    setArrivalItems(parseLegacyArrival(legacy_order));
+    const f = fullOrder;
     setForm({
-      customer_name: o.customer_name || "",
-      customer_contact: o.customer_contact || "",
-      customer_address: o.customer_address || "",
-      status: o.status || "draft", sales_channel: o.sales_channel || "branch",
-      notes: o.notes || "",
-      delivery_type: o.delivery_type || "Delivery",
-      delivery_date: o.delivery_date || "",
-      delivery_time_slot: o.delivery_time_slot || "",
-      remark: o.remark || "",
-      discount: o.discount ?? "", deposit: o.deposit ?? "", payment_method: o.payment_method || "", payment_proofs: (() => { try { return JSON.parse(o.payment_proofs || "[]"); } catch { return []; } })(),
-      branch_id: o.branch_id || "", salesman_names: o.salesman_name || "",
-      country: o.country || "", gst_rate: o.gst_rate ?? 0, gst_waived: o.gst_waived || false,
-      items: (o.sales_order_items || []).map(it => ({
+      customer_name: f.customer_name || "",
+      customer_contact: f.customer_contact || "",
+      customer_address: f.customer_address || "",
+      status: f.status || "draft", sales_channel: f.sales_channel || "branch",
+      notes: f.notes || "",
+      delivery_type: f.delivery_type || "Delivery",
+      delivery_date: f.delivery_date || "",
+      delivery_time_slot: f.delivery_time_slot || "",
+      remark: f.remark || "",
+      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
+      branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
+      country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
+      items: (f.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
         custom_dimensions: it.custom_dimensions || "",
@@ -634,14 +636,7 @@ export default function OrdersPage() {
   };
 
   const openSubmitPO = async (order) => {
-    // Ensure we have full items
-    let fullOrder = order;
-    if (!order.sales_order_items) {
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
-      const d = await res.json();
-      if (d.order) fullOrder = d.order;
-    }
+    const { order: fullOrder } = await getFullOrder(order);
     const items = fullOrder.sales_order_items || fullOrder.items || [];
     // Fetch products and suppliers separately to avoid PostgREST join issues
     const headers = await authHeaders();
@@ -762,7 +757,7 @@ export default function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={async e => { e.stopPropagation(); if (!o.sales_order_items) { const h = await authHeaders(); const r = await fetch(`${API}/sales-orders/${o.id}`, { headers: h }); const d = await r.json(); setSignOrder(d.order || o); } else setSignOrder(o); }}
+                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await getFullOrder(o); setSignOrder(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
