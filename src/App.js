@@ -110,7 +110,7 @@ function Badge({ children, color = "gray" }) {
 
 // ── Order Card (mobile-first) ─────────────────────────────────────
 // ── Order View Modal ──────────────────────────────────────────────
-function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orders, handleView }) {
+function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orders, handleView, onRefresh }) {
   const hasBalance = parseFloat(o.balance) > 0;
   const [trips, setTrips] = useState([]);
   const [tripsLoading, setTripsLoading] = useState(false);
@@ -171,10 +171,17 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
                       <div><span className="text-gray-400">Supplier: </span><span className="font-medium">{item.supplier || "-"}</span></div>
                       <div><span className="text-gray-400">Ordered: </span><span className="font-medium">{fmt(item.itemOrderDate)}</span></div>
                       <div><span className="text-gray-400">Sent: </span><span className="font-medium">{fmt(item.supplierSentDate)}</span></div>
-                      <div><span className="text-gray-400">Arrived: </span>
+                      <div className="flex items-center gap-1"><span className="text-gray-400">Arrived: </span>
                         {item.arrivalDate
                           ? <span className="font-semibold text-emerald-600">{fmt(item.arrivalDate)}</span>
                           : <span className="font-semibold text-red-500">Not arrived</span>}
+                        <input type="date" value={item.arrivalDate || ""} onChange={async e => {
+                          const val = e.target.value;
+                          const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                          await fetch(`${BACKEND}/orders/${o.id}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                          o.items[i].arrivalDate = val;
+                          if (onRefresh) onRefresh();
+                        }} className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[105px] focus:outline-none focus:border-violet-400" title="Set arrival date" />
                       </div>
                     </div>
                   </div>
@@ -1330,7 +1337,7 @@ export default function App() {
       {/* ── Modals ────────────────────────────────────────────────── */}
 
       {/* Order view */}
-      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} />}
+      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} onRefresh={loadOrders} />}
 
       {/* Add/Edit Order form */}
       {showForm && (
