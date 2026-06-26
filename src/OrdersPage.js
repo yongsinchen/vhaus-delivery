@@ -827,7 +827,7 @@ export default function OrdersPage() {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
-                      {["draft", "cancelled"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
+                      {!["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
                   </div>
