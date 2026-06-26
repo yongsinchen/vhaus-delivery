@@ -13,11 +13,11 @@ const AGING_STYLE = {
   "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "Warning", sub: "60-90 days" },
   "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "Critical", sub: "90+ days" },
 };
-const TABS = ["Overview", "Aging Detail", "Payments", "Collections"];
+const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile"];
 
 export default function FinancePage() {
   const { user } = useAuth();
-  useToast();
+  const toast = useToast();
   const companyId = user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -26,6 +26,14 @@ export default function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+
+  // Reconciliation
+  const [uploads, setUploads] = useState([]);
+  const [activeUpload, setActiveUpload] = useState(null);
+  const [recTxns, setRecTxns] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [orderSearch, setOrderSearch] = useState({});
 
   const loadData = useCallback(async () => {
     if (!companyId) return;
@@ -41,6 +49,58 @@ export default function FinancePage() {
   }, [companyId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadUploads = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/statements?company_id=${companyId}`);
+    const d = await res.json();
+    setUploads(d.uploads || []);
+  }, [companyId]);
+
+  const openUpload = async (u) => {
+    const res = await af(`${API}/statements/${u.id}`);
+    const d = await res.json();
+    setActiveUpload(d.upload);
+    setRecTxns(d.transactions || []);
+  };
+
+  const uploadStatement = async (file, type) => {
+    setUploading(true);
+    const token = await getToken();
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("type", type);
+    const res = await fetch(`${API}/statements/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+    const d = await res.json();
+    if (d.upload_id) { toast.success(`${d.total} transactions extracted, ${d.matched} auto-matched`); loadUploads(); openUpload({ id: d.upload_id }); }
+    else toast.error(d.error || "Failed");
+    setUploading(false);
+  };
+
+  const updateTxn = async (txnId, updates) => {
+    await af(`${API}/statement-transactions/${txnId}`, { method: "PATCH", body: JSON.stringify(updates) });
+    if (activeUpload) openUpload(activeUpload);
+  };
+
+  const reconcileAll = async () => {
+    if (!activeUpload) return;
+    setReconciling(true);
+    const res = await af(`${API}/statements/${activeUpload.id}/reconcile`, { method: "POST" });
+    const d = await res.json();
+    toast.success(`${d.reconciled} payments recorded`);
+    setReconciling(false);
+    loadUploads(); openUpload(activeUpload); loadData();
+  };
+
+  const searchOrderForTxn = async (txnId, query) => {
+    if (query.length < 2) return;
+    const res = await af(`${API}/services?company_id=${companyId}`);
+    const all = await res.json();
+    const matches = (Array.isArray(all) ? all : []).filter(o => (o.so_number || "").toLowerCase().includes(query.toLowerCase()) || (o.customer_name || "").toLowerCase().includes(query.toLowerCase())).slice(0, 5);
+    setOrderSearch(prev => ({ ...prev, [txnId]: matches }));
+  };
+
+  useEffect(() => { if (tab === 4) loadUploads(); }, [tab, loadUploads]);
 
   const filteredPayments = payments.filter(p => {
     const d = (p.paid_at || "").slice(0, 10);
@@ -218,6 +278,138 @@ export default function FinancePage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* TAB 4: Reconcile */}
+      {tab === 4 && (
+        <div className="space-y-4">
+          {/* Upload buttons */}
+          <div className="flex gap-3 flex-wrap">
+            <label className={`px-4 py-2 rounded-xl text-sm font-medium cursor-pointer ${uploading ? "bg-gray-200 text-gray-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
+              {uploading ? "Processing..." : "📄 Upload Bank Statement"}
+              <input type="file" accept=".csv,.xlsx,.xls,.pdf,image/*" className="hidden" disabled={uploading}
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadStatement(f, "bank"); e.target.value = ""; }} />
+            </label>
+            <label className={`px-4 py-2 rounded-xl text-sm font-medium cursor-pointer ${uploading ? "bg-gray-200 text-gray-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
+              {uploading ? "Processing..." : "💳 Upload Card Statement"}
+              <input type="file" accept=".csv,.xlsx,.xls,.pdf,image/*" className="hidden" disabled={uploading}
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadStatement(f, "card"); e.target.value = ""; }} />
+            </label>
+          </div>
+
+          {/* Past uploads */}
+          {uploads.length > 0 && !activeUpload && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-gray-700">Statement History</h3>
+              {uploads.map(u => (
+                <div key={u.id} onClick={() => openUpload(u)}
+                  className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-900">{u.filename}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.type === "card" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>{u.type}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${u.status === "reconciled" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{u.status}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">{u.total_transactions} transactions · {u.matched_count} matched · {new Date(u.created_at).toLocaleDateString("en-MY")}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Active upload review */}
+          {activeUpload && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">{activeUpload.filename}</h3>
+                  <p className="text-xs text-gray-500">{recTxns.length} transactions</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => { setActiveUpload(null); setRecTxns([]); }} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600">← Back</button>
+                  {recTxns.some(t => t.match_status === "auto_matched" || t.match_status === "confirmed") && (
+                    <button onClick={reconcileAll} disabled={reconciling}
+                      className="text-xs px-4 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+                      {reconciling ? "Recording..." : `✓ Reconcile ${recTxns.filter(t => t.match_status === "auto_matched" || t.match_status === "confirmed").length} Matches`}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-2">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center">
+                  <p className="text-xs text-emerald-600">Matched</p>
+                  <p className="text-lg font-bold text-emerald-700">{recTxns.filter(t => ["auto_matched", "confirmed"].includes(t.match_status)).length}</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center">
+                  <p className="text-xs text-amber-600">Unmatched</p>
+                  <p className="text-lg font-bold text-amber-700">{recTxns.filter(t => t.match_status === "unmatched").length}</p>
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-2 text-center">
+                  <p className="text-xs text-blue-600">Reconciled</p>
+                  <p className="text-lg font-bold text-blue-700">{recTxns.filter(t => t.match_status === "reconciled").length}</p>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-2 text-center">
+                  <p className="text-xs text-gray-500">Total</p>
+                  <p className="text-lg font-bold text-gray-700">{money(recTxns.reduce((s, t) => s + (Number(t.amount) || 0), 0))}</p>
+                </div>
+              </div>
+
+              {/* Transaction list */}
+              <div className="space-y-2">
+                {recTxns.map(txn => (
+                  <div key={txn.id} className={`bg-white rounded-xl border p-3 ${txn.match_status === "reconciled" ? "border-emerald-200 opacity-50" : txn.match_status === "auto_matched" || txn.match_status === "confirmed" ? "border-emerald-200" : "border-amber-200"}`}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">{money(txn.amount)}</p>
+                        <p className="text-xs text-gray-500">{txn.transaction_date || ""} {txn.reference ? `· Ref: ${txn.reference}` : ""}</p>
+                        {txn.description && <p className="text-xs text-gray-400 truncate max-w-xs">{txn.description}</p>}
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
+                        txn.match_status === "reconciled" ? "bg-emerald-100 text-emerald-700" :
+                        txn.match_status === "auto_matched" ? "bg-emerald-100 text-emerald-700" :
+                        txn.match_status === "confirmed" ? "bg-blue-100 text-blue-700" :
+                        "bg-amber-100 text-amber-700"
+                      }`}>{txn.match_status}</span>
+                    </div>
+
+                    {/* Matched order */}
+                    {txn._order && (
+                      <div className="bg-emerald-50 rounded-lg px-3 py-1.5 flex items-center justify-between mt-1">
+                        <span className="text-xs text-emerald-800"><b>{txn._order.so_number}</b> — {txn._order.customer_name} (Bal: {money(txn._order.balance)})</span>
+                        {txn.match_status === "auto_matched" && (
+                          <div className="flex gap-1">
+                            <button onClick={() => updateTxn(txn.id, { match_status: "confirmed" })} className="text-xs px-2 py-0.5 rounded bg-emerald-600 text-white">✓</button>
+                            <button onClick={() => updateTxn(txn.id, { match_status: "unmatched", matched_order_id: null })} className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-600">✗</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Manual match for unmatched */}
+                    {txn.match_status === "unmatched" && (
+                      <div className="mt-2">
+                        <input placeholder="Search SO # or customer..." onChange={e => searchOrderForTxn(txn.id, e.target.value)}
+                          className="w-full px-2 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                        {(orderSearch[txn.id] || []).length > 0 && (
+                          <div className="border border-gray-200 rounded-lg mt-1 max-h-24 overflow-y-auto">
+                            {orderSearch[txn.id].map(o => (
+                              <button key={o.id} onClick={() => { updateTxn(txn.id, { matched_order_id: o.id, match_status: "confirmed" }); setOrderSearch(prev => ({ ...prev, [txn.id]: [] })); }}
+                                className="w-full text-left px-2 py-1 text-xs hover:bg-violet-50">
+                                <b className="text-violet-700">{o.so_number}</b> {o.customer_name} — Bal: {money(o.balance)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
