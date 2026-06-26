@@ -536,14 +536,8 @@ export default function App() {
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
   const handleDelete = async id => {
     try {
-      const order = orders.find(o => o.id === id);
-      if (order?.soNumber) {
-        // Find sales_order by order_number and delete via API
-        const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(order.soNumber)}&limit=1`);
-        const listData = await listRes.json();
-        const soId = listData?.orders?.[0]?.id;
-        if (soId) await authFetch(`${BACKEND}/sales-orders/${soId}`, { method: "DELETE" });
-      }
+      const res = await authFetch(`${BACKEND}/orders/${id}`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); return; }
       setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null);
     } catch (e) { alert("Failed to delete: " + e.message); }
   };
