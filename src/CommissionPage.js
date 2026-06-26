@@ -130,49 +130,105 @@ export default function CommissionPage() {
       {/* TAB 0: Payout */}
       {tab === 0 && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <input type="month" value={payoutMonth.slice(0, 7)} onChange={e => setPayoutMonth(e.target.value + "-01")} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
             <button onClick={loadPayout} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
+            {payout && (payout.users || []).length > 0 && (
+              <button onClick={() => {
+                const rows = (payout.users || []).flatMap(u => {
+                  const eligible = u.commissions.filter(c => c.status === "eligible");
+                  const pending = u.commissions.filter(c => c.status === "pending");
+                  const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
+                  const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
+                  return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role})</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
+                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
+                    ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
+                    ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
+                  ];
+                });
+                const w = window.open("", "_blank"); if (!w) return;
+                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Month: ${payoutMonth.slice(0,7)} · Total: ${money(payout.total)} · ${(payout.users||[]).length} person(s)</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(payout.total)}</p></body></html>`);
+                w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+              }} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Report</button>
+            )}
             {payout && <span className="text-sm font-bold text-gray-700">Total Payout: {money(payout.total)}</span>}
           </div>
-          {payout && (payout.users || []).map(u => (
+
+          {payout && (payout.users || []).length === 0 && <div className="text-center py-8 text-gray-400">No commissions for this month. Set up rules and click "Recalculate All" in the All Commissions tab.</div>}
+
+          {payout && (payout.users || []).map(u => {
+            const eligible = u.commissions.filter(c => c.status === "eligible" || c.status === "paid");
+            const pending = u.commissions.filter(c => c.status === "pending");
+            // eslint-disable-next-line no-unused-vars
+            const held = u.commissions.filter(c => c.status === "held");
+            const pendingTotal = pending.reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
+            return (
             <div key={u.user_id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <p className="font-bold text-gray-900">{u.name}</p>
+                  <p className="font-bold text-gray-900 text-lg">{u.name}</p>
                   <p className="text-xs text-gray-500">{u.role} · {u.commissions.length} order(s)</p>
                 </div>
-                <p className={`text-lg font-bold ${u.total >= 0 ? "text-emerald-700" : "text-red-600"}`}>{money(u.total)}</p>
+                <div className="text-right">
+                  <p className={`text-xl font-bold ${u.total >= 0 ? "text-emerald-700" : "text-red-600"}`}>{money(u.total)}</p>
+                  {pending.length > 0 && <p className="text-xs text-amber-600">+ {money(pendingTotal)} pending deposit</p>}
+                </div>
               </div>
-              <div className="space-y-1">
-                {u.commissions.map(c => (
-                  <div key={c.id} className="flex items-center justify-between text-xs py-1 border-t border-gray-50">
-                    <div>
-                      <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
-                      <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+
+              {/* Eligible commissions */}
+              {eligible.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-bold text-emerald-600 mb-1">ELIGIBLE ({eligible.length})</p>
+                  {eligible.map(c => (
+                    <div key={c.id} className="flex items-center justify-between text-xs py-1.5 border-t border-gray-50">
+                      <div>
+                        <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
+                        <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                        {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +RM${Math.round(Number(c.net_amount) * Number(c.incentive_pct) / 100)}` : ""}</span>
+                        <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}%` : ""}</span>
-                      <span className={`px-1.5 py-0.5 rounded-full ${STATUS_STYLE[c.status] || "bg-gray-100"}`}>{c.status}</span>
-                      <span className="font-medium text-gray-900">{money(c.commission_amt)}</span>
+                  ))}
+                </div>
+              )}
+
+              {/* Pending commissions */}
+              {pending.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-bold text-amber-600 mb-1">PENDING DEPOSIT &lt; 30% ({pending.length})</p>
+                  {pending.map(c => (
+                    <div key={c.id} className="flex items-center justify-between text-xs py-1.5 border-t border-gray-50 opacity-60">
+                      <div>
+                        <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
+                        <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-600">⏳ {c.rate_pct}%</span>
+                        <span className="text-gray-400">{money(c.commission_amt)}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-                {u.adjustments.length > 0 && u.adjustments.map(a => (
-                  <div key={a.id} className="flex items-center justify-between text-xs py-1 border-t border-gray-50 bg-amber-50">
-                    <span className="text-amber-700">Adjustment: {a.reason || a.adjustment_type}</span>
-                    <span className={`font-bold ${Number(a.delta_amt) >= 0 ? "text-emerald-600" : "text-red-600"}`}>{money(a.delta_amt)}</span>
-                  </div>
-                ))}
-                {u.holds.filter(h => h.status === "held").length > 0 && (
-                  <div className="text-xs text-red-600 font-medium py-1 border-t border-gray-50">
-                    ⚠️ {u.holds.filter(h => h.status === "held").length} hold(s) — {money(u.holds.filter(h => h.status === "held").reduce((s, h) => s + Number(h.held_amt), 0))} withheld
-                  </div>
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Adjustments */}
+              {u.adjustments.length > 0 && u.adjustments.map(a => (
+                <div key={a.id} className="flex items-center justify-between text-xs py-1 border-t border-gray-50 bg-amber-50 px-2 rounded">
+                  <span className="text-amber-700">Adjustment: {a.reason || a.adjustment_type}</span>
+                  <span className={`font-bold ${Number(a.delta_amt) >= 0 ? "text-emerald-600" : "text-red-600"}`}>{money(a.delta_amt)}</span>
+                </div>
+              ))}
+              {u.holds.filter(h => h.status === "held").length > 0 && (
+                <div className="text-xs text-red-600 font-medium py-1 border-t border-gray-50">
+                  🔒 {u.holds.filter(h => h.status === "held").length} hold(s) — {money(u.holds.filter(h => h.status === "held").reduce((s, h) => s + Number(h.held_amt), 0))} withheld
+                </div>
+              )}
             </div>
-          ))}
-          {payout && (payout.users || []).length === 0 && <div className="text-center py-8 text-gray-400">No commissions for this month</div>}
+          ); })}
         </div>
       )}
 
