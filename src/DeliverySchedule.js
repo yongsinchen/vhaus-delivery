@@ -124,7 +124,6 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
       method: "PATCH", body: JSON.stringify({ slot: val })
     });
     setSaving(false);
-    if (onSaved) onSaved();
   };
 
   return (
