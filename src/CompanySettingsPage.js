@@ -67,15 +67,6 @@ export default function CompanySettingsPage() {
   const [newOptLabel, setNewOptLabel] = useState("");
   const [newOptValue, setNewOptValue] = useState("");
 
-  const loadSettings = useCallback(async () => {
-    if (!companyId) return;
-    const res = await af(`${API}/company-settings?company_id=${companyId}`);
-    const d = await res.json();
-    if (d.settings && d.settings.company_id) {
-      setSettings(prev => ({ ...prev, ...d.settings }));
-    }
-  }, [companyId]);
-
   const loadBranches = useCallback(async () => {
     if (!companyId) return;
     const res = await af(`${API}/branches?company_id=${companyId}`);
@@ -109,7 +100,25 @@ export default function CompanySettingsPage() {
     setPendingOptions(pendD.options || []);
   }, [companyId]);
 
-  useEffect(() => { loadSettings(); loadBranches(); loadWarehouses(); loadCategories(); loadSpecOptions(); }, [loadSettings, loadBranches, loadWarehouses, loadCategories, loadSpecOptions]);
+  const loadAll = useCallback(async () => {
+    if (!companyId) return;
+    const [sRes, bRes, wRes, cRes, soRes, spRes] = await Promise.all([
+      af(`${API}/company-settings?company_id=${companyId}`),
+      af(`${API}/branches?company_id=${companyId}`),
+      af(`${API}/warehouses?company_id=${companyId}`),
+      af(`${API}/categories?company_id=${companyId}`),
+      af(`${API}/spec-options?company_id=${companyId}`),
+      af(`${API}/spec-options/pending?company_id=${companyId}`),
+    ]);
+    const [sD, bD, wD, cD, soD, spD] = await Promise.all([sRes.json(), bRes.json(), wRes.json(), cRes.json(), soRes.json(), spRes.json()]);
+    if (sD.settings?.company_id) setSettings(prev => ({ ...prev, ...sD.settings }));
+    setBranches(bD.branches || []);
+    setWhouses(wD.warehouses || []);
+    setCategories(cD.categories || []);
+    setSpecOptions((soD.options || []).filter(o => o.is_approved));
+    setPendingOptions(spD.options || []);
+  }, [companyId]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const saveWarehouse = async () => {
     if (!whForm.name.trim()) return;

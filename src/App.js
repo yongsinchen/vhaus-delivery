@@ -327,12 +327,16 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Product (from master list)</label>
-            <input value={productSearch} onChange={async e => {
-              setProductSearch(e.target.value);
-              if (e.target.value.length >= 2) {
-                const res = await authFetch(`${BACKEND}/products?company_id=${companyId}&search=${encodeURIComponent(e.target.value)}&limit=10&is_active=true`);
-                const d = await res.json();
-                setProductResults(d.products || []);
+            <input value={productSearch} onChange={e => {
+              const val = e.target.value;
+              setProductSearch(val);
+              clearTimeout(window._doProductSearchTimer);
+              if (val.length >= 2) {
+                window._doProductSearchTimer = setTimeout(async () => {
+                  const res = await authFetch(`${BACKEND}/products?company_id=${companyId}&search=${encodeURIComponent(val)}&limit=10&is_active=true`);
+                  const d = await res.json();
+                  setProductResults(d.products || []);
+                }, 300);
               } else setProductResults([]);
             }} placeholder="Search product code or name…" className="w-full border rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
             {productResults.length > 0 && (
@@ -749,11 +753,10 @@ export default function App() {
           for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
           const getDs = d => d ? `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
           const calSalesmen = [...new Set(orders.map(o => o.salesman).filter(Boolean))].sort();
-          // Always show ALL orders — salesman filter only highlights
-          const ordersOnDay = d => {
-            const ds = getDs(d);
-            return ds ? orders.filter(o => o.deliveryDate === ds) : [];
-          };
+          // Pre-build date→orders map (O(n) instead of O(n*days))
+          const ordersByDate = {};
+          orders.forEach(o => { if (o.deliveryDate) { if (!ordersByDate[o.deliveryDate]) ordersByDate[o.deliveryDate] = []; ordersByDate[o.deliveryDate].push(o); } });
+          const ordersOnDay = d => ordersByDate[getDs(d)] || [];
           const isMyOrder = o => {
             if (!calSalesman) return false;
             return (o.salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(calSalesman.toLowerCase());

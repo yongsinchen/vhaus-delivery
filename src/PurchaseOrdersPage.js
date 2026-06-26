@@ -81,14 +81,15 @@ export default function PurchaseOrdersPage() {
   };
 
   const receiveItem = async (itemId, qty) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/purchase-order-items/${itemId}/receive`, {
-      method: "PATCH", headers, body: JSON.stringify({ received_qty: qty }),
-    });
+    // Optimistic update — show received immediately
     if (detailOrder) {
-      const res = await fetch(`${API}/purchase-orders/${detailOrder.id}`, { headers: await authHeaders() });
-      const d = await res.json();
-      setDetailOrder(d.order);
+      setDetailOrder(prev => prev ? { ...prev, purchase_order_items: (prev.purchase_order_items || []).map(it => it.id === itemId ? { ...it, received_qty: qty } : it) } : prev);
+    }
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/purchase-order-items/${itemId}/receive`, { method: "PATCH", headers, body: JSON.stringify({ received_qty: qty }) });
+    if (!res.ok) {
+      // Revert on failure
+      if (detailOrder) { const r = await fetch(`${API}/purchase-orders/${detailOrder.id}`, { headers }); const d = await r.json(); setDetailOrder(d.order); }
     }
     loadOrders();
   };

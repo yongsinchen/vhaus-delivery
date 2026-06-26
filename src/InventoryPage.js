@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import { useDebounce } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const af = async (url, opts = {}) => { const { data } = await supabase.auth.getSession(); const token = data?.session?.access_token; return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } }); };
@@ -82,20 +83,27 @@ export default function InventoryPage() {
     setProducts(d.products || []);
   }, [companyId]);
 
+  const loadedRef = useRef({ inv: false, mov: false });
   useEffect(() => { loadWarehouses(); loadProducts(); }, [loadWarehouses, loadProducts]);
-  useEffect(() => { if (tab === 0) loadInventory(); if (tab === 1) loadMovements(); }, [tab, loadInventory, loadMovements]);
+  useEffect(() => {
+    if (tab === 0 && !loadedRef.current.inv) { loadInventory(); loadedRef.current.inv = true; }
+    if (tab === 1 && !loadedRef.current.mov) { loadMovements(); loadedRef.current.mov = true; }
+  }, [tab, loadInventory, loadMovements]);
+  // Reset cache on filter change
+  useEffect(() => { loadedRef.current = { inv: false, mov: false }; }, [filterWarehouse, filterLowStock]);
 
-  const filteredInv = search
+  const debouncedSearch = useDebounce(search, 200);
+  const filteredInv = useMemo(() => debouncedSearch
     ? inventory.filter(i => {
         const p = i.products;
-        const q = search.toLowerCase();
+        const q = debouncedSearch.toLowerCase();
         return (p?.code || "").toLowerCase().includes(q) || (p?.name || "").toLowerCase().includes(q);
       })
-    : inventory;
+    : inventory, [inventory, debouncedSearch]);
 
-  const getFilteredProducts = (q) => q
+  const getFilteredProducts = useCallback((q) => q
     ? products.filter(p => (p.code + " " + p.name).toLowerCase().includes(q.toLowerCase())).slice(0, 20)
-    : products.slice(0, 20);
+    : products.slice(0, 20), [products]);
 
   const doAdjust = async () => {
     if (!adjWarehouse || !adjProduct || adjQty === "") return;
