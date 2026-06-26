@@ -433,19 +433,27 @@ export default function OrdersPage() {
     setDrawerOpen(true);
   };
 
-  const openEdit = (o) => {
+  const openEdit = async (o) => {
     setEditId(o.id);
-    setEditingOrder(o);
-    // Load legacy order items for arrival tracking
+    setDrawerOpen(true);
     setArrivalItems(null);
-    if (o.order_number) {
+    // Fetch full order detail (items, proofs, signature) if not already loaded
+    let fullOrder = o;
+    if (!o.sales_order_items) {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${o.id}`, { headers });
+      const d = await res.json();
+      if (d.order) fullOrder = d.order;
+      if (d.legacy_order) {
+        const items = typeof d.legacy_order.items === "string" ? JSON.parse(d.legacy_order.items || "[]") : (d.legacy_order.items || []);
+        setArrivalItems({ orderId: d.legacy_order.id, items: Array.isArray(items) ? items : [] });
+      }
+    } else if (o.order_number) {
       supabase.from("orders").select("id, items").eq("so_number", o.order_number).maybeSingle().then(({ data }) => {
-        if (data) {
-          const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []);
-          setArrivalItems({ orderId: data.id, items: Array.isArray(items) ? items : [] });
-        }
+        if (data) { const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []); setArrivalItems({ orderId: data.id, items: Array.isArray(items) ? items : [] }); }
       });
     }
+    setEditingOrder(fullOrder);
     setForm({
       customer_name: o.customer_name || "",
       customer_contact: o.customer_contact || "",
@@ -626,7 +634,15 @@ export default function OrdersPage() {
   };
 
   const openSubmitPO = async (order) => {
-    const items = order.sales_order_items || order.items || [];
+    // Ensure we have full items
+    let fullOrder = order;
+    if (!order.sales_order_items) {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
+      const d = await res.json();
+      if (d.order) fullOrder = d.order;
+    }
+    const items = fullOrder.sales_order_items || fullOrder.items || [];
     // Fetch products and suppliers separately to avoid PostgREST join issues
     const headers = await authHeaders();
     const [prodRes, supRes] = await Promise.all([
@@ -746,7 +762,7 @@ export default function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={e => { e.stopPropagation(); setSignOrder(o); }}
+                  <button onClick={async e => { e.stopPropagation(); if (!o.sales_order_items) { const h = await authHeaders(); const r = await fetch(`${API}/sales-orders/${o.id}`, { headers: h }); const d = await r.json(); setSignOrder(d.order || o); } else setSignOrder(o); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
