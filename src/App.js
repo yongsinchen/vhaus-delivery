@@ -13,6 +13,7 @@ import InventoryPage from "./InventoryPage";
 import WarehousePage from "./WarehousePage";
 import DriverPage from "./DriverPage";
 import ServicePage from "./ServicePage";
+import CustomerPage from "./CustomerPage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -78,6 +79,7 @@ const NAV = [
   { id: "inventory",  label: "Inventory",          icon: "📊", canKey: null, manageOnly: true },
   { id: "warehouse",  label: "Warehouse",          icon: "🏭", canKey: null, manageOnly: true },
   { id: "driver",     label: "Driver",             icon: "🚛", canKey: null, manageOnly: false },
+  { id: "customers",  label: "Customers",        icon: "👥", canKey: null, manageOnly: false },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
@@ -1239,6 +1241,9 @@ export default function App() {
 
     // DRIVER
     if (page === "driver") return <DriverPage />;
+
+    // CUSTOMERS
+    if (page === "customers") return <CustomerPage />;
 
     // SUPPLIERS
     if (page === "suppliers") return <SuppliersPage />;
