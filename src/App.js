@@ -438,12 +438,16 @@ export default function App() {
   const saveServiceDate = async () => {
     if (!serviceDateModal || !serviceDateValue) return;
     setServiceDateSaving(true);
-    const { error } = await supabase.from("orders")
-      .update({ delivery_date: serviceDateValue })
-      .eq("id", serviceDateModal.id);
-    if (error) { alert("Failed: " + error.message); setServiceDateSaving(false); return; }
-    setServices(prev => prev.map(o => o.id === serviceDateModal.id ? { ...o, deliveryDate: serviceDateValue } : o));
-    setServiceDateModal(null); setServiceDateValue(""); setServiceDateSaving(false);
+    try {
+      const res = await authFetch(`${BACKEND}/orders/${serviceDateModal.id}/set-date`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delivery_date: serviceDateValue }),
+      });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setServiceDateSaving(false); return; }
+      setServices(prev => prev.map(o => o.id === serviceDateModal.id ? { ...o, deliveryDate: serviceDateValue } : o));
+      setServiceDateModal(null); setServiceDateValue("");
+    } catch (e) { alert("Failed: " + e.message); }
+    setServiceDateSaving(false);
   };
 
   // ── Data loading ────────────────────────────────────────────────
@@ -530,20 +534,50 @@ export default function App() {
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
-  const handleDelete = async id => { await supabase.from("orders").delete().eq("id", id); setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null); };
+  const handleDelete = async id => {
+    try {
+      const order = orders.find(o => o.id === id);
+      if (order?.soNumber) {
+        // Find sales_order by order_number and delete via API
+        const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(order.soNumber)}&limit=1`);
+        const listData = await listRes.json();
+        const soId = listData?.orders?.[0]?.id;
+        if (soId) await authFetch(`${BACKEND}/sales-orders/${soId}`, { method: "DELETE" });
+      }
+      setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null);
+    } catch (e) { alert("Failed to delete: " + e.message); }
+  };
   const handleSubmit = async () => {
     if (!form.soNumber) return alert("SO Number required.");
     setSaving(true);
-    const payload = { ...toDb(form), company_id: companyId || null };
-    if (editId) {
-      const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
-      if (err) { alert("Error: " + err.message); setSaving(false); return; }
-      setOrders(p => p.map(o => o.id === editId ? fromDb({...payload, id: editId, created_at: o.created_at}) : o));
-    } else {
-      const { data, error: err } = await supabase.from("orders").insert(payload).select();
-      if (err) { alert("Error: " + err.message); setSaving(false); return; }
-      if (data?.[0]) setOrders(p => [...p, fromDb(data[0])]);
-    }
+    try {
+      const items = (form.items || []).filter(i => i.itemName).map(i => ({
+        product_name: i.itemName, product_code: i.itemCode, quantity: Number(i.unit) || 1,
+        unit_price: Number(i.unitPrice) || 0, supplier_name: i.supplier || null,
+      }));
+      const body = {
+        order_number: form.soNumber, customer_name: form.customerName, customer_contact: form.contact,
+        customer_address: form.address, salesman_names: form.salesman, delivery_date: form.deliveryDate || null,
+        delivery_time_slot: form.timeSlot || null, delivery_type: form.type || "Delivery",
+        remark: form.remark || null, status: "confirmed",
+        subtotal: Number(form.orderAmount) || 0, deposit: (Number(form.orderAmount) || 0) - (Number(form.balance) || 0),
+        items,
+      };
+      let res;
+      if (editId) {
+        const order = orders.find(o => o.id === editId);
+        const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(form.soNumber)}&limit=1`);
+        const listData = await listRes.json();
+        const soId = listData?.orders?.[0]?.id;
+        if (soId) {
+          res = await authFetch(`${BACKEND}/sales-orders/${soId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        }
+      } else {
+        res = await authFetch(`${BACKEND}/sales-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      }
+      if (res && !res.ok) { const d = await res.json(); alert("Error: " + (d.error || "Unknown")); setSaving(false); return; }
+      await loadOrders();
+    } catch (e) { alert("Error: " + e.message); }
     setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setEditId(null); setShowForm(false); setSaving(false);
   };
 
@@ -577,12 +611,18 @@ export default function App() {
     if (!paymentModal || !paymentAmount) return;
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return alert("Invalid amount.");
-    const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
     setPaymentSaving(true);
-    const { error } = await supabase.from("orders").update({ balance: newBalance, remark: (paymentModal.remark?paymentModal.remark+" | ":"")+`Payment RM${amount} on ${new Date().toLocaleDateString("en-MY")}` }).eq("id", paymentModal.id);
-    if (error) { alert("Failed: "+error.message); setPaymentSaving(false); return; }
-    setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
-    setPaymentModal(null); setPaymentAmount(""); setPaymentSaving(false);
+    try {
+      const res = await authFetch(`${BACKEND}/payments/record`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: paymentModal.id, amount, payment_method: "cash" }),
+      });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setPaymentSaving(false); return; }
+      const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
+      setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
+      setPaymentModal(null); setPaymentAmount("");
+    } catch (e) { alert("Failed: " + e.message); }
+    setPaymentSaving(false);
   };
   const handleGlobalSearch = v => {
     setGlobalSearch(v);
