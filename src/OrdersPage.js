@@ -730,6 +730,14 @@ export default function OrdersPage() {
         </button>
       </div>
 
+      {/* Amended review banner */}
+      {orders.filter(o => o.status === "amended").length > 0 && (
+        <button onClick={() => setFilterStatus(filterStatus === "amended" ? "" : "amended")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${filterStatus === "amended" ? "bg-amber-500 text-white" : "bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100"}`}>
+          ⚠️ {orders.filter(o => o.status === "amended").length} amended order{orders.filter(o => o.status === "amended").length !== 1 ? "s" : ""} pending review
+        </button>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order # or customer…"
@@ -901,9 +909,20 @@ export default function OrdersPage() {
                     </div>
                   )}
 
+                  {/* Amended review banner */}
+                  {o.status === "amended" && (
+                    <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-bold text-amber-800">⚠️ Amendment Pending Review</span>
+                        <button onClick={() => changeStatus(o, "confirmed")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">✓ Re-confirm</button>
+                      </div>
+                      {o.notes && <p className="text-xs text-amber-700 whitespace-pre-wrap mt-1">{o.notes}</p>}
+                    </div>
+                  )}
+
                   {/* Notes & Remark */}
                   {o.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{o.remark}</div>}
-                  {o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
+                  {o.status !== "amended" && o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
 
                   {/* Action buttons */}
                   <div className="flex gap-2 pt-2">
