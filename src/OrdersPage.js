@@ -301,6 +301,8 @@ export default function OrdersPage() {
   const [editId, setEditId] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [arrivalItems, setArrivalItems] = useState(null);
+  const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
+  const [viewArrival, setViewArrival] = useState(null);
   const [form, setForm] = useState(EMPTY_ORDER);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -394,6 +396,19 @@ export default function OrdersPage() {
     const t = setTimeout(() => searchProducts(productSearch), 250);
     return () => clearTimeout(t);
   }, [pickerOpen, productSearch, searchProducts]);
+
+  // ── Order View (read-only detail) ──────────────────────────────
+  const openView = async (o) => {
+    setViewingOrder(o);
+    setViewArrival(null);
+    if (o.order_number) {
+      const { data } = await supabase.from("orders").select("id, items").eq("so_number", o.order_number).maybeSingle();
+      if (data) {
+        const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []);
+        setViewArrival({ orderId: data.id, items: Array.isArray(items) ? items : [] });
+      }
+    }
+  };
 
   // ── Order CRUD ────────────────────────────────────────────────────
   const openNew = () => {
@@ -692,7 +707,7 @@ export default function OrdersPage() {
         {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
         {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
         {!loading && orders.map(o => (
-          <div key={o.id} onClick={() => openEdit(o)}
+          <div key={o.id} onClick={() => openView(o)}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -726,6 +741,122 @@ export default function OrdersPage() {
       </div>
 
       {/* ── Order Builder Drawer ───────────────────────────────────── */}
+      {/* Order Detail View (read-only) */}
+      {viewingOrder && !drawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setViewingOrder(null)} />
+          <div className="relative w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl">
+            {(() => {
+              const o = viewingOrder;
+              const items = o.sales_order_items || [];
+              const sub = Number(o.subtotal) || 0;
+              const disc = Number(o.discount) || 0;
+              const gst = o.gst_waived ? 0 : (Number(o.gst_amount) || 0);
+              const total = sub - disc + gst;
+              const dep = Number(o.deposit) || 0;
+              const bal = total - dep;
+              return (<>
+                <div className="sticky top-0 bg-white border-b px-5 py-3 z-10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-lg font-bold text-violet-700">{o.order_number}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100"}`}>{o.status}</span>
+                        {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
+                      </div>
+                      <p className="text-sm text-gray-600 mt-0.5">{o.customer_name}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
+                      <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-5 py-4 space-y-4">
+                  {/* Customer info */}
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Contact</p><p className="font-medium text-gray-800">{o.customer_contact || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Salesman</p><p className="font-medium text-gray-800">{o.salesman_name || "-"}</p></div>
+                  </div>
+                  {o.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">Address</p><p className="font-medium text-gray-800">{o.customer_address}</p></div>}
+
+                  {/* Key numbers */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Subtotal</p><p className="text-sm font-bold text-gray-800">{money(sub)}</p></div>
+                    {disc > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Discount</p><p className="text-sm font-bold text-red-600">-{money(disc)}</p></div>}
+                    {gst > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">GST</p><p className="text-sm font-bold text-gray-600">{money(gst)}</p></div>}
+                    <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Deposit</p><p className="text-sm font-bold text-emerald-600">{money(dep)}</p></div>
+                    <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-red-50" : "bg-emerald-50"}`}><p className="text-xs text-gray-400">Balance</p><p className={`text-sm font-bold ${bal > 0 ? "text-red-600" : "text-emerald-600"}`}>{money(bal)}</p></div>
+                  </div>
+
+                  {/* Delivery info */}
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{o.delivery_type || "Delivery"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className="font-medium">{o.delivery_date || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{o.delivery_time_slot || "-"}</p></div>
+                  </div>
+
+                  {/* Items */}
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 mb-2">ITEMS ({items.length})</p>
+                    <div className="space-y-1.5">
+                      {items.map((it, i) => (
+                        <div key={it.id || i} className="bg-white border border-gray-100 rounded-xl p-2.5 flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              {it.product_code && <span className="text-xs font-mono text-violet-600">{it.product_code}</span>}
+                              <span className="text-sm font-medium text-gray-900 truncate">{it.product_name || "-"}</span>
+                            </div>
+                            <p className="text-xs text-gray-400">{[it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ")}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0 ml-3">
+                            <p className="text-sm font-bold text-gray-900">{money(it.unit_price)} × {it.quantity || 1}</p>
+                            <p className="text-xs text-gray-400">{money((Number(it.unit_price) || 0) * (Number(it.quantity) || 1))}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Item Arrival Status */}
+                  {viewArrival && viewArrival.items.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 mb-2">ITEM ARRIVAL STATUS</p>
+                      <div className="space-y-1">
+                        {viewArrival.items.map((it, i) => (
+                          <div key={i} className="flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-50">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
+                              <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
+                            </div>
+                            <input type="date" value={it.arrivalDate || ""} onChange={async e => {
+                              const val = e.target.value;
+                              const token = await getToken();
+                              await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                              setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                            }} className={`text-xs border rounded px-1.5 py-1 w-[115px] ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Notes & Remark */}
+                  {o.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{o.remark}</div>}
+                  {o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
+
+                  {/* Action buttons */}
+                  <div className="flex gap-2 pt-2">
+                    <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Edit Order</button>
+                    <button onClick={() => openSubmitPO(o)} className="py-2.5 px-4 rounded-xl text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">Submit PO</button>
+                  </div>
+                </div>
+              </>);
+            })()}
+          </div>
+        </div>
+      )}
+
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => !saving && setDrawerOpen(false)} />
