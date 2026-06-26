@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
-import jsQR from "jsqr";
+let jsQR = null;
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { let { data } = await supabase.auth.getSession(); let s = data?.session; if (s?.expires_at && s.expires_at * 1000 < Date.now() + 60000) { const { data: r } = await supabase.auth.refreshSession(); s = r?.session || s; } return s?.access_token || ""; };
@@ -109,6 +109,8 @@ export default function WarehousePage() {
   // ── Camera scanner ────────────────────────────────────────
   const startCamera = async () => {
     try {
+      // Lazy load jsQR only when camera is needed
+      if (!jsQR) { const mod = await import("jsqr"); jsQR = mod.default; }
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } } });
       const video = videoRef.current;
       if (!video) { stream.getTracks().forEach(t => t.stop()); return; }

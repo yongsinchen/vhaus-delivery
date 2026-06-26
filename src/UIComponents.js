@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, createContext, useContext, useRef } from "react";
+import React, { useState, useEffect, useCallback, createContext, useContext, useRef, useMemo } from "react";
 
 // ─── Toast System ────────────────────────────────────────────────
 const ToastContext = createContext();
@@ -152,6 +152,52 @@ export function Skeleton({ className = "h-4 w-full", count = 1 }) {
       ))}
     </>
   );
+}
+
+// ─── Performance Hooks ───────────────────────────────────────────
+
+// Debounce hook — delays value updates (for search inputs)
+export function useDebounce(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+// Debounced callback — fires callback after delay of inactivity
+export function useDebouncedCallback(callback, delay = 300) {
+  const timerRef = useRef(null);
+  const cbRef = useRef(callback);
+  cbRef.current = callback;
+  return useCallback((...args) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => cbRef.current(...args), delay);
+  }, [delay]);
+}
+
+// Cached fetch — stores results by URL, avoids duplicate calls
+const fetchCache = new Map();
+export function useCachedFetch() {
+  return useCallback(async (url, opts = {}, ttl = 30000) => {
+    const key = url + JSON.stringify(opts.body || "");
+    const cached = fetchCache.get(key);
+    if (cached && Date.now() - cached.time < ttl) return cached.data;
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    fetchCache.set(key, { data, time: Date.now() });
+    return data;
+  }, []);
+}
+
+// Memoized list — prevents rerender when list hasn't actually changed
+export function useMemoList(list) {
+  const ref = useRef(list);
+  return useMemo(() => {
+    if (JSON.stringify(ref.current) !== JSON.stringify(list)) ref.current = list;
+    return ref.current;
+  }, [list]);
 }
 
 export function SkeletonCard({ count = 3 }) {

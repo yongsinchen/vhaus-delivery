@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import { useDebounce } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -31,6 +32,7 @@ export default function ProductsPage() {
 
   // Filters
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [filterSupplier, setFilterSupplier] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterActive, setFilterActive] = useState("all");
@@ -90,7 +92,7 @@ export default function ProductsPage() {
     setLoading(true);
     const headers = await authHeaders();
     const params = new URLSearchParams({ company_id: companyId, page: p, limit: 50 });
-    if (search) params.set("search", search);
+    if (debouncedSearch) params.set("search", debouncedSearch);
     if (filterSupplier) params.set("supplier_id", filterSupplier);
     if (filterCategory) params.set("category_id", filterCategory);
     if (filterActive !== "all") params.set("is_active", filterActive);
@@ -100,7 +102,7 @@ export default function ProductsPage() {
     setTotal(d.total || 0);
     setPage(p);
     setLoading(false);
-  }, [companyId, search, filterSupplier, filterCategory, filterActive]);
+  }, [companyId, debouncedSearch, filterSupplier, filterCategory, filterActive]);
 
   useEffect(() => { loadSuppliers(); loadCategories(); }, [loadSuppliers, loadCategories]);
   useEffect(() => { loadProducts(1); }, [loadProducts]);

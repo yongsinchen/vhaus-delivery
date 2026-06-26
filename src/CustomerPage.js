@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useDebounce } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -20,6 +20,7 @@ export default function CustomerPage() {
   // Customer list
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [loading, setLoading] = useState(true);
 
   // Customer detail
@@ -46,12 +47,12 @@ export default function CustomerPage() {
     if (!companyId) return;
     setLoading(true);
     const params = new URLSearchParams({ company_id: companyId, limit: "200" });
-    if (search) params.set("search", search);
+    if (debouncedSearch) params.set("search", debouncedSearch);
     const res = await af(`${API}/customers?${params}`);
     const d = await res.json();
     setCustomers(d.customers || []);
     setLoading(false);
-  }, [companyId, search]);
+  }, [companyId, debouncedSearch]);
 
   const loadAging = useCallback(async () => {
     if (!companyId) return;

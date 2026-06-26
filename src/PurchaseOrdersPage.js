@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import { useDebounce } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -34,6 +35,7 @@ export default function PurchaseOrdersPage() {
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [suppliers, setSuppliers] = useState([]);
   const [filterSupplier, setFilterSupplier] = useState("");
 
@@ -48,12 +50,12 @@ export default function PurchaseOrdersPage() {
     const params = new URLSearchParams();
     if (filterStatus) params.set("status", filterStatus);
     if (filterSupplier) params.set("supplier_id", filterSupplier);
-    if (search) params.set("search", search);
+    if (debouncedSearch) params.set("search", debouncedSearch);
     const res = await fetch(`${API}/purchase-orders?${params}`, { headers });
     const d = await res.json();
     setOrders(d.orders || []);
     setLoading(false);
-  }, [companyId, filterStatus, filterSupplier, search]);
+  }, [companyId, filterStatus, filterSupplier, debouncedSearch]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 

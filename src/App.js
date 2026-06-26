@@ -1,21 +1,23 @@
-import { useState, useEffect, useMemo } from "react";
-import DeliverySchedule from "./DeliverySchedule";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
-import UserManagement from "./UserManagement";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
-import ResetPasswordPage from "./ResetPassword";
-import ProductsPage from "./ProductsPage";
-import OrdersPage from "./OrdersPage";
-import SuppliersPage from "./SuppliersPage";
-import CompanySettingsPage from "./CompanySettingsPage";
-import PurchaseOrdersPage from "./PurchaseOrdersPage";
-import InventoryPage from "./InventoryPage";
-import WarehousePage from "./WarehousePage";
-import DriverPage from "./DriverPage";
-import ServicePage from "./ServicePage";
-import CustomerPage from "./CustomerPage";
-import FinancePage from "./FinancePage";
-import CommissionPage from "./CommissionPage";
+
+// Lazy load all pages — only loaded when navigated to
+const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
+const UserManagement = lazy(() => import("./UserManagement"));
+const ResetPasswordPage = lazy(() => import("./ResetPassword"));
+const ProductsPage = lazy(() => import("./ProductsPage"));
+const OrdersPage = lazy(() => import("./OrdersPage"));
+const SuppliersPage = lazy(() => import("./SuppliersPage"));
+const CompanySettingsPage = lazy(() => import("./CompanySettingsPage"));
+const PurchaseOrdersPage = lazy(() => import("./PurchaseOrdersPage"));
+const InventoryPage = lazy(() => import("./InventoryPage"));
+const WarehousePage = lazy(() => import("./WarehousePage"));
+const DriverPage = lazy(() => import("./DriverPage"));
+const ServicePage = lazy(() => import("./ServicePage"));
+const CustomerPage = lazy(() => import("./CustomerPage"));
+const FinancePage = lazy(() => import("./FinancePage"));
+const CommissionPage = lazy(() => import("./CommissionPage"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -1302,7 +1304,7 @@ export default function App() {
         {/* Page content */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 py-6 pb-24 lg:pb-6">
-            {renderPage()}
+            <Suspense fallback={<div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-3 border-violet-200 border-t-violet-600 rounded-full animate-spin" /></div>}>{renderPage()}</Suspense>
           </div>
         </div>
 
