@@ -759,7 +759,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   // -- CRUD: Schedules (assign / unassign / reorder) --------------------
   const assignItem = async (teamId, id, type, setDateOnAssign = false) => {
-    const team = teams.find(t => t.id === parseInt(teamId));
+    const team = teams.find(t => String(t.id) === String(teamId));
     const sortOrder = (team?.schedules?.length || 0) + 1;
 
     if (setDateOnAssign && type === "order") {
@@ -1094,7 +1094,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                 <div key={team.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
                   onDragOver={e => { e.preventDefault(); }}
                   onDrop={() => {
-                    if (!dragOrder || isLocked || isConfirmed) return;
+                    if (!dragOrder || isLocked) return;
                     assignItem(team.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
                     setDragOrder(null);
                   }}>
