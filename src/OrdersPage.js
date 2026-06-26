@@ -708,6 +708,15 @@ export default function OrdersPage() {
     setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
   };
 
+  const deleteOrder = async (o) => {
+    if (!window.confirm(`Delete order ${o.order_number}? This cannot be undone.`)) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/sales-orders/${o.id}`, { method: "DELETE", headers });
+    if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to delete"); return; }
+    setOrders(prev => prev.filter(ord => ord.id !== o.id));
+    setViewingOrder(null);
+  };
+
   return (
     <div className="p-4 sm:p-6 space-y-4">
       {/* Header */}
@@ -818,6 +827,7 @@ export default function OrdersPage() {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
+                      {["draft", "cancelled"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
                   </div>
