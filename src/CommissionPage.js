@@ -7,7 +7,7 @@ const getToken = async () => { const { data } = await supabase.auth.getSession()
 const af = async (url, opts = {}) => { const token = await getToken(); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}` } }); };
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 
-const TABS = ["Payout", "All Commissions", "Rules", "Holds"];
+const TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
 export default function CommissionPage() {
@@ -21,11 +21,17 @@ export default function CommissionPage() {
   const [commissions, setCommissions] = useState([]);
   const [rules, setRules] = useState([]);
   const [holds, setHolds] = useState([]); // eslint-disable-line
+  const [incentives, setIncentives] = useState([]);
+  const [salesmen, setSalesmen] = useState([]);
+  const [incForm, setIncForm] = useState({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" });
+  const [showIncForm, setShowIncForm] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [productResults, setProductResults] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Rule form
   const [showRuleForm, setShowRuleForm] = useState(false);
-  const [ruleForm, setRuleForm] = useState({ role_name: "salesman", tier_name: "", min_net: 0, max_net: "", rate_pct: 3, incentive_pct: 0, deposit_gate_pct: 30, payout_day: 25 });
+  const [ruleForm, setRuleForm] = useState({ role_name: "salesman", tier_name: "", min_net: 0, max_net: "", rate_pct: 3, incentive_pct: 0, deposit_gate_pct: 30, payout_day: 25, user_id: "" });
 
   const loadPayout = useCallback(async () => {
     if (!companyId) return;
@@ -50,15 +56,45 @@ export default function CommissionPage() {
     setRules(d.rules || []);
   }, [companyId]);
 
+  const loadIncentives = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/product-incentives?company_id=${companyId}`);
+    const d = await res.json();
+    setIncentives(d.incentives || []);
+  }, [companyId]);
+
   useEffect(() => { if (tab === 0) loadPayout(); }, [tab, loadPayout]);
   useEffect(() => { if (tab === 1) loadCommissions(); }, [tab, loadCommissions]);
-  useEffect(() => { if (tab === 2) loadRules(); }, [tab, loadRules]);
+  useEffect(() => { if (tab === 2) { loadRules(); af(`${API}/admin/users/list?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen((Array.isArray(d) ? d : []).filter(u => u.salesman_name && u.is_active))); } }, [tab, loadRules, companyId]);
+  useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
 
   const saveRule = async () => {
-    const res = await af(`${API}/commission-rules`, { method: "POST", body: JSON.stringify(ruleForm) });
+    const payload = { ...ruleForm };
+    if (!payload.user_id) delete payload.user_id;
+    const res = await af(`${API}/commission-rules`, { method: "POST", body: JSON.stringify(payload) });
     const d = await res.json();
     if (d.rule) { toast.success("Rule created"); setShowRuleForm(false); loadRules(); }
     else toast.error(d.error || "Failed");
+  };
+
+  const saveIncentive = async () => {
+    const res = await af(`${API}/product-incentives`, { method: "POST", body: JSON.stringify(incForm) });
+    const d = await res.json();
+    if (d.incentive) { toast.success("Incentive added"); setShowIncForm(false); setIncForm({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" }); loadIncentives(); }
+    else toast.error(d.error || "Failed");
+  };
+
+  const deleteIncentive = async (id) => {
+    await af(`${API}/product-incentives/${id}`, { method: "DELETE" });
+    toast.success("Removed"); loadIncentives();
+  };
+
+  const searchProducts = async (q) => {
+    setProductSearch(q);
+    if (q.length < 2) { setProductResults([]); return; }
+    const res = await af(`${API}/products?company_id=${companyId}&search=${encodeURIComponent(q)}&limit=10`);
+    const d = await res.json();
+    setProductResults(d.products || []);
   };
 
   const deleteRule = async (id) => {
@@ -209,6 +245,15 @@ export default function CommissionPage() {
                       <option value="branch_manager">Branch Manager (Override)</option>
                     </select>
                   </div>
+                  {ruleForm.role_name === "salesman" && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Apply to (blank = all salesmen)</label>
+                      <select value={ruleForm.user_id} onChange={e => setRuleForm(f => ({ ...f, user_id: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+                        <option value="">All Salesmen (company-wide tier)</option>
+                        {salesmen.map(s => <option key={s.id} value={s.id}>{s.salesman_name || s.name}</option>)}
+                      </select>
+                    </div>
+                  )}
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">Tier Name</label>
                     <input value={ruleForm.tier_name} onChange={e => setRuleForm(f => ({ ...f, tier_name: e.target.value }))} placeholder="e.g. Standard, Senior, Top" className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" /></div>
                   <div className="grid grid-cols-2 gap-3">
@@ -240,8 +285,83 @@ export default function CommissionPage() {
         </div>
       )}
 
-      {/* TAB 3: Holds */}
+      {/* TAB 3: Product Incentives */}
       {tab === 3 && (
+        <div className="space-y-4">
+          <button onClick={() => setShowIncForm(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ Add Incentive Product</button>
+          {incentives.length === 0 && <div className="text-center py-8 text-gray-400"><p>No product incentives set.</p><p className="text-xs mt-1">Add products that earn bonus incentive when sold.</p></div>}
+          <div className="space-y-2">
+            {incentives.map(inc => (
+              <div key={inc.id} className={`bg-white rounded-2xl border shadow-sm p-4 flex items-center justify-between ${inc.is_active ? "border-gray-100" : "border-gray-50 opacity-50"}`}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-900">{inc.product_name || inc.product_code || "?"}</span>
+                    {inc.product_code && <span className="text-xs font-mono text-violet-600">{inc.product_code}</span>}
+                    <span className="text-sm font-bold text-emerald-700">{money(inc.incentive_amount)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {inc.start_date ? `From ${inc.start_date}` : "No start date"}
+                    {inc.end_date ? ` to ${inc.end_date}` : " — ongoing"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    const amt = window.prompt("New incentive amount (RM):", inc.incentive_amount);
+                    if (amt) af(`${API}/product-incentives/${inc.id}`, { method: "PUT", body: JSON.stringify({ incentive_amount: Number(amt) }) }).then(() => { toast.success("Updated"); loadIncentives(); });
+                  }} className="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Edit RM</button>
+                  <button onClick={() => deleteIncentive(inc.id)} className="text-xs text-red-500 hover:underline">Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {showIncForm && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div className="px-6 py-4 border-b flex items-center justify-between">
+                  <h3 className="font-bold text-gray-900">Add Incentive Product</h3>
+                  <button onClick={() => setShowIncForm(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500">×</button>
+                </div>
+                <div className="px-6 py-5 space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Search Product</label>
+                    <input value={productSearch} onChange={e => searchProducts(e.target.value)} placeholder="Type product code or name..."
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    {productResults.length > 0 && (
+                      <div className="border border-gray-200 rounded-xl mt-1 max-h-32 overflow-y-auto">
+                        {productResults.map(p => (
+                          <button key={p.id} onClick={() => { setIncForm(f => ({ ...f, product_id: p.id, product_code: p.code, product_name: p.name })); setProductSearch(`${p.code} ${p.name}`); setProductResults([]); }}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
+                            <span className="font-mono text-violet-700">{p.code}</span> {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Incentive Amount (RM)</label>
+                    <input type="number" value={incForm.incentive_amount} onChange={e => setIncForm(f => ({ ...f, incentive_amount: e.target.value }))}
+                      placeholder="e.g. 150" className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-xs font-medium text-gray-500 mb-1">Start Date (optional)</label>
+                      <input type="date" value={incForm.start_date} onChange={e => setIncForm(f => ({ ...f, start_date: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" /></div>
+                    <div><label className="block text-xs font-medium text-gray-500 mb-1">End Date (optional)</label>
+                      <input type="date" value={incForm.end_date} onChange={e => setIncForm(f => ({ ...f, end_date: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" /></div>
+                  </div>
+                </div>
+                <div className="px-6 py-4 border-t flex gap-3 justify-end">
+                  <button onClick={() => setShowIncForm(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
+                  <button onClick={saveIncentive} disabled={!incForm.incentive_amount} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 disabled:opacity-50">Add Incentive</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: Holds */}
+      {tab === 4 && (
         <div className="space-y-2">
           {commissions.filter(c => c.status === "held").length === 0 && <div className="text-center py-8 text-gray-400">No held commissions</div>}
           {commissions.filter(c => c.status === "held").map(c => (
