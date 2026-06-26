@@ -171,17 +171,15 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
                       <div><span className="text-gray-400">Supplier: </span><span className="font-medium">{item.supplier || "-"}</span></div>
                       <div><span className="text-gray-400">Ordered: </span><span className="font-medium">{fmt(item.itemOrderDate)}</span></div>
                       <div><span className="text-gray-400">Sent: </span><span className="font-medium">{fmt(item.supplierSentDate)}</span></div>
-                      <div className="flex items-center gap-1"><span className="text-gray-400">Arrived: </span>
-                        {item.arrivalDate
-                          ? <span className="font-semibold text-emerald-600">{fmt(item.arrivalDate)}</span>
-                          : <span className="font-semibold text-red-500">Not arrived</span>}
+                      <div>
+                        <span className="text-gray-400">Arrived: </span>
                         <input type="date" value={item.arrivalDate || ""} onChange={async e => {
                           const val = e.target.value;
                           const token = (await supabase.auth.getSession()).data?.session?.access_token;
                           await fetch(`${BACKEND}/orders/${o.id}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
                           o.items[i].arrivalDate = val;
                           if (onRefresh) onRefresh();
-                        }} className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[105px] focus:outline-none focus:border-violet-400" title="Set arrival date" />
+                        }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] focus:outline-none focus:border-violet-400 ${item.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
                       </div>
                     </div>
                   </div>

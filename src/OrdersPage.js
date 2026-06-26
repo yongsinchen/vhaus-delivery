@@ -300,6 +300,7 @@ export default function OrdersPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [arrivalItems, setArrivalItems] = useState(null);
   const [form, setForm] = useState(EMPTY_ORDER);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -398,6 +399,7 @@ export default function OrdersPage() {
   const openNew = () => {
     setEditId(null);
     setEditingOrder(null);
+    setArrivalItems(null);
     setForm({ ...EMPTY_ORDER, salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
     setFormError("");
     setDrawerOpen(true);
@@ -406,6 +408,16 @@ export default function OrdersPage() {
   const openEdit = (o) => {
     setEditId(o.id);
     setEditingOrder(o);
+    // Load legacy order items for arrival tracking
+    setArrivalItems(null);
+    if (o.order_number) {
+      supabase.from("orders").select("id, items").eq("so_number", o.order_number).maybeSingle().then(({ data }) => {
+        if (data) {
+          const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []);
+          setArrivalItems({ orderId: data.id, items: Array.isArray(items) ? items : [] });
+        }
+      });
+    }
     setForm({
       customer_name: o.customer_name || "",
       customer_contact: o.customer_contact || "",
@@ -1021,6 +1033,27 @@ export default function OrdersPage() {
                     className={`rounded ${form.gst_waived ? "border-amber-300 text-amber-600 focus:ring-amber-500" : "border-gray-300 text-violet-600 focus:ring-violet-500"}`} />
                   {form.gst_waived ? "GST waived for this order" : "Waive GST for this order"}
                 </label>
+              )}
+
+              {/* Item Arrival Tracking — for existing orders */}
+              {editId && arrivalItems && (
+                <div className="border-t border-gray-100 pt-3">
+                  <p className="text-xs font-bold text-gray-500 mb-2">ITEM ARRIVAL STATUS</p>
+                  {arrivalItems.items.map((it, i) => (
+                    <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
+                        <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
+                      </div>
+                      <input type="date" value={it.arrivalDate || ""} onChange={async e => {
+                        const val = e.target.value;
+                        const token = await getToken();
+                        await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                        setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                      }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                    </div>
+                  ))}
+                </div>
               )}
 
               <button onClick={saveOrder} disabled={saving}
