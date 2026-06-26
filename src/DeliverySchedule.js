@@ -99,6 +99,7 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
 function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDragOver, onDrop, onSaved, isTrip }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
+  const [slotVal, setSlotVal] = useState(schedule.slot || "");
   const [showItems, setShowItems] = useState(false);
   const [saving, setSaving] = useState(false);
   if (!o || !o.so_number) return null;
@@ -106,15 +107,18 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
   const items = parseItems(o.items);
   const preferredTime = o.time_slot || "";
   const tripInfo = isTrip ? schedule : null;
+  const isLegacy = String(schedule.id).startsWith("legacy-");
 
   const saveNotes = async (val) => {
     setNotes(val);
+    if (isLegacy) return;
     await af(`${API}/delivery-schedules/${schedule.id}`, {
       method: "PATCH", body: JSON.stringify({ notes: val })
     });
   };
 
   const saveSlot = async (val) => {
+    if (isLegacy) return;
     setSaving(true);
     await af(`${API}/delivery-schedules/${schedule.id}`, {
       method: "PATCH", body: JSON.stringify({ slot: val })
@@ -167,9 +171,10 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
         {!isLocked && (
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-gray-400 flex-shrink-0">Slot:</span>
-            <input value={schedule.slot || ""} onChange={e => saveSlot(e.target.value)} placeholder="e.g. 10am-12pm"
+            <input value={slotVal} onChange={e => setSlotVal(e.target.value)} onBlur={() => saveSlot(slotVal)} placeholder="e.g. 10am-12pm"
+              onKeyDown={e => e.key === "Enter" && saveSlot(slotVal)}
               className={`text-xs border rounded px-1.5 py-0.5 w-28 ${saving ? "opacity-50" : ""}`} />
-            {preferredTime && !schedule.slot && <button onClick={() => saveSlot(preferredTime)} className="text-xs text-purple-600 hover:underline">Use preferred</button>}
+            {preferredTime && !slotVal && <button onClick={() => { setSlotVal(preferredTime); saveSlot(preferredTime); }} className="text-xs text-purple-600 hover:underline">Use preferred</button>}
           </div>
         )}
         {isLocked && schedule.slot && <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">Slot: {schedule.slot}</span>}
