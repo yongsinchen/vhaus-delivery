@@ -37,6 +37,14 @@ export default function ProductsPage() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterActive, setFilterActive] = useState("all");
 
+  // Product Review Queue
+  const [showReview, setShowReview] = useState(false);
+  const [reviewQueue, setReviewQueue] = useState([]);
+  const [reviewTotal, setReviewTotal] = useState(0);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [linkSearch, setLinkSearch] = useState({});
+  const [linkResults, setLinkResults] = useState({});
+
   // Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -106,6 +114,46 @@ export default function ProductsPage() {
 
   useEffect(() => { loadSuppliers(); loadCategories(); }, [loadSuppliers, loadCategories]);
   useEffect(() => { loadProducts(1); }, [loadProducts]);
+
+  const loadReviewQueue = async () => {
+    setReviewLoading(true);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/product-review-queue`, { headers });
+    const d = await res.json();
+    setReviewQueue(d.queue || []);
+    setReviewTotal(d.total_items || 0);
+    setReviewLoading(false);
+  };
+
+  const linkToProduct = async (itemIds, productId) => {
+    const headers = await authHeaders();
+    await fetch(`${API}/product-review-queue/link`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds, product_id: productId }) });
+    loadReviewQueue();
+  };
+
+  const createAndLink = async (group) => {
+    const headers = await authHeaders();
+    await fetch(`${API}/product-review-queue/create-and-link`, { method: "POST", headers, body: JSON.stringify({
+      item_ids: group.item_ids, product_code: group.product_code, product_name: group.product_name,
+      size: group.size, color: group.color, unit_price: group.sample_price,
+    }) });
+    loadReviewQueue(); loadProducts(1);
+  };
+
+  const dismissItems = async (itemIds) => {
+    const headers = await authHeaders();
+    await fetch(`${API}/product-review-queue/dismiss`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds }) });
+    loadReviewQueue();
+  };
+
+  const searchForLink = async (groupKey, q) => {
+    setLinkSearch(prev => ({ ...prev, [groupKey]: q }));
+    if (q.length < 2) { setLinkResults(prev => ({ ...prev, [groupKey]: [] })); return; }
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/products?company_id=${companyId}&search=${encodeURIComponent(q)}&limit=8`, { headers });
+    const d = await res.json();
+    setLinkResults(prev => ({ ...prev, [groupKey]: d.products || [] }));
+  };
 
   // ── Product drawer ────────────────────────────────────────────────
   const openAdd = () => {
@@ -381,6 +429,10 @@ export default function ProductsPage() {
           <p className="text-sm text-gray-500">{total} product{total !== 1 ? "s" : ""}</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => { setShowReview(!showReview); if (!showReview) loadReviewQueue(); }}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${showReview ? "bg-amber-600 text-white" : "bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100"}`}>
+            📋 Review Queue {reviewTotal > 0 ? `(${reviewTotal})` : ""}
+          </button>
           <button onClick={openImport} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
             📄 Import Catalogue
           </button>
@@ -389,6 +441,64 @@ export default function ProductsPage() {
           </button>
         </div>
       </div>
+
+      {/* Product Review Queue */}
+      {showReview && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-amber-800">Unmatched Legacy Products</h3>
+              <p className="text-xs text-amber-600">{reviewQueue.length} unique products across {reviewTotal} order items need review</p>
+            </div>
+            <button onClick={() => setShowReview(false)} className="text-xs text-amber-600 hover:underline">Close</button>
+          </div>
+          {reviewLoading && <div className="py-4 text-center text-amber-600 text-xs">Loading...</div>}
+          {!reviewLoading && reviewQueue.length === 0 && <p className="text-center text-amber-600 text-xs py-4">All products reviewed!</p>}
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {reviewQueue.map((g, gi) => {
+              const key = `${g.product_code}|${g.product_name}`;
+              return (
+                <div key={gi} className="bg-white rounded-xl border border-gray-100 p-3">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {g.product_code && <span className="text-xs font-mono text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">{g.product_code}</span>}
+                        <span className="text-sm font-medium text-gray-900">{g.product_name || "Unnamed"}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {g.supplier_name && <span className="text-violet-600">{g.supplier_name} · </span>}
+                        {g.size && `Size: ${g.size} · `}{g.color && `Color: ${g.color} · `}
+                        {g.order_count} order{g.order_count !== 1 ? "s" : ""} · {g.total_qty} units
+                        {g.sample_price > 0 && ` · RM ${g.sample_price}`}
+                      </p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button onClick={() => createAndLink(g)} className="text-xs px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700" title="Create product in master + link all items">+ Create</button>
+                      <button onClick={() => dismissItems(g.item_ids)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" title="Keep as custom, stop showing">Skip</button>
+                    </div>
+                  </div>
+                  {/* Link to existing */}
+                  <div className="flex gap-2">
+                    <input value={linkSearch[key] || ""} onChange={e => searchForLink(key, e.target.value)}
+                      placeholder="Search existing product to link..." className="flex-1 text-xs px-2 py-1 rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
+                  </div>
+                  {(linkResults[key] || []).length > 0 && (
+                    <div className="border border-gray-200 rounded-lg mt-1 max-h-24 overflow-y-auto">
+                      {linkResults[key].map(p => (
+                        <button key={p.id} onClick={() => { linkToProduct(g.item_ids, p.id); setLinkResults(prev => ({ ...prev, [key]: [] })); setLinkSearch(prev => ({ ...prev, [key]: "" })); }}
+                          className="w-full text-left px-2 py-1 text-xs hover:bg-violet-50 flex items-center justify-between">
+                          <span><span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? `· ${p.size}` : ""}</span>
+                          <span className="text-emerald-600 font-medium">Link →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
