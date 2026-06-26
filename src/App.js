@@ -12,6 +12,7 @@ import PurchaseOrdersPage from "./PurchaseOrdersPage";
 import InventoryPage from "./InventoryPage";
 import WarehousePage from "./WarehousePage";
 import DriverPage from "./DriverPage";
+import ServicePage from "./ServicePage";
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -402,8 +403,8 @@ export default function App() {
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
   const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");
-  const [services, setServices] = useState([]);
-  const [servicesLoading, setServicesLoading] = useState(false);
+  const [services, setServices] = useState([]); // eslint-disable-line -- used in overview calendar
+  const [servicesLoading, setServicesLoading] = useState(false); // eslint-disable-line
   const [supplierDOs, setSupplierDOs] = useState([]);
   const [doWarehouses, setDoWarehouses] = useState([]);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
@@ -1217,59 +1218,7 @@ export default function App() {
     );
 
     // SERVICES
-    if (page === "services") return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Services</h1>
-            <p className="text-sm text-gray-400 mt-0.5">{services.length} service orders</p>
-          </div>
-          <button onClick={loadServices} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">🔄 Refresh</button>
-        </div>
-        {servicesLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
-        : services.length === 0
-        ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">🔧</div><p className="font-medium">No service orders yet</p></div>
-        : <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {services.map(o => (
-              <div key={o.id} className="bg-white rounded-2xl border-2 border-violet-100 shadow-sm overflow-hidden cursor-pointer hover:border-violet-300 transition-colors" onClick={() => handleView(o)}>
-                <div className="px-4 pt-4 pb-3">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {o.svNumber && <span className="font-bold text-violet-700 text-sm">{o.svNumber}</span>}
-                        <span className="text-xs text-gray-400">SO: {o.soNumber}</span>
-                        {o.linkedSo && o.linkedSo !== o.soNumber && <span className="text-xs bg-violet-50 text-violet-600 px-1.5 py-0.5 rounded-lg">linked to {o.linkedSo}</span>}
-                      </div>
-                      <p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${statusColor(o.status)}`}>{o.status}</span>
-                  </div>
-                  <p className="text-xs text-gray-400 truncate mb-2">{o.address || "-"}</p>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {o.deliveryDate ? <Badge color="blue">📅 {fmt(o.deliveryDate)}</Badge> : <Badge color="gray">📅 TBC</Badge>}
-                    {o.salesman && <Badge color="gray">👤 {o.salesman}</Badge>}
-                  </div>
-                  {o.serviceNote && <div className="mt-2 bg-violet-50 rounded-xl p-2"><p className="text-xs text-violet-700">📝 {o.serviceNote}</p></div>}
-                  {can("editSchedule") && (
-                    <div className="mt-3 pt-3 border-t border-gray-50 flex gap-2">
-                      <button onClick={e => { e.stopPropagation(); setServiceDateModal(o); setServiceDateValue(o.deliveryDate || ""); }}
-                        className="flex-1 text-xs bg-violet-600 text-white py-1.5 rounded-xl hover:bg-violet-700">
-                        {o.deliveryDate ? `📅 ${fmt(o.deliveryDate)}` : "Set Service Date"}
-                      </button>
-                      {o.deliveryDate && (
-                        <button onClick={e => { e.stopPropagation(); setPage("deliveries"); }}
-                          className="text-xs bg-white border border-violet-200 text-violet-600 px-3 py-1.5 rounded-xl hover:bg-violet-50">
-                          View Route
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>}
-      </div>
-    );
+    if (page === "services") return <ServicePage />;
 
     // TEAM
     if (page === "team") return (
