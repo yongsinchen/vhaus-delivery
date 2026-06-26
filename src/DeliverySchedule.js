@@ -124,6 +124,7 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
       method: "PATCH", body: JSON.stringify({ slot: val })
     });
     setSaving(false);
+    if (onSaved) onSaved(); // trigger re-sort
   };
 
   return (
@@ -256,7 +257,7 @@ function TeamPrintView({ team, onClose }) {
             <p style={{ fontSize:"11px", margin:"2px 0 0 0", color:"#444" }}>Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}</p>
           </div>
           {(() => {
-            const COL = <colgroup><col style={{width:"14%"}}/><col style={{width:"4%"}}/><col style={{width:"3.5%"}}/><col style={{width:"3.5%"}}/><col style={{width:"6%"}}/><col style={{width:"3%"}}/><col style={{width:"8%"}}/><col style={{width:"18%"}}/><col style={{width:"3%"}}/><col style={{width:"6%"}}/><col style={{width:"6%"}}/><col style={{width:"5.5%"}}/><col style={{width:"5.5%"}}/><col style={{width:"6.5%"}}/><col style={{width:"7%"}}/></colgroup>;
+            const COL = <colgroup><col style={{width:"13%"}}/><col style={{width:"5%"}}/><col style={{width:"3.5%"}}/><col style={{width:"3%"}}/><col style={{width:"3%"}}/><col style={{width:"5.5%"}}/><col style={{width:"2.5%"}}/><col style={{width:"7%"}}/><col style={{width:"17%"}}/><col style={{width:"3%"}}/><col style={{width:"5.5%"}}/><col style={{width:"5.5%"}}/><col style={{width:"5%"}}/><col style={{width:"5%"}}/><col style={{width:"6%"}}/><col style={{width:"6%"}}/></colgroup>;
             const TS = { width:"100%", borderCollapse:"collapse", fontSize:"10px", tableLayout:"fixed" };
             const BD = { border:"1px solid #000", padding:"3px 4px" };
             // Group allRows by schedule (order)
@@ -269,7 +270,7 @@ function TeamPrintView({ team, onClose }) {
             return (<>
               {/* Header table */}
               <table style={TS}>{COL}<thead><tr style={{backgroundColor:"#c6efce",textAlign:"center"}}>
-                {["SO / Customer","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"].map(h=>(
+                {["SO / Customer","Salesman","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"].map(h=>(
                   <th key={h} style={{...BD,whiteSpace:"nowrap",fontWeight:"bold"}}>{h}</th>
                 ))}
               </tr></thead></table>
@@ -290,6 +291,7 @@ function TeamPrintView({ team, onClose }) {
                           {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {o.balance}</div>}
                           {sc.slot&&<div style={{color:"#1e40af",fontWeight:"bold"}}>Slot: {sc.slot}</div>}
                         </td>}
+                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",fontSize:"9px"}}>{o.salesman||"-"}</td>}
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,textAlign:"center",verticalAlign:"top",fontSize:"9px",color:sc.trip_no>1?"#6b7280":"#059669"}}>{tripLabel}</td>}
                         <td style={{...BD,textAlign:"center"}}></td>
                         <td style={{...BD,textAlign:"center"}}></td>
@@ -676,7 +678,13 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
       const enriched = teamsList.map(team => {
         const teamSchedules = schedulesList
           .filter(s => s.team_id === team.id)
-          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          .sort((a, b) => {
+            // Sort by time slot first (e.g. "9am" < "10am" < "2pm"), then sort_order
+            const slotA = (a.slot || a.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
+            const slotB = (b.slot || b.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
+            if (slotA !== slotB) return slotA.localeCompare(slotB);
+            return (a.sort_order || 0) - (b.sort_order || 0);
+          });
         const v = vehicles.find(v => v.id === team.vehicle_id);
         return {
           ...team,
