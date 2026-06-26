@@ -288,6 +288,7 @@ export default function OrdersPage() {
   const [salesmen, setSalesmen] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
   const [countries, setCountries] = useState([]);
+  const [salesChannels, setSalesChannels] = useState(["branch"]);
   const [categorySpecs, setCategorySpecs] = useState({});
   const [specOptionsMap, setSpecOptionsMap] = useState({});
   const [loading, setLoading] = useState(false);
@@ -363,6 +364,10 @@ export default function OrdersPage() {
       try {
         const list = JSON.parse(d.settings?.countries || "[]");
         if (Array.isArray(list) && list.length) setCountries(list);
+      } catch {}
+      try {
+        const ch = JSON.parse(d.settings?.sales_channels || '["branch"]');
+        if (Array.isArray(ch) && ch.length) setSalesChannels(ch);
       } catch {}
     });
   }, [companyId]);
@@ -679,6 +684,7 @@ export default function OrdersPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-sm font-medium text-violet-700">{o.order_number}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{o.status}</span>
+                  {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
                 <p className="text-xs text-gray-400">
@@ -785,11 +791,7 @@ export default function OrdersPage() {
                     <label className="block text-xs font-medium text-gray-500 mb-1">Sales Channel</label>
                     <select value={form.sales_channel} onChange={e => setForm(f => ({ ...f, sales_channel: e.target.value }))}
                       className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
-                      <option value="branch">Branch</option>
-                      <option value="fair">Fair (General)</option>
-                      <option value="PISA Fair">PISA Fair</option>
-                      <option value="Home Expo">Home Expo</option>
-                      <option value="online">Online</option>
+                      {salesChannels.map(ch => <option key={ch} value={ch}>{ch.charAt(0).toUpperCase() + ch.slice(1)}</option>)}
                     </select>
                   </div>
                 </div>

@@ -442,6 +442,33 @@ export default function CompanySettingsPage() {
             </div>
           </div>
 
+          {/* Sales Channels */}
+          <div className="border-t border-gray-100 pt-4 mt-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-2">Sales Channels</h4>
+            <p className="text-xs text-gray-400 mb-3">Configure sales channels (Branch, Fair events, Online). Used in orders and commission rules.</p>
+            <div className="space-y-2">
+              {(() => {
+                let list = [];
+                try { list = JSON.parse(settings.sales_channels || '["branch"]'); } catch {}
+                if (!Array.isArray(list)) list = ["branch"];
+                const update = (newList) => setSettings(s => ({ ...s, sales_channels: JSON.stringify(newList) }));
+                return (
+                  <>
+                    {list.map((ch, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input value={ch} onChange={e => { const n = [...list]; n[i] = e.target.value; update(n); }}
+                          placeholder="e.g. PISA Fair Jun 2026" className="flex-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:border-violet-400" />
+                        {ch !== "branch" && <button type="button" onClick={() => update(list.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>}
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => update([...list, ""])}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Channel</button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
           <div className="flex items-center gap-3">
             <button onClick={saveSettings} disabled={settingsSaving}
               className="px-6 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">

@@ -27,6 +27,7 @@ export default function CommissionPage() {
   const [showIncForm, setShowIncForm] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState([]);
+  const [channels, setChannels] = useState(["branch"]);
   const [loading, setLoading] = useState(true);
 
   // Rule form
@@ -65,7 +66,11 @@ export default function CommissionPage() {
 
   useEffect(() => { if (tab === 0) loadPayout(); }, [tab, loadPayout]);
   useEffect(() => { if (tab === 1) loadCommissions(); }, [tab, loadCommissions]);
-  useEffect(() => { if (tab === 2) { loadRules(); af(`${API}/admin/users/list?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen((Array.isArray(d) ? d : []).filter(u => u.salesman_name && u.is_active))); } }, [tab, loadRules, companyId]);
+  useEffect(() => { if (tab === 2) {
+    loadRules();
+    af(`${API}/admin/users/list?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen((Array.isArray(d) ? d : []).filter(u => u.salesman_name && u.is_active)));
+    af(`${API}/company-settings?company_id=${companyId}`).then(r=>r.json()).then(d => { try { const ch = JSON.parse(d.settings?.sales_channels || '["branch"]'); if (Array.isArray(ch)) setChannels(ch); } catch {} });
+  } }, [tab, loadRules, companyId]);
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
 
   const saveRule = async () => {
@@ -307,11 +312,7 @@ export default function CommissionPage() {
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Channel</label>
                     <select value={ruleForm.channel} onChange={e => setRuleForm(f => ({ ...f, channel: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white mb-3">
-                      <option value="branch">Branch (Normal)</option>
-                      <option value="fair">Fair (General)</option>
-                      <option value="PISA Fair">PISA Fair</option>
-                      <option value="Home Expo">Home Expo</option>
-                      <option value="online">Online</option>
+                      {channels.map(ch => <option key={ch} value={ch}>{ch === "branch" ? "Branch (Normal)" : ch}</option>)}
                     </select>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
                     <select value={ruleForm.role_name} onChange={e => setRuleForm(f => ({ ...f, role_name: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
