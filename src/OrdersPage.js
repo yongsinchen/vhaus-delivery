@@ -323,7 +323,7 @@ export default function OrdersPage() {
 
   const loadOrders = useCallback(async () => {
     if (!companyId) return;
-    setLoading(true);
+    if (orders.length === 0) setLoading(true); // only skeleton on first load
     const headers = await authHeaders();
     const params = new URLSearchParams();
     if (filterStatus) params.set("status", filterStatus);
@@ -332,7 +332,7 @@ export default function OrdersPage() {
     const d = await res.json();
     setOrders(d.orders || []);
     setLoading(false);
-  }, [companyId, filterStatus, debouncedSearch]);
+  }, [companyId, filterStatus, debouncedSearch]); // eslint-disable-line
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 

@@ -448,7 +448,7 @@ export default function App() {
 
   // ── Data loading ────────────────────────────────────────────────
   const loadOrders = async () => {
-    setLoading(true); setError(null);
+    if (orders.length === 0) setLoading(true); setError(null);
     let q = supabase.from("orders").select("*").order("created_at", { ascending: true });
     // Scope to the user's own company (master included). Only a user with no
     // company_id (super-admin) sees everything.
