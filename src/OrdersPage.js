@@ -32,7 +32,7 @@ const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"];
 
 const EMPTY_ORDER = {
-  order_number: "", customer_name: "", customer_contact: "", customer_address: "",
+  order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "", payment_proofs: [],
@@ -402,7 +402,7 @@ export default function OrdersPage() {
       customer_name: o.customer_name || "",
       customer_contact: o.customer_contact || "",
       customer_address: o.customer_address || "",
-      status: o.status || "draft",
+      status: o.status || "draft", sales_channel: o.sales_channel || "branch",
       notes: o.notes || "",
       delivery_type: o.delivery_type || "Delivery",
       delivery_date: o.delivery_date || "",
@@ -511,6 +511,7 @@ export default function OrdersPage() {
     const headers = await authHeaders();
     const body = {
       order_number: form.order_number?.trim() || undefined,
+      sales_channel: form.sales_channel || "branch",
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
       customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
@@ -778,7 +779,20 @@ export default function OrdersPage() {
 
               {/* Order number (optional for paper SO) */}
               {!editId && (
-                <Field label="Order Number (leave blank for auto)" value={form.order_number} onChange={v => setForm(f => ({ ...f, order_number: v }))} placeholder="e.g. 31120 or F-11150" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Order Number (blank = auto)" value={form.order_number} onChange={v => setForm(f => ({ ...f, order_number: v }))} placeholder="e.g. 31120" />
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Sales Channel</label>
+                    <select value={form.sales_channel} onChange={e => setForm(f => ({ ...f, sales_channel: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                      <option value="branch">Branch</option>
+                      <option value="fair">Fair (General)</option>
+                      <option value="PISA Fair">PISA Fair</option>
+                      <option value="Home Expo">Home Expo</option>
+                      <option value="online">Online</option>
+                    </select>
+                  </div>
+                </div>
               )}
 
               {/* Customer info */}

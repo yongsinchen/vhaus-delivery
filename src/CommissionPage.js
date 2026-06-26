@@ -31,7 +31,7 @@ export default function CommissionPage() {
 
   // Rule form
   const [showRuleForm, setShowRuleForm] = useState(false);
-  const [ruleForm, setRuleForm] = useState({ role_name: "salesman", tier_name: "", min_net: 0, max_net: "", rate_pct: 3, incentive_pct: 0, deposit_gate_pct: 30, payout_day: 25, user_id: "" });
+  const [ruleForm, setRuleForm] = useState({ role_name: "salesman", tier_name: "", min_net: 0, max_net: "", rate_pct: 3, incentive_pct: 0, deposit_gate_pct: 30, payout_day: 25, user_id: "", channel: "branch" });
 
   const loadPayout = useCallback(async () => {
     if (!companyId) return;
@@ -282,6 +282,7 @@ export default function CommissionPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.role_name === "salesman" ? "bg-emerald-100 text-emerald-700" : "bg-violet-100 text-violet-700"}`}>{r.role_name}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.channel === "branch" ? "bg-gray-100 text-gray-600" : "bg-amber-100 text-amber-700"}`}>{r.channel || "branch"}</span>
                     {r.tier_name && <span className="text-sm font-medium text-gray-700">{r.tier_name}</span>}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
@@ -304,6 +305,14 @@ export default function CommissionPage() {
                 </div>
                 <div className="px-6 py-5 space-y-3">
                   <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Channel</label>
+                    <select value={ruleForm.channel} onChange={e => setRuleForm(f => ({ ...f, channel: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white mb-3">
+                      <option value="branch">Branch (Normal)</option>
+                      <option value="fair">Fair (General)</option>
+                      <option value="PISA Fair">PISA Fair</option>
+                      <option value="Home Expo">Home Expo</option>
+                      <option value="online">Online</option>
+                    </select>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
                     <select value={ruleForm.role_name} onChange={e => setRuleForm(f => ({ ...f, role_name: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
                       <option value="salesman">Salesman</option>
