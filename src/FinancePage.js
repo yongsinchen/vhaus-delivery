@@ -137,7 +137,7 @@ export default function FinancePage() {
         ))}
       </div>
 
-      {loading && <div className="text-center text-gray-400 py-8">Loading...</div>}
+      {loading && <div className="space-y-3"><div className="grid grid-cols-2 sm:grid-cols-5 gap-3">{[1,2,3,4,5].map(i=><div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div><div className="grid grid-cols-3 gap-3">{[1,2,3].map(i=><div key={i} className="h-24 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div></div>}
 
       {/* TAB 0: Overview */}
       {!loading && tab === 0 && aging && (

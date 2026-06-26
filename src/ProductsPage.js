@@ -455,7 +455,7 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+            {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
             {!loading && products.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
             {!loading && products.map(p => (
               <tr key={p.id} className={`border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer ${selectedIds.has(p.id) ? "bg-violet-50/50" : ""}`} onClick={() => openEdit(p)}>

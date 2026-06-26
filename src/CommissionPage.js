@@ -249,7 +249,7 @@ export default function CommissionPage() {
               loadCommissions();
             }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
           </div>
-          {loading && <div className="text-center text-gray-400 py-8">Loading...</div>}
+          {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
           {!loading && commissions.length === 0 && <div className="text-center py-8 text-gray-400">No commissions yet. Set up rules first, then click "Recalculate All Orders".</div>}
           {commissions.map(c => (
             <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">

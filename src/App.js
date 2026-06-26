@@ -213,7 +213,7 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
           {(tripsLoading || trips.length > 0) && (
             <div>
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Trips {trips.length > 0 && `(${trips.length})`}</p>
-              {tripsLoading ? <p className="text-xs text-gray-400">Loading...</p> : (
+              {tripsLoading ? <div className="h-3 w-20 bg-gray-200 rounded animate-pulse" /> : (
                 <div className="space-y-2">
                   {trips.map(trip => (
                     <div key={trip.id} className={`rounded-xl p-3 border flex items-center justify-between gap-3 flex-wrap ${trip.status === "Completed" ? "bg-emerald-50 border-emerald-200" : trip.status === "Cancelled" ? "bg-gray-50 border-gray-200 opacity-60" : "bg-violet-50 border-violet-200"}`}>
@@ -1021,7 +1021,7 @@ export default function App() {
 
         {opsTab === "service_pending" && (
           <div>
-            {spLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
+            {spLoading ? <div className="space-y-2 py-4">{[1,2,3].map(i=><div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
             : servicePending.length === 0
             ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">✅</div><p className="font-medium">All deliveries settled</p></div>
             : <div className="space-y-3">{servicePending.map(sp => (
@@ -1057,7 +1057,7 @@ export default function App() {
                 <button onClick={loadSupplierDOs} className="bg-violet-600 text-white rounded-xl px-4 py-2 text-sm font-medium hover:bg-violet-700">Search</button>
               </div>
             </div>
-            {supplierDOsLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
+            {supplierDOsLoading ? <div className="space-y-2 py-4">{[1,2,3].map(i=><div key={i} className="h-14 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
             : supplierDOs.length === 0
             ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">📦</div><p className="font-medium">No supplier DOs found</p><p className="text-sm mt-1">DOs are logged automatically when warehouse scans them in Telegram</p></div>
             : <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1219,7 +1219,7 @@ export default function App() {
                 <button onClick={loadDoReview} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">Refresh</button>
               </div>
             </div>
-            {doReviewLoading ? <div className="text-center py-12 text-gray-400">Loading...</div>
+            {doReviewLoading ? <div className="space-y-2 py-4">{[1,2,3].map(i=><div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
             : doReview.length === 0
             ? <div className="text-center py-16 text-gray-400"><div className="text-4xl mb-3">✅</div><p className="font-medium">All DO items matched</p></div>
             : <div className="space-y-3">{doReview.map(item => <DoReviewItem key={item.id} item={item} orders={orders} onResolve={resolveDoReview} onDismiss={dismissDoReview} onView={handleView} warehouses={doWarehouses} onAddToStock={addToStockDoReview} companyId={companyId} />)}</div>}

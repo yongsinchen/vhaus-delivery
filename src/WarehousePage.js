@@ -303,7 +303,7 @@ export default function WarehousePage() {
       {/* ═══ TAB 0: Receive DOs ═══ */}
       {tab === 0 && (
         <div className="space-y-3">
-          {loading && <div className="text-center text-gray-400 py-8">Loading…</div>}
+          {loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
           {!loading && dos.filter(d => ["Reviewed", "Labeled"].includes(d.status)).length === 0 && (
             <div className="text-center py-12 text-gray-400">
               <div className="text-3xl mb-2">📦</div>

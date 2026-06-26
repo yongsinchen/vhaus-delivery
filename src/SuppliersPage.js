@@ -118,7 +118,7 @@ export default function SuppliersPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+            {loading && [1,2,3,4].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-24" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td></tr>)}
             {!loading && filtered.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No suppliers found</td></tr>}
             {!loading && filtered.map(s => (
               <tr key={s.id} className="border-b border-gray-50 hover:bg-violet-50/30 transition-colors">

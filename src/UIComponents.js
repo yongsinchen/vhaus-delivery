@@ -200,20 +200,66 @@ export function useMemoList(list) {
   }, [list]);
 }
 
+// Spinner — small inline spinner
+export function Spinner({ size = "w-5 h-5", className = "" }) {
+  return <div className={`${size} border-2 border-gray-200 border-t-violet-600 rounded-full animate-spin ${className}`} />;
+}
+
+// Loading overlay — centered spinner with optional text
+export function LoadingState({ text }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12">
+      <div className="w-8 h-8 border-3 border-gray-200 border-t-violet-600 rounded-full animate-spin mb-3" />
+      {text && <p className="text-xs text-gray-400">{text}</p>}
+    </div>
+  );
+}
+
+// Skeleton cards — matches order/service/customer card shape
 export function SkeletonCard({ count = 3 }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
+        <div key={i} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2 animate-pulse">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gray-200 rounded-full animate-pulse" />
+            <div className="w-10 h-10 bg-gray-200 rounded-full" />
             <div className="flex-1 space-y-1.5">
-              <div className="h-3.5 bg-gray-200 rounded-lg w-1/3 animate-pulse" />
-              <div className="h-3 bg-gray-100 rounded-lg w-2/3 animate-pulse" />
+              <div className="h-3.5 bg-gray-200 rounded-lg w-1/3" />
+              <div className="h-3 bg-gray-100 rounded-lg w-2/3" />
             </div>
+            <div className="h-5 w-16 bg-gray-100 rounded-full" />
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Skeleton table rows
+export function SkeletonTable({ rows = 5, cols = 6 }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <tr key={i} className="animate-pulse">
+          {Array.from({ length: cols }).map((_, j) => (
+            <td key={j} className="px-4 py-3"><div className={`h-3 bg-gray-200 rounded-lg ${j === 0 ? "w-20" : j === 1 ? "w-32" : "w-16"}`} /></td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// Skeleton drawer
+export function SkeletonDrawer() {
+  return (
+    <div className="px-6 py-4 space-y-4 animate-pulse">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 bg-gray-200 rounded-full" />
+        <div className="space-y-2 flex-1"><div className="h-4 bg-gray-200 rounded-lg w-1/3" /><div className="h-3 bg-gray-100 rounded-lg w-1/2" /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">{[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl" />)}</div>
+      <div className="space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-12 bg-gray-50 rounded-xl" />)}</div>
     </div>
   );
 }

@@ -677,7 +677,7 @@ export default function OrdersPage() {
 
       {/* Orders list */}
       <div className="space-y-2">
-        {loading && <div className="text-center text-gray-400 py-8">Loading…</div>}
+        {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
         {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
         {!loading && orders.map(o => (
           <div key={o.id} onClick={() => openEdit(o)}

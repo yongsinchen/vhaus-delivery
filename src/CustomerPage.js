@@ -136,7 +136,7 @@ export default function CustomerPage() {
         <div className="space-y-3">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email..."
             className="w-full sm:w-72 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-          {loading && <div className="text-center text-gray-400 py-8">Loading...</div>}
+          {loading && <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">{[1,2,3,4,5,6].map(i=><div key={i} className="h-20 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
           {!loading && customers.length === 0 && <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-2">👥</div><p>No customers yet</p></div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
             {customers.map(c => (
@@ -241,7 +241,7 @@ export default function CustomerPage() {
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setDetail(null)} />
           <div className="relative w-full max-w-xl bg-white h-full overflow-y-auto shadow-2xl">
-            {detailLoading ? <div className="text-center py-16 text-gray-400">Loading...</div> : (
+            {detailLoading ? <div className="px-6 py-4 space-y-4 animate-pulse"><div className="flex gap-3"><div className="w-12 h-12 bg-gray-200 rounded-full" /><div className="flex-1 space-y-2"><div className="h-4 bg-gray-200 rounded w-1/3" /><div className="h-3 bg-gray-100 rounded w-1/2" /></div></div><div className="grid grid-cols-3 gap-3">{[1,2,3].map(i=><div key={i} className="h-16 bg-gray-100 rounded-xl" />)}</div>{[1,2,3].map(i=><div key={i} className="h-12 bg-gray-50 rounded-xl" />)}</div> : (
               <>
                 <div className="sticky top-0 bg-white border-b px-6 py-4 z-10">
                   <div className="flex items-center justify-between">

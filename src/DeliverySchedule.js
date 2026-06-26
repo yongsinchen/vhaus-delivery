@@ -842,7 +842,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
         </div>
       </div>
 
-      {loading && <div className="text-center py-8 text-gray-400 text-sm">Loading...</div>}
+      {loading && <div className="flex flex-col xl:flex-row gap-4"><div className="xl:w-72 space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div><div className="flex-1 space-y-3">{[1,2].map(i=><div key={i} className="h-40 bg-white rounded-xl border border-gray-200 animate-pulse" />)}</div></div>}
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}

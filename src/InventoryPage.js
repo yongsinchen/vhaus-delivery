@@ -175,7 +175,7 @@ export default function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+                {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
                 {!loading && filteredInv.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No stock records</td></tr>}
                 {!loading && filteredInv.map(i => {
                   const p = i.products || {};
