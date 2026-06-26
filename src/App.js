@@ -34,13 +34,7 @@ const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
 const now = new Date();
 const todayStr = now.toISOString().split("T")[0];
 
-const toDb = o => ({
-  so_number: o.soNumber, customer_name: o.customerName, address: o.address, contact: o.contact,
-  order_date: o.orderDate, salesman: o.salesman, order_amount: o.orderAmount, balance: o.balance,
-  delivery_date: o.deliveryDate || null, time_slot: o.timeSlot, plate_no: o.plateNo, type: o.type,
-  service_note: o.serviceNote, remark: o.remark, status: o.status, items: JSON.stringify(o.items || []),
-  ...(o.svNumber && { sv_number: o.svNumber }),
-});
+// toDb removed — dashboard writes now go through backend API
 const fromDb = o => ({
   id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
   address: o.address, contact: o.contact, orderDate: o.order_date, salesman: o.salesman,
@@ -559,7 +553,6 @@ export default function App() {
       };
       let res;
       if (editId) {
-        const order = orders.find(o => o.id === editId);
         const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(form.soNumber)}&limit=1`);
         const listData = await listRes.json();
         const soId = listData?.orders?.[0]?.id;
