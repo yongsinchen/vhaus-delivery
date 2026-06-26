@@ -33,7 +33,8 @@ export default function SuppliersPage() {
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const res = await fetch(`${API}/suppliers?company_id=${companyId}`);
+    const token = await getToken();
+    const res = await fetch(`${API}/suppliers?company_id=${companyId}`, { headers: { Authorization: `Bearer ${token}` } });
     const d = await res.json();
     setSuppliers(d.suppliers || []);
     setLoading(false);
