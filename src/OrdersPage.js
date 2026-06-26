@@ -295,6 +295,11 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [perPage, setPerPage] = useState(50);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Order builder drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -321,20 +326,26 @@ export default function OrdersPage() {
 
   const debouncedSearch = useDebounce(search, 300);
 
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async (p = page) => {
     if (!companyId) return;
-    if (orders.length === 0) setLoading(true); // only skeleton on first load
+    if (orders.length === 0) setLoading(true);
+    else setRefreshing(true);
     const headers = await authHeaders();
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ page: p, limit: perPage });
     if (filterStatus) params.set("status", filterStatus);
     if (debouncedSearch) params.set("search", debouncedSearch);
     const res = await fetch(`${API}/sales-orders?${params}`, { headers });
     const d = await res.json();
-    setOrders(d.orders || []);
+    setOrders(d.data || []);
+    setTotalPages(d.total_pages || 1);
+    setTotalOrders(d.total || 0);
+    setPage(d.page || 1);
     setLoading(false);
-  }, [companyId, filterStatus, debouncedSearch]); // eslint-disable-line
+    setRefreshing(false);
+  }, [companyId, filterStatus, debouncedSearch, perPage]); // eslint-disable-line
 
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, debouncedSearch, perPage]); // eslint-disable-line
 
   useEffect(() => {
     if (!companyId) return;
@@ -399,14 +410,16 @@ export default function OrdersPage() {
 
   // ── Order View (read-only detail) ──────────────────────────────
   const openView = async (o) => {
-    setViewingOrder(o);
+    setViewingOrder(o); // show immediately with list data
     setViewArrival(null);
-    if (o.order_number) {
-      const { data } = await supabase.from("orders").select("id, items").eq("so_number", o.order_number).maybeSingle();
-      if (data) {
-        const items = typeof data.items === "string" ? JSON.parse(data.items || "[]") : (data.items || []);
-        setViewArrival({ orderId: data.id, items: Array.isArray(items) ? items : [] });
-      }
+    // Fetch full detail (items, proofs, signature, arrival) in background
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/sales-orders/${o.id}`, { headers });
+    const d = await res.json();
+    if (d.order) setViewingOrder(d.order); // enrich with full data
+    if (d.legacy_order) {
+      const items = typeof d.legacy_order.items === "string" ? JSON.parse(d.legacy_order.items || "[]") : (d.legacy_order.items || []);
+      setViewArrival({ orderId: d.legacy_order.id, items: Array.isArray(items) ? items : [] });
     }
   };
 
@@ -593,7 +606,12 @@ export default function OrdersPage() {
       alert("Order amended. Status changed to 'Amended' — manager approval required to re-confirm.");
     }
     setDrawerOpen(false);
-    loadOrders();
+    // Local update instead of full refetch for edits
+    if (editId && d.order) {
+      setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length } : o));
+    } else {
+      loadOrders(page);
+    }
     if (!editId && d.order) {
       setSignOrder(d.order);
     }
@@ -675,7 +693,8 @@ export default function OrdersPage() {
       const d = await res.json();
       if (!res.ok) { alert(d.error || "Failed"); return; }
     }
-    loadOrders();
+    // Optimistic local update
+    setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
   };
 
   return (
@@ -684,7 +703,7 @@ export default function OrdersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Orders</h1>
-          <p className="text-sm text-gray-500">{orders.length} order{orders.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-gray-500">{totalOrders} order{totalOrders !== 1 ? "s" : ""}{refreshing ? " · updating..." : ""}</p>
         </div>
         <button onClick={openNew} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
           + New Order
@@ -718,7 +737,7 @@ export default function OrdersPage() {
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
                 <p className="text-xs text-gray-400">
-                  {(o.sales_order_items || []).length} item{(o.sales_order_items || []).length !== 1 ? "s" : ""}
+                  {o._item_count || (o.sales_order_items || []).length || 0} item{(o._item_count || (o.sales_order_items || []).length || 0) !== 1 ? "s" : ""}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
                   {o.delivery_date ? ` · 📅 ${o.delivery_date}` : ""}
@@ -739,6 +758,26 @@ export default function OrdersPage() {
           </div>
         ))}
       </div>
+
+      {/* Pagination */}
+      {!loading && totalPages > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Rows per page:</span>
+            {[25, 50, 100].map(n => (
+              <button key={n} onClick={() => setPerPage(n)}
+                className={`text-xs px-2 py-1 rounded-lg ${perPage === n ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{n}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { if (page > 1) loadOrders(page - 1); }} disabled={page <= 1}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">← Prev</button>
+            <span className="text-xs text-gray-600 font-medium">Page {page} of {totalPages}</span>
+            <button onClick={() => { if (page < totalPages) loadOrders(page + 1); }} disabled={page >= totalPages}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next →</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Order Builder Drawer ───────────────────────────────────── */}
       {/* Order Detail View (read-only) */}
