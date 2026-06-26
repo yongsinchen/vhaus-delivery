@@ -774,11 +774,11 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
       if (trip) {
         const tripOrder = unassigned.find(o => o.so_number === trip.so_number);
         if (tripOrder) {
-          await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, team_id: parseInt(teamId), scheduled_date: date, sort_order: sortOrder }) });
+          await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
         }
       }
     } else {
-      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: id, team_id: parseInt(teamId), scheduled_date: date, sort_order: sortOrder }) });
+      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
     }
