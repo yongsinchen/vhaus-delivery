@@ -76,27 +76,81 @@ export const canSeeOrder = (user, order) => {
   return false;
 };
 
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
+
 // ── Auth Provider ─────────────────────────────────────────────────
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
-  const [user, setUser] = useState(null); // full user profile from users table
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [availableCompanies, setAvailableCompanies] = useState([]);
+  const [activeCompanyId, setActiveCompanyId] = useState(() => localStorage.getItem("pulseActiveCompanyId") || null);
+  const [activeRoleKey, setActiveRoleKey] = useState(null);
+  const [permissions, setPermissions] = useState({});
+
+  const getToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || "";
+  };
+
+  const authFetch = async (url, opts = {}) => {
+    const token = await getToken();
+    const headers = { ...opts.headers, Authorization: `Bearer ${token}` };
+    if (activeCompanyId) headers["X-Company-ID"] = activeCompanyId;
+    return fetch(url, { ...opts, headers });
+  };
+
+  const loadPermissions = async () => {
+    try {
+      const res = await authFetch(`${API}/permissions/effective`);
+      if (res.ok) {
+        const data = await res.json();
+        setPermissions(data.permissions || {});
+        if (data.activeCompanyId) setActiveCompanyId(data.activeCompanyId);
+        if (data.roleKey) setActiveRoleKey(data.roleKey);
+      }
+    } catch (e) { console.error("loadPermissions error:", e); }
+  };
 
   const loadUserProfile = async (authUser) => {
     if (!authUser) { setUser(null); setLoading(false); return; }
     try {
-      // Use backend API with service role key to bypass RLS recursion
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token || "";
-      const res = await fetch(`${process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app"}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } });
+      const token = (await supabase.auth.getSession()).data?.session?.access_token || "";
+      const headers = { Authorization: `Bearer ${token}` };
+      if (activeCompanyId) headers["X-Company-ID"] = activeCompanyId;
+      const res = await fetch(`${API}/auth/profile`, { headers });
       if (!res.ok) { console.error("Profile fetch failed:", res.status); setUser(null); setLoading(false); return; }
       const data = await res.json();
       setUser({ ...data, email: authUser.email });
+      setAvailableCompanies(data.availableCompanies || []);
+      if (data.activeCompanyId) {
+        setActiveCompanyId(data.activeCompanyId);
+        localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
+      }
+      if (data.activeRoleKey) setActiveRoleKey(data.activeRoleKey);
+      // Load permissions after profile
+      setTimeout(loadPermissions, 100);
     } catch (e) {
       console.error("loadUserProfile error:", e);
       setUser(null);
     }
     setLoading(false);
+  };
+
+  const switchCompany = async (companyId) => {
+    try {
+      const res = await authFetch(`${API}/auth/switch-company`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company_id: companyId }),
+      });
+      if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to switch"); return false; }
+      const data = await res.json();
+      setActiveCompanyId(data.activeCompanyId);
+      setActiveRoleKey(data.activeRoleKey);
+      setPermissions(data.permissions || {});
+      localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
+      return true;
+    } catch (e) { console.error("switchCompany error:", e); return false; }
   };
 
   useEffect(() => {
@@ -127,8 +181,23 @@ export function AuthProvider({ children }) {
     setSession(null);
   };
 
+  const canPerm = (actionKey) => {
+    if (!user) return false;
+    if (user.role === "master" || activeRoleKey === "MASTER") return true;
+    const p = permissions[actionKey];
+    if (p) return p.allowed === true;
+    return can(user, actionKey);
+  };
+
   return (
-    <AuthContext.Provider value={{ session, user, loading, signIn, signOut, can: (action) => can(user, action), canSeeOrder: (order) => canSeeOrder(user, order) }}>
+    <AuthContext.Provider value={{
+      session, user, loading, signIn, signOut,
+      can: (action) => can(user, action),
+      canPerm,
+      canSeeOrder: (order) => canSeeOrder(user, order),
+      availableCompanies, activeCompanyId, activeRoleKey, permissions,
+      switchCompany, authFetch,
+    }}>
       {children}
     </AuthContext.Provider>
   );

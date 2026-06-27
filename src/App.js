@@ -378,7 +378,7 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
 
 // ── Main App ──────────────────────────────────────────────────────
 export default function App() {
-  const { user, signOut, can } = useAuth();
+  const { user, signOut, can, availableCompanies, activeCompanyId, switchCompany } = useAuth();
   const { loading: authLoading } = useAuth();
   const companyId = user?.company_id;
   const isMaster = user?.role === "master";
@@ -646,7 +646,14 @@ export default function App() {
           <div className="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-white font-bold text-lg">⚡</div>
           <span className="text-white font-bold text-lg tracking-wide">PulseOS</span>
         </div>
-        <p className="text-xs mt-2 font-medium truncate" style={{color:"#C4B5FD"}}>{user?.companies?.name || "V Haus Living"}</p>
+        {availableCompanies.length > 1 ? (
+          <select value={activeCompanyId || ""} onChange={async e => { const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); }}
+            className="w-full mt-2 px-2 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-purple-200 border border-white/10 focus:outline-none focus:border-violet-400 cursor-pointer">
+            {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({c.roleName})</option>)}
+          </select>
+        ) : (
+          <p className="text-xs mt-2 font-medium truncate" style={{color:"#C4B5FD"}}>{user?.companies?.name || "V Haus Living"}</p>
+        )}
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {visibleNav.map(n => (
