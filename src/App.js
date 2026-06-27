@@ -383,7 +383,7 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
 export default function App() {
   const { user, signOut, can, availableCompanies, activeCompanyId, switchCompany } = useAuth();
   const { loading: authLoading } = useAuth();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const isMaster = user?.role === "master";
   const isSalesman = user?.role === "salesman";
 
