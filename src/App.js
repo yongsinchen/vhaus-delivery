@@ -392,6 +392,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [switchingCompany, setSwitchingCompany] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
   const [editId, setEditId] = useState(null);
@@ -629,6 +630,7 @@ export default function App() {
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
   if (authLoading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading PulseOS...</p></div></div>;
   if (!user) return <LoginPage />;
+  if (switchingCompany) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3 animate-pulse">🏢</div><p className="text-gray-700 font-bold text-lg mb-1">Switching Company...</p><p className="text-gray-400 text-sm">Loading data for the selected company</p></div></div>;
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading your data...</p></div></div>;
   if (error) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center bg-white rounded-2xl shadow p-8"><div className="text-4xl mb-3">⚠️</div><p className="text-red-600 mb-4">{error}</p><button onClick={loadOrders} className="bg-violet-600 text-white px-4 py-2 rounded-xl text-sm">Retry</button></div></div>;
 
@@ -650,7 +652,7 @@ export default function App() {
           <span className="text-white font-bold text-lg tracking-wide">PulseOS</span>
         </div>
         {availableCompanies.length > 1 ? (
-          <select value={activeCompanyId || ""} onChange={async e => { localStorage.setItem("pulseActiveCompanyId", e.target.value); const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); }}
+          <select value={activeCompanyId || ""} onChange={async e => { setSwitchingCompany(true); localStorage.setItem("pulseActiveCompanyId", e.target.value); const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); else setSwitchingCompany(false); }}
             className="w-full mt-2 px-2 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-purple-200 border border-white/10 focus:outline-none focus:border-violet-400 cursor-pointer">
             {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({c.roleName})</option>)}
           </select>
