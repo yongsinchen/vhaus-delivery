@@ -514,7 +514,7 @@ export default function App() {
     loadDoReview();
     loadServices();
     if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
-  }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
+  }, [user?.id, companyId, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
 
@@ -650,7 +650,7 @@ export default function App() {
           <span className="text-white font-bold text-lg tracking-wide">PulseOS</span>
         </div>
         {availableCompanies.length > 1 ? (
-          <select value={activeCompanyId || ""} onChange={async e => { const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); }}
+          <select value={activeCompanyId || ""} onChange={async e => { localStorage.setItem("pulseActiveCompanyId", e.target.value); const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); }}
             className="w-full mt-2 px-2 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-purple-200 border border-white/10 focus:outline-none focus:border-violet-400 cursor-pointer">
             {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({c.roleName})</option>)}
           </select>
