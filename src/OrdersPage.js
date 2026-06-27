@@ -14,10 +14,12 @@ const getToken = async () => {
   }
   return session?.access_token || "";
 };
-const authHeaders = async () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${await getToken()}`,
-});
+const authHeaders = async () => {
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
+  const companyId = localStorage.getItem("pulseActiveCompanyId");
+  if (companyId) headers["X-Company-ID"] = companyId;
+  return headers;
+};
 
 const STATUSES = ["draft", "confirmed", "amended", "delivered", "cancelled"];
 const STATUS_STYLE = {
@@ -281,9 +283,9 @@ function printSalesOrder(order, signatureDataUrl, co) {
 }
 
 export default function OrdersPage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
 
   const [orders, setOrders] = useState([]);
   const [branches, setBranches] = useState([]);

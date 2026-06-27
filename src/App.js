@@ -25,7 +25,8 @@ const BACKEND = "https://vhaus-bot-production.up.railway.app";
 const authFetch = async (url, opts = {}) => {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
-  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+  const cid = localStorage.getItem("pulseActiveCompanyId");
+  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
