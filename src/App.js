@@ -18,6 +18,7 @@ const ServicePage = lazy(() => import("./ServicePage"));
 const CustomerPage = lazy(() => import("./CustomerPage"));
 const FinancePage = lazy(() => import("./FinancePage"));
 const CommissionPage = lazy(() => import("./CommissionPage"));
+const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -82,6 +83,7 @@ const NAV = [
   { id: "commission", label: "Commission",       icon: "📊", canKey: null, manageOnly: true },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
+  { id: "permissions",label: "Permissions",      icon: "🔐", canKey: "manageCompanies" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
 ];
 
@@ -1274,6 +1276,8 @@ export default function App() {
     if (page === "team") return (
       <div><h1 className="text-xl font-bold text-gray-900 mb-4">Team</h1><UserManagement /></div>
     );
+
+    if (page === "permissions") return <UserPermissionsPage />;
 
     // PRODUCTS
     if (page === "products") return <ProductsPage />;
