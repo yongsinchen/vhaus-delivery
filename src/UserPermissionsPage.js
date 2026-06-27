@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext";
 const API = "https://vhaus-bot-production.up.railway.app";
 
 export default function UserPermissionsPage() {
-  const { authFetch, activeCompanyId } = useAuth();
+  const { authFetch } = useAuth();
   const [users, setUsers] = useState([]);
   const [modules, setModules] = useState([]);
   const [roles, setRoles] = useState([]);
