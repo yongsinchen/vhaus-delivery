@@ -768,7 +768,7 @@ export default function OrdersPage() {
                   {o._item_count || (o.sales_order_items || []).length || 0} item{(o._item_count || (o.sales_order_items || []).length || 0) !== 1 ? "s" : ""}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
-                  {o.delivery_date ? ` · 📅 ${o.delivery_date}` : ""}
+                  {o.delivery_date ? ` · 📅 ${o.delivery_date === "TBC" ? "TBC" : o.delivery_date}` : ""}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -860,7 +860,7 @@ export default function OrdersPage() {
                   {/* Delivery info */}
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{o.delivery_type || "Delivery"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className="font-medium">{o.delivery_date || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className={`font-medium ${o.delivery_date === "TBC" ? "text-amber-600" : ""}`}>{o.delivery_date || "-"}</p></div>
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{o.delivery_time_slot || "-"}</p></div>
                   </div>
 
@@ -1078,8 +1078,15 @@ export default function OrdersPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Delivery Date</label>
-                  <input type="date" value={form.delivery_date} onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  <div className="flex gap-2">
+                    <input type="date" value={form.delivery_date === "TBC" ? "" : form.delivery_date} disabled={form.delivery_date === "TBC"}
+                      onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))}
+                      className={`flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400 ${form.delivery_date === "TBC" ? "bg-gray-100 text-gray-400" : ""}`} />
+                    <button type="button" onClick={() => setForm(f => ({ ...f, delivery_date: f.delivery_date === "TBC" ? "" : "TBC" }))}
+                      className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${form.delivery_date === "TBC" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-500 border-gray-200 hover:border-amber-400 hover:text-amber-600"}`}>
+                      TBC
+                    </button>
+                  </div>
                 </div>
                 <Field label="Time Slot" value={form.delivery_time_slot} onChange={v => setForm(f => ({ ...f, delivery_time_slot: v }))} placeholder="e.g. 2-5pm" />
               </div>
