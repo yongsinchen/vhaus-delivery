@@ -135,9 +135,9 @@ export default function UserPermissionsPage() {
         </div>
       </div>
 
-      <div className="flex gap-4" style={{ minHeight: "70vh" }}>
+      <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: "70vh" }}>
         {/* User list */}
-        <div className="w-80 shrink-0 space-y-3">
+        <div className={`${selectedUser ? "hidden lg:block" : ""} lg:w-80 shrink-0 space-y-3`}>
           <div className="flex gap-2">
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..."
               className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
@@ -159,7 +159,7 @@ export default function UserPermissionsPage() {
         </div>
 
         {/* Permission editor */}
-        <div className="flex-1 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className={`${selectedUser ? "" : "hidden lg:block"} flex-1 min-w-0 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden`}>
           {!selectedUser ? (
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">
               Select a user to manage permissions
@@ -169,13 +169,16 @@ export default function UserPermissionsPage() {
           ) : (
             <div className="flex flex-col h-full">
               {/* Header */}
-              <div className="sticky top-0 bg-white border-b px-5 py-3 z-10">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-gray-900">{selectedUser.name}</p>
-                    <p className="text-xs text-gray-500">{selectedUser.roleName} · {selectedUser.email}</p>
+              <div className="sticky top-0 bg-white border-b px-4 sm:px-5 py-3 z-10">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button onClick={() => { setSelectedUser(null); setUserPerms(null); setChanges({}); }} className="lg:hidden w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 shrink-0">←</button>
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-900 truncate">{selectedUser.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{selectedUser.roleName} · {selectedUser.email}</p>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     {overrideKeys.size > 0 && (
                       <button onClick={resetAll} disabled={saving}
                         className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Reset All to Default</button>
