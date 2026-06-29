@@ -5,7 +5,7 @@ const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.u
 const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", is_active: true };
 
 export default function UserManagement() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, activeCompanyId } = useAuth();
   const isMaster = currentUser?.role === "master";
 
   const [users, setUsers] = useState([]);
@@ -54,7 +54,7 @@ export default function UserManagement() {
     }
 
     setLoading(false);
-  }, [isMaster, currentUser?.company_id]); // eslint-disable-line
+  }, [isMaster, activeCompanyId]); // eslint-disable-line
 
   useEffect(() => { loadData(); }, [loadData]);
 
