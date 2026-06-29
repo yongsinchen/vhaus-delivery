@@ -4,7 +4,8 @@ import { useAuth, supabase } from "./AuthContext";
 const af = async (url, opts = {}) => {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
-  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+  const cid = localStorage.getItem("pulseActiveCompanyId");
+  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 
 const API = "https://vhaus-bot-production.up.railway.app";

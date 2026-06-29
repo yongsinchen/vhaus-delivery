@@ -18,13 +18,15 @@ const ServicePage = lazy(() => import("./ServicePage"));
 const CustomerPage = lazy(() => import("./CustomerPage"));
 const FinancePage = lazy(() => import("./FinancePage"));
 const CommissionPage = lazy(() => import("./CommissionPage"));
+const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
 const authFetch = async (url, opts = {}) => {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
-  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}` } });
+  const cid = localStorage.getItem("pulseActiveCompanyId");
+  return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
@@ -34,13 +36,7 @@ const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
 const now = new Date();
 const todayStr = now.toISOString().split("T")[0];
 
-const toDb = o => ({
-  so_number: o.soNumber, customer_name: o.customerName, address: o.address, contact: o.contact,
-  order_date: o.orderDate, salesman: o.salesman, order_amount: o.orderAmount, balance: o.balance,
-  delivery_date: o.deliveryDate || null, time_slot: o.timeSlot, plate_no: o.plateNo, type: o.type,
-  service_note: o.serviceNote, remark: o.remark, status: o.status, items: JSON.stringify(o.items || []),
-  ...(o.svNumber && { sv_number: o.svNumber }),
-});
+// toDb removed — dashboard writes now go through backend API
 const fromDb = o => ({
   id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
   address: o.address, contact: o.contact, orderDate: o.order_date, salesman: o.salesman,
@@ -88,6 +84,7 @@ const NAV = [
   { id: "commission", label: "Commission",       icon: "📊", canKey: null, manageOnly: true },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
+  { id: "permissions",label: "Permissions",      icon: "🔐", canKey: "manageCompanies" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
 ];
 
@@ -384,9 +381,9 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
 
 // ── Main App ──────────────────────────────────────────────────────
 export default function App() {
-  const { user, signOut, can } = useAuth();
+  const { user, signOut, can, availableCompanies, activeCompanyId, switchCompany } = useAuth();
   const { loading: authLoading } = useAuth();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const isMaster = user?.role === "master";
   const isSalesman = user?.role === "salesman";
 
@@ -395,6 +392,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [switchingCompany, setSwitchingCompany] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
   const [editId, setEditId] = useState(null);
@@ -438,12 +436,16 @@ export default function App() {
   const saveServiceDate = async () => {
     if (!serviceDateModal || !serviceDateValue) return;
     setServiceDateSaving(true);
-    const { error } = await supabase.from("orders")
-      .update({ delivery_date: serviceDateValue })
-      .eq("id", serviceDateModal.id);
-    if (error) { alert("Failed: " + error.message); setServiceDateSaving(false); return; }
-    setServices(prev => prev.map(o => o.id === serviceDateModal.id ? { ...o, deliveryDate: serviceDateValue } : o));
-    setServiceDateModal(null); setServiceDateValue(""); setServiceDateSaving(false);
+    try {
+      const res = await authFetch(`${BACKEND}/orders/${serviceDateModal.id}/set-date`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delivery_date: serviceDateValue }),
+      });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setServiceDateSaving(false); return; }
+      setServices(prev => prev.map(o => o.id === serviceDateModal.id ? { ...o, deliveryDate: serviceDateValue } : o));
+      setServiceDateModal(null); setServiceDateValue("");
+    } catch (e) { alert("Failed: " + e.message); }
+    setServiceDateSaving(false);
   };
 
   // ── Data loading ────────────────────────────────────────────────
@@ -513,7 +515,7 @@ export default function App() {
     loadDoReview();
     loadServices();
     if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
-  }, [user?.id, user?.company_id, user?.role]); // eslint-disable-line
+  }, [user?.id, companyId, user?.role]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
 
@@ -530,20 +532,43 @@ export default function App() {
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = o => setViewOrder(o);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
-  const handleDelete = async id => { await supabase.from("orders").delete().eq("id", id); setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null); };
+  const handleDelete = async id => {
+    try {
+      const res = await authFetch(`${BACKEND}/orders/${id}`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); return; }
+      setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null);
+    } catch (e) { alert("Failed to delete: " + e.message); }
+  };
   const handleSubmit = async () => {
     if (!form.soNumber) return alert("SO Number required.");
     setSaving(true);
-    const payload = { ...toDb(form), company_id: companyId || null };
-    if (editId) {
-      const { error: err } = await supabase.from("orders").update(payload).eq("id", editId);
-      if (err) { alert("Error: " + err.message); setSaving(false); return; }
-      setOrders(p => p.map(o => o.id === editId ? fromDb({...payload, id: editId, created_at: o.created_at}) : o));
-    } else {
-      const { data, error: err } = await supabase.from("orders").insert(payload).select();
-      if (err) { alert("Error: " + err.message); setSaving(false); return; }
-      if (data?.[0]) setOrders(p => [...p, fromDb(data[0])]);
-    }
+    try {
+      const items = (form.items || []).filter(i => i.itemName).map(i => ({
+        product_name: i.itemName, product_code: i.itemCode, quantity: Number(i.unit) || 1,
+        unit_price: Number(i.unitPrice) || 0, supplier_name: i.supplier || null,
+      }));
+      const body = {
+        order_number: form.soNumber, customer_name: form.customerName, customer_contact: form.contact,
+        customer_address: form.address, salesman_names: form.salesman, delivery_date: form.deliveryDate || null,
+        delivery_time_slot: form.timeSlot || null, delivery_type: form.type || "Delivery",
+        remark: form.remark || null, status: "confirmed",
+        subtotal: Number(form.orderAmount) || 0, deposit: (Number(form.orderAmount) || 0) - (Number(form.balance) || 0),
+        items,
+      };
+      let res;
+      if (editId) {
+        const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(form.soNumber)}&limit=1`);
+        const listData = await listRes.json();
+        const soId = listData?.orders?.[0]?.id;
+        if (soId) {
+          res = await authFetch(`${BACKEND}/sales-orders/${soId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        }
+      } else {
+        res = await authFetch(`${BACKEND}/sales-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      }
+      if (res && !res.ok) { const d = await res.json(); alert("Error: " + (d.error || "Unknown")); setSaving(false); return; }
+      await loadOrders();
+    } catch (e) { alert("Error: " + e.message); }
     setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setEditId(null); setShowForm(false); setSaving(false);
   };
 
@@ -578,12 +603,18 @@ export default function App() {
     if (!paymentModal || !paymentAmount) return;
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return alert("Invalid amount.");
-    const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
     setPaymentSaving(true);
-    const { error } = await supabase.from("orders").update({ balance: newBalance, remark: (paymentModal.remark?paymentModal.remark+" | ":"")+`Payment RM${amount} on ${new Date().toLocaleDateString("en-MY")}` }).eq("id", paymentModal.id);
-    if (error) { alert("Failed: "+error.message); setPaymentSaving(false); return; }
-    setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
-    setPaymentModal(null); setPaymentAmount(""); setPaymentSaving(false);
+    try {
+      const res = await authFetch(`${BACKEND}/payments/record`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: paymentModal.id, amount, payment_method: "cash" }),
+      });
+      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setPaymentSaving(false); return; }
+      const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
+      setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
+      setPaymentModal(null); setPaymentAmount("");
+    } catch (e) { alert("Failed: " + e.message); }
+    setPaymentSaving(false);
   };
   const handleGlobalSearch = v => {
     setGlobalSearch(v);
@@ -600,6 +631,7 @@ export default function App() {
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
   if (authLoading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading PulseOS...</p></div></div>;
   if (!user) return <LoginPage />;
+  if (switchingCompany) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3 animate-pulse">🏢</div><p className="text-gray-700 font-bold text-lg mb-1">Switching Company...</p><p className="text-gray-400 text-sm">Loading data for the selected company</p></div></div>;
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading your data...</p></div></div>;
   if (error) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center bg-white rounded-2xl shadow p-8"><div className="text-4xl mb-3">⚠️</div><p className="text-red-600 mb-4">{error}</p><button onClick={loadOrders} className="bg-violet-600 text-white px-4 py-2 rounded-xl text-sm">Retry</button></div></div>;
 
@@ -620,7 +652,14 @@ export default function App() {
           <div className="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-white font-bold text-lg">⚡</div>
           <span className="text-white font-bold text-lg tracking-wide">PulseOS</span>
         </div>
-        <p className="text-xs mt-2 font-medium truncate" style={{color:"#C4B5FD"}}>{user?.companies?.name || "V Haus Living"}</p>
+        {availableCompanies.length > 1 ? (
+          <select value={activeCompanyId || ""} onChange={async e => { setSwitchingCompany(true); localStorage.setItem("pulseActiveCompanyId", e.target.value); const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); else setSwitchingCompany(false); }}
+            className="w-full mt-2 px-2 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-purple-200 border border-white/10 focus:outline-none focus:border-violet-400 cursor-pointer">
+            {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({c.roleName})</option>)}
+          </select>
+        ) : (
+          <p className="text-xs mt-2 font-medium truncate" style={{color:"#C4B5FD"}}>{user?.companies?.name || "V Haus Living"}</p>
+        )}
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {visibleNav.map(n => (
@@ -1241,6 +1280,8 @@ export default function App() {
     if (page === "team") return (
       <div><h1 className="text-xl font-bold text-gray-900 mb-4">Team</h1><UserManagement /></div>
     );
+
+    if (page === "permissions") return <UserPermissionsPage />;
 
     // PRODUCTS
     if (page === "products") return <ProductsPage />;

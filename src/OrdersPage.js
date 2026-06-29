@@ -14,10 +14,12 @@ const getToken = async () => {
   }
   return session?.access_token || "";
 };
-const authHeaders = async () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${await getToken()}`,
-});
+const authHeaders = async () => {
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
+  const companyId = localStorage.getItem("pulseActiveCompanyId");
+  if (companyId) headers["X-Company-ID"] = companyId;
+  return headers;
+};
 
 const STATUSES = ["draft", "confirmed", "amended", "delivered", "cancelled"];
 const STATUS_STYLE = {
@@ -281,9 +283,9 @@ function printSalesOrder(order, signatureDataUrl, co) {
 }
 
 export default function OrdersPage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
 
   const [orders, setOrders] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -708,6 +710,15 @@ export default function OrdersPage() {
     setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
   };
 
+  const deleteOrder = async (o) => {
+    if (!window.confirm(`Delete order ${o.order_number}? This cannot be undone.`)) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/sales-orders/${o.id}`, { method: "DELETE", headers });
+    if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to delete"); return; }
+    setOrders(prev => prev.filter(ord => ord.id !== o.id));
+    setViewingOrder(null);
+  };
+
   return (
     <div className="p-4 sm:p-6 space-y-4">
       {/* Header */}
@@ -720,6 +731,14 @@ export default function OrdersPage() {
           + New Order
         </button>
       </div>
+
+      {/* Amended review banner */}
+      {orders.filter(o => o.status === "amended").length > 0 && (
+        <button onClick={() => setFilterStatus(filterStatus === "amended" ? "" : "amended")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${filterStatus === "amended" ? "bg-amber-500 text-white" : "bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100"}`}>
+          ⚠️ {orders.filter(o => o.status === "amended").length} amended order{orders.filter(o => o.status === "amended").length !== 1 ? "s" : ""} pending review
+        </button>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
@@ -751,7 +770,7 @@ export default function OrdersPage() {
                   {o._item_count || (o.sales_order_items || []).length || 0} item{(o._item_count || (o.sales_order_items || []).length || 0) !== 1 ? "s" : ""}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
-                  {o.delivery_date ? ` · 📅 ${o.delivery_date}` : ""}
+                  {o.delivery_date ? ` · 📅 ${o.delivery_date === "TBC" ? "TBC" : o.delivery_date}` : ""}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -818,6 +837,7 @@ export default function OrdersPage() {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
+                      {!["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
                   </div>
@@ -842,7 +862,7 @@ export default function OrdersPage() {
                   {/* Delivery info */}
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{o.delivery_type || "Delivery"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className="font-medium">{o.delivery_date || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className={`font-medium ${o.delivery_date === "TBC" ? "text-amber-600" : ""}`}>{o.delivery_date || "-"}</p></div>
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{o.delivery_time_slot || "-"}</p></div>
                   </div>
 
@@ -891,9 +911,20 @@ export default function OrdersPage() {
                     </div>
                   )}
 
+                  {/* Amended review banner */}
+                  {o.status === "amended" && (
+                    <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-bold text-amber-800">⚠️ Amendment Pending Review</span>
+                        <button onClick={() => changeStatus(o, "confirmed")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">✓ Re-confirm</button>
+                      </div>
+                      {o.notes && <p className="text-xs text-amber-700 whitespace-pre-wrap mt-1">{o.notes}</p>}
+                    </div>
+                  )}
+
                   {/* Notes & Remark */}
                   {o.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{o.remark}</div>}
-                  {o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
+                  {o.status !== "amended" && o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
 
                   {/* Action buttons */}
                   <div className="flex gap-2 pt-2">
@@ -1049,8 +1080,15 @@ export default function OrdersPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Delivery Date</label>
-                  <input type="date" value={form.delivery_date} onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  <div className="flex gap-2">
+                    <input type="date" value={form.delivery_date === "TBC" ? "" : form.delivery_date} disabled={form.delivery_date === "TBC"}
+                      onChange={e => setForm(f => ({ ...f, delivery_date: e.target.value }))}
+                      className={`flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400 ${form.delivery_date === "TBC" ? "bg-gray-100 text-gray-400" : ""}`} />
+                    <button type="button" onClick={() => setForm(f => ({ ...f, delivery_date: f.delivery_date === "TBC" ? "" : "TBC" }))}
+                      className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors ${form.delivery_date === "TBC" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-500 border-gray-200 hover:border-amber-400 hover:text-amber-600"}`}>
+                      TBC
+                    </button>
+                  </div>
                 </div>
                 <Field label="Time Slot" value={form.delivery_time_slot} onChange={v => setForm(f => ({ ...f, delivery_time_slot: v }))} placeholder="e.g. 2-5pm" />
               </div>
