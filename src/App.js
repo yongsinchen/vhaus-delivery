@@ -568,8 +568,9 @@ export default function App() {
   const confirmConvert = async () => {
     if (!convertModal || converting) return;
     setConverting(true);
-    const d = await fetch(`${BACKEND}/service-pending/${convertModal.id}/convert`, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ remark: convertRemark, delivery_date: convertDate||null }) }).then(r=>r.json());
-    if (d.success) { setConvertModal(null); setConvertRemark(""); setConvertDate(""); loadServicePending(); loadOrders(); alert(`Converted: ${d.svNumber}`); }
+    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+    const d = await fetch(`${BACKEND}/service-pending/${convertModal.id}/convert`, { method:"POST", headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`}, body: JSON.stringify({ remark: convertRemark, delivery_date: convertDate||null }) }).then(r=>r.json());
+    if (d.success) { setConvertModal(null); setConvertRemark(""); setConvertDate(""); loadServicePending(); loadOrders(); alert(`Service case created: ${d.svNumber}\nView in Services page.`); }
     else alert("Failed: "+(d.error||"Unknown"));
     setConverting(false);
   };
@@ -1038,7 +1039,7 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { if(window.confirm("Remove?")) fetch(`${BACKEND}/service-pending/${sp.id}`,{method:"DELETE"}).then(()=>loadServicePending()); }} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
-                      <button onClick={() => { setConvertModal(sp); setConvertRemark(""); }} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-xl hover:bg-amber-600">Convert to Service</button>
+                      <button onClick={() => { setConvertModal(sp); setConvertRemark(""); }} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-xl hover:bg-amber-600">Create Service Case</button>
                     </div>
                   </div>
                   <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1469,7 +1470,7 @@ export default function App() {
       {convertModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full">
-            <h3 className="font-bold text-gray-900 mb-1">Convert to Service Order</h3>
+            <h3 className="font-bold text-gray-900 mb-1">Create Service Case Order</h3>
             <p className="text-sm text-gray-500 mb-4">A new service order will be created linked to <span className="font-semibold text-violet-700">SO {convertModal.so_number}</span>. Original delivery order stays intact.</p>
             <div className="space-y-3 mb-4">
               <div><label className="text-xs font-medium text-gray-600 block mb-1">Service Date (optional)</label><input type="date" value={convertDate} onChange={e=>setConvertDate(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" /></div>

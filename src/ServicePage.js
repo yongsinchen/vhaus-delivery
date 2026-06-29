@@ -136,11 +136,14 @@ export default function ServicePage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-gray-900 text-sm">{SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`}</span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[svc.status] || "bg-gray-100"}`}>{svc.status}</span>
+                    {svc.source === "legacy_order" && <span className="px-1.5 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">Legacy</span>}
+                    {svc.source === "service_pending" && <span className="px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-600">From pending</span>}
+                    {svc.priority === "urgent" && <span className="px-1.5 py-0.5 rounded-full text-xs bg-red-100 text-red-600">Urgent</span>}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {svc.orders?.so_number && <span className="text-violet-600 font-medium">{svc.orders.so_number} · </span>}
-                    {svc.orders?.customer_name || "No order linked"}
-                    {svc.assigned?.name && <span className="ml-2 text-gray-400">→ {svc.assigned.name}</span>}
+                    {(svc._order?.so_number || svc.orders?.so_number) && <span className="text-violet-600 font-medium">{svc._order?.so_number || svc.orders?.so_number} · </span>}
+                    {svc._order?.customer_name || svc.orders?.customer_name || svc.customer_name || "No order linked"}
+                    {(svc._assigned?.name || svc.assigned?.name) && <span className="ml-2 text-gray-400">→ {svc._assigned?.name || svc.assigned?.name}</span>}
                   </p>
                   {svc.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{svc.description}</p>}
                 </div>
