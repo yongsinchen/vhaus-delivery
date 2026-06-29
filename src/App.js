@@ -381,11 +381,13 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
 
 // ── Main App ──────────────────────────────────────────────────────
 export default function App() {
-  const { user, signOut, can, availableCompanies, activeCompanyId, switchCompany } = useAuth();
+  const { user, signOut, can: legacyCan, canPerm, availableCompanies, activeCompanyId, activeRoleKey, switchCompany } = useAuth();
   const { loading: authLoading } = useAuth();
+  const can = canPerm || legacyCan;
   const companyId = activeCompanyId || user?.company_id;
-  const isMaster = user?.role === "master";
-  const isSalesman = user?.role === "salesman";
+  const effectiveRole = activeRoleKey || user?.role;
+  const isMaster = effectiveRole === "master";
+  const isSalesman = effectiveRole === "salesman";
 
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
@@ -639,9 +641,9 @@ export default function App() {
   const visibleNav = NAV.filter(n => {
     if (n.id === "operations") return can("viewServicePending") || can("viewDoReview");
     if (n.id === "team") return can("manageUsers");
-    if (n.id === "deliveries") return ["master","manager","company_admin","operation"].includes(user?.role);
-    if (n.id === "driver") return ["master","manager","company_admin","driver","operation"].includes(user?.role);
-    if (n.manageOnly) return ["master","manager","company_admin"].includes(user?.role);
+    if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
+    if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation"].includes(effectiveRole);
+    if (n.manageOnly) return ["master","manager","company_admin"].includes(effectiveRole);
     if (n.canKey) return can(n.canKey);
     return true;
   });
@@ -657,7 +659,7 @@ export default function App() {
         {availableCompanies.length > 1 ? (
           <select value={activeCompanyId || ""} onChange={async e => { setSwitchingCompany(true); localStorage.setItem("pulseActiveCompanyId", e.target.value); const ok = await switchCompany(e.target.value); if (ok) window.location.reload(); else setSwitchingCompany(false); }}
             className="w-full mt-2 px-2 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-purple-200 border border-white/10 focus:outline-none focus:border-violet-400 cursor-pointer">
-            {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({c.roleName})</option>)}
+            {availableCompanies.map(c => <option key={c.companyId} value={c.companyId} className="bg-gray-900 text-white">{c.companyName} ({roleLabel(c.roleName) || c.roleName})</option>)}
           </select>
         ) : (
           <p className="text-xs mt-2 font-medium truncate" style={{color:"#C4B5FD"}}>{user?.companies?.name || "V Haus Living"}</p>

@@ -17,11 +17,12 @@ export const ROLES = {
 };
 
 export const roleLabel = r => ({
-  master: "Master",
-  manager: "Manager",
+  master: "Master", super_admin: "Super Admin",
+  director: "Director", manager: "Manager",
   company_admin: "Company Admin",
-  salesman: "Salesman",
-  finance: "Finance",
+  salesman: "Salesman", finance: "Finance",
+  warehouse: "Warehouse", operation: "Warehouse",
+  driver: "Driver", viewer: "Viewer",
 }[r] || r);
 
 export const can = (user, action) => {
