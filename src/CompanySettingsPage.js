@@ -112,7 +112,7 @@ export default function CompanySettingsPage() {
       af(`${API}/spec-options/pending?company_id=${companyId}`),
     ]);
     const [sD, bD, wD, cD, soD, spD] = await Promise.all([sRes.json(), bRes.json(), wRes.json(), cRes.json(), soRes.json(), spRes.json()]);
-    if (sD.settings?.company_id) setSettings(prev => ({ ...prev, ...sD.settings }));
+    setSettings(sD.settings && Object.keys(sD.settings).length > 0 ? sD.settings : { company_name: "", registration_no: "", address: "", hotline: "", bank_account: "", branches_display: "", work_start: "09:00", work_end: "18:00", base_address: "", countries: null, sales_channels: null });
     setBranches(bD.branches || []);
     setWhouses(wD.warehouses || []);
     setCategories(cD.categories || []);
