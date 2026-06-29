@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 
@@ -390,7 +390,6 @@ export default function App() {
   const isSalesman = effectiveRole === "salesman";
 
   // ── State ───────────────────────────────────────────────────────
-  const contentRef = useRef(null);
   const [page, setPage] = useState("overview");
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -511,8 +510,6 @@ export default function App() {
   };
 
   // Load data once user is authenticated and profile is loaded
-  useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [page]);
-
   useEffect(() => {
     if (!user) return; // wait for auth
     loadOrders();
@@ -1359,7 +1356,7 @@ export default function App() {
         </div>
 
         {/* Page content */}
-        <div ref={contentRef} className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 py-6 pb-24 lg:pb-6">
             <Suspense fallback={<div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-3 border-violet-200 border-t-violet-600 rounded-full animate-spin" /></div>}>{renderPage()}</Suspense>
           </div>
