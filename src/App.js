@@ -639,6 +639,8 @@ export default function App() {
   const visibleNav = NAV.filter(n => {
     if (n.id === "operations") return can("viewServicePending") || can("viewDoReview");
     if (n.id === "team") return can("manageUsers");
+    if (n.id === "deliveries") return ["master","manager","company_admin","operation"].includes(user?.role);
+    if (n.id === "driver") return ["master","manager","company_admin","driver","operation"].includes(user?.role);
     if (n.manageOnly) return ["master","manager","company_admin"].includes(user?.role);
     if (n.canKey) return can(n.canKey);
     return true;
