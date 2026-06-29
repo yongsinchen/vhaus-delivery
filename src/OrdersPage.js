@@ -317,6 +317,8 @@ export default function OrdersPage() {
 
   // Product picker
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [customItemMode, setCustomItemMode] = useState(false);
+  const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1 });
   const [signOrder, setSignOrder] = useState(null);
 
   // Submit PO
@@ -501,6 +503,28 @@ export default function OrdersPage() {
     }));
     setPickerOpen(false);
     setProductSearch("");
+    setCustomItemMode(false);
+  };
+
+  const addCustomLineItem = () => {
+    if (!customItem.product_name.trim()) return;
+    setForm(f => ({
+      ...f,
+      items: [...f.items, {
+        product_id: null, product_code: customItem.product_code.trim() || "CUSTOM",
+        product_name: customItem.product_name.trim(),
+        size: customItem.size.trim(), color: customItem.color.trim(),
+        is_custom: true, custom_specs: [], custom_dimensions: "",
+        quantity: Number(customItem.quantity) || 1,
+        unit_price: customItem.unit_price || "",
+        unit_cost: "", attachment_url: "", notes: "",
+        requires_product_review: true,
+      }],
+    }));
+    setPickerOpen(false);
+    setProductSearch("");
+    setCustomItemMode(false);
+    setCustomItem({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1 });
   };
 
   const updateItem = (idx, field, value) =>
@@ -1097,7 +1121,7 @@ export default function OrdersPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm font-medium text-gray-700">Items</label>
-                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); searchProducts(""); }}
+                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); searchProducts(""); }}
                     className="text-xs px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Product</button>
                 </div>
 
@@ -1296,8 +1320,17 @@ export default function OrdersPage() {
             </div>
             <div className="overflow-y-auto p-2">
               {productLoading && <p className="text-center text-gray-400 py-6 text-sm">Searching…</p>}
-              {!productLoading && products.length === 0 && <p className="text-center text-gray-400 py-6 text-sm">No products found</p>}
-              {!productLoading && products.map(p => (
+              {!productLoading && !customItemMode && products.length === 0 && (
+                <div className="text-center py-6">
+                  <p className="text-gray-400 text-sm mb-3">No products found</p>
+                  <button onClick={() => { setCustomItemMode(true); setCustomItem(c => ({ ...c, product_name: productSearch })); }}
+                    className="text-sm px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 font-medium">
+                    + Add as custom item
+                  </button>
+                  <p className="text-xs text-gray-400 mt-2">Custom items will be sent for review</p>
+                </div>
+              )}
+              {!productLoading && !customItemMode && products.map(p => (
                 <button key={p.id} onClick={() => addLineItem(p)}
                   className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-violet-50 transition-colors flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -1312,6 +1345,54 @@ export default function OrdersPage() {
                   </div>
                 </button>
               ))}
+              {!productLoading && !customItemMode && products.length > 0 && (
+                <div className="border-t border-gray-100 mt-2 pt-2">
+                  <button onClick={() => { setCustomItemMode(true); setCustomItem(c => ({ ...c, product_name: productSearch })); }}
+                    className="w-full text-center text-xs text-gray-400 hover:text-amber-600 py-2">
+                    Can't find it? Add as custom item
+                  </button>
+                </div>
+              )}
+              {customItemMode && (
+                <div className="p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-amber-700">Add Custom Item</p>
+                    <button onClick={() => setCustomItemMode(false)} className="text-xs text-gray-400 hover:text-gray-600">Back to search</button>
+                  </div>
+                  <p className="text-xs text-gray-400">This item will be flagged for product review.</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <label className="text-xs text-gray-500">Product Name *</label>
+                      <input value={customItem.product_name} onChange={e => setCustomItem(c => ({ ...c, product_name: e.target.value }))}
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" autoFocus />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Product Code</label>
+                      <input value={customItem.product_code} onChange={e => setCustomItem(c => ({ ...c, product_code: e.target.value }))}
+                        placeholder="Optional" className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Unit Price</label>
+                      <input type="number" value={customItem.unit_price} onChange={e => setCustomItem(c => ({ ...c, unit_price: e.target.value }))}
+                        placeholder="0.00" className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Size</label>
+                      <input value={customItem.size} onChange={e => setCustomItem(c => ({ ...c, size: e.target.value }))}
+                        placeholder="Optional" className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">Color</label>
+                      <input value={customItem.color} onChange={e => setCustomItem(c => ({ ...c, color: e.target.value }))}
+                        placeholder="Optional" className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                    </div>
+                  </div>
+                  <button onClick={addCustomLineItem} disabled={!customItem.product_name.trim()}
+                    className="w-full py-2 text-sm font-medium bg-amber-500 text-white rounded-xl hover:bg-amber-600 disabled:opacity-40">
+                    Add Custom Item
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
