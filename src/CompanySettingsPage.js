@@ -27,8 +27,8 @@ const authHeaders = async () => {
 const TABS = ["Company Info", "Branches", "Warehouses", "Operations", "Categories", "Options Library"];
 
 export default function CompanySettingsPage() {
-  const { user } = useAuth();
-  const companyId = user?.company_id;
+  const { user, activeCompanyId } = useAuth();
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
   // Company settings
