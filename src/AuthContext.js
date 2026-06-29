@@ -122,7 +122,18 @@ export function AuthProvider({ children }) {
       const headers = { Authorization: `Bearer ${token}` };
       if (activeCompanyId) headers["X-Company-ID"] = activeCompanyId;
       const res = await fetch(`${API}/auth/profile`, { headers });
-      if (!res.ok) { console.error("Profile fetch failed:", res.status); setUser(null); setLoading(false); return; }
+      if (!res.ok) {
+        console.error("Profile fetch failed:", res.status);
+        if (res.status === 403 && activeCompanyId) {
+          // Stale company in localStorage — clear and retry without header
+          console.warn("Clearing stale company ID and retrying profile");
+          localStorage.removeItem("pulseActiveCompanyId");
+          setActiveCompanyId(null);
+          const retry = await fetch(`${API}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } });
+          if (retry.ok) { const d = await retry.json(); setUser({ ...d, email: authUser.email }); setAvailableCompanies(d.availableCompanies || []); if (d.activeCompanyId) { setActiveCompanyId(d.activeCompanyId); localStorage.setItem("pulseActiveCompanyId", d.activeCompanyId); } if (d.effectiveRole) setActiveRoleKey(d.effectiveRole); if (d.effectivePermissions?.length > 0) setPermissions(new Set(d.effectivePermissions)); setLoading(false); return; }
+        }
+        setUser(null); setLoading(false); return;
+      }
       const data = await res.json();
       setUser({ ...data, email: authUser.email });
       setAvailableCompanies(data.availableCompanies || []);
