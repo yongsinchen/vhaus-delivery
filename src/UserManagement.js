@@ -40,7 +40,8 @@ export default function UserManagement() {
       if (!isMaster && currentUser?.company_id) {
         params.set("company_id", currentUser.company_id);
       }
-      const res = await fetch(`${BACKEND}/admin/users/list?${params}`);
+      const token = (await supabase.auth.getSession()).data?.session?.access_token;
+      const res = await fetch(`${BACKEND}/admin/users/list?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
@@ -132,9 +133,10 @@ export default function UserManagement() {
 
     } else {
       // Create new user via backend
+      const token2 = (await supabase.auth.getSession()).data?.session?.access_token;
       const res = await fetch(`${BACKEND}/admin/users`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token2}` },
         body: JSON.stringify({
           name: form.name.trim(),
           email: form.email.trim(),
