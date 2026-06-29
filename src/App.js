@@ -1081,7 +1081,7 @@ export default function App() {
                       <Badge color="amber">Not Settled</Badge>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { if(window.confirm("Remove?")) fetch(`${BACKEND}/service-pending/${sp.id}`,{method:"DELETE"}).then(()=>loadServicePending()); }} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
+                      <button onClick={() => { if(window.confirm("Remove?")) authFetch(`${BACKEND}/service-pending/${sp.id}`,{method:"DELETE"}).then(()=>loadServicePending()); }} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
                       <button onClick={() => { setConvertModal(sp); setConvertRemark(""); }} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-xl hover:bg-amber-600">Create Service Case</button>
                     </div>
                   </div>
