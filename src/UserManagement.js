@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 
-const BACKEND = "https://vhaus-bot-production.up.railway.app";
+const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", is_active: true };
 
 export default function UserManagement() {
@@ -19,6 +19,12 @@ export default function UserManagement() {
   const [successMsg, setSuccessMsg] = useState("");
   const [pwModal, setPwModal] = useState(null); // { id, name }
   const [newPw, setNewPw] = useState("");
+  // Company access management
+  const [accessRows, setAccessRows] = useState([]);
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState("");
+  const [roles, setRoles] = useState([]);
+  const [addAccess, setAddAccess] = useState({ company_id: "", role_id: "" });
 
   const availableRoles = isMaster
     ? ["master", "manager", "company_admin", "salesman", "finance"]
@@ -60,6 +66,87 @@ export default function UserManagement() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const getAuthHeaders = async () => {
+    const token = (await supabase.auth.getSession()).data?.session?.access_token;
+    const cid = localStorage.getItem("pulseActiveCompanyId");
+    return { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) };
+  };
+
+  const loadRoles = async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/roles`, { headers });
+      if (res.ok) { const d = await res.json(); setRoles(d.roles || []); }
+    } catch (e) { console.error("loadRoles error:", e); }
+  };
+
+  const loadAccess = async (userId) => {
+    setAccessLoading(true); setAccessError("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/user-roles/${userId}`, { headers });
+      if (res.ok) { const d = await res.json(); setAccessRows(d.companyRoles || []); }
+      else { const d = await res.json(); setAccessError(d.error || "Failed to load access"); }
+    } catch (e) { setAccessError(e.message); }
+    setAccessLoading(false);
+  };
+
+  const handleAddAccess = async (userId) => {
+    if (!addAccess.company_id || !addAccess.role_id) return setAccessError("Select company and role");
+    setAccessError("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/user-roles`, {
+        method: "POST", headers,
+        body: JSON.stringify({ user_id: userId, company_id: addAccess.company_id, role_id: addAccess.role_id }),
+      });
+      const d = await res.json();
+      if (!res.ok) return setAccessError(d.error || "Failed to add access");
+      setAddAccess({ company_id: "", role_id: "" });
+      await loadAccess(userId);
+    } catch (e) { setAccessError(e.message); }
+  };
+
+  const handleUpdateAccessRole = async (accessId, userId, newRoleId) => {
+    setAccessError("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ role_id: newRoleId }),
+      });
+      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
+      await loadAccess(userId);
+    } catch (e) { setAccessError(e.message); }
+  };
+
+  const handleToggleAccess = async (accessId, userId, currentActive) => {
+    setAccessError("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ is_active: !currentActive }),
+      });
+      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
+      await loadAccess(userId);
+    } catch (e) { setAccessError(e.message); }
+  };
+
+  const handleRevokeAccess = async (accessId, userId) => {
+    if (!window.confirm("Revoke this company access?")) return;
+    setAccessError("");
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, { method: "DELETE", headers });
+      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to revoke"); }
+      await loadAccess(userId);
+    } catch (e) { setAccessError(e.message); }
+  };
+
+  // Current user's role level for escalation prevention
+  const myRoleLevel = currentUser?.role === "master" ? 100 : roles.find(r => r.role_key === (currentUser?.role || "").toUpperCase())?.level || 0;
+
   const openCreate = () => {
     setForm({
       ...EMPTY_FORM,
@@ -85,7 +172,12 @@ export default function UserManagement() {
     setEditId(u.id);
     setError("");
     setSuccessMsg("");
+    setAccessRows([]);
+    setAccessError("");
+    setAddAccess({ company_id: "", role_id: "" });
     setShowForm(true);
+    loadRoles();
+    loadAccess(u.id);
   };
 
   const handleSave = async () => {
@@ -323,6 +415,73 @@ export default function UserManagement() {
                     onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))}
                     className="w-4 h-4 accent-violet-600" />
                   <label htmlFor="is_active" className="text-sm text-gray-700">Active account — can log in</label>
+                </div>
+              )}
+
+              {/* Company Access — only on edit */}
+              {editId && (
+                <div className="border-t pt-4 mt-2">
+                  <label className="text-xs font-semibold text-gray-700 block mb-2">Company Access</label>
+                  {accessLoading ? (
+                    <p className="text-xs text-gray-400 py-2">Loading access...</p>
+                  ) : accessRows.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-2">No company access records. Primary company used as fallback.</p>
+                  ) : (
+                    <div className="space-y-2 mb-3">
+                      {accessRows.map(a => (
+                        <div key={a.id} className={`flex items-center gap-2 flex-wrap bg-gray-50 rounded-xl px-3 py-2 text-sm ${!a.is_active ? "opacity-50" : ""}`}>
+                          <span className="font-medium text-gray-800 text-xs flex-1 min-w-[100px]">{a.companies?.name || "—"}</span>
+                          <select value={a.role_id} onChange={e => handleUpdateAccessRole(a.id, editId, e.target.value)}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white">
+                            {roles.filter(r => !r.company_id && r.role_key && (isMaster || r.level <= myRoleLevel)).map(r => (
+                              <option key={r.id} value={r.id}>{r.role_name}</option>
+                            ))}
+                          </select>
+                          {a.is_default && <span className="text-[10px] bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full">Default</span>}
+                          <button onClick={() => handleToggleAccess(a.id, editId, a.is_active)}
+                            className={`text-[10px] px-2 py-0.5 rounded-lg border ${a.is_active ? "border-amber-200 text-amber-600 hover:bg-amber-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50"}`}>
+                            {a.is_active ? "Deactivate" : "Activate"}
+                          </button>
+                          {(isMaster || currentUser?.role === "manager") && !a.is_default && (
+                            <button onClick={() => handleRevokeAccess(a.id, editId)}
+                              className="text-[10px] px-2 py-0.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Revoke</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add new access */}
+                  <div className="flex items-end gap-2 flex-wrap bg-blue-50/50 rounded-xl p-3">
+                    <div className="flex-1 min-w-[120px]">
+                      <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Company</label>
+                      <select value={addAccess.company_id} onChange={e => setAddAccess(p => ({ ...p, company_id: e.target.value }))}
+                        className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                        <option value="">Select...</option>
+                        {companies.filter(c => !accessRows.find(a => a.company_id === c.id && !a.deleted_at)).map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[100px]">
+                      <label className="text-[10px] font-medium text-gray-500 block mb-0.5">Role</label>
+                      <select value={addAccess.role_id} onChange={e => setAddAccess(p => ({ ...p, role_id: e.target.value }))}
+                        className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+                        <option value="">Select...</option>
+                        {roles.filter(r => !r.company_id && r.role_key && (isMaster || r.level <= myRoleLevel)).map(r => (
+                          <option key={r.id} value={r.id}>{r.role_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button onClick={() => handleAddAccess(editId)} disabled={!addAccess.company_id || !addAccess.role_id}
+                      className="text-xs bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 disabled:opacity-40 font-medium whitespace-nowrap">
+                      + Add
+                    </button>
+                  </div>
+
+                  {accessError && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600 mt-2">{accessError}</div>
+                  )}
                 </div>
               )}
 
