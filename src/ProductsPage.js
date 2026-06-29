@@ -20,8 +20,8 @@ const EMPTY_PRODUCT = {
 };
 
 export default function ProductsPage() {
-  const { user } = useAuth();
-  const companyId = user?.company_id;
+  const { user, activeCompanyId } = useAuth();
+  const companyId = activeCompanyId || user?.company_id;
 
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);

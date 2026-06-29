@@ -16,8 +16,8 @@ const authHeaders = async () => {
 const EMPTY = { name: "", code: "", contact: "", cost_divisor: "", color_mode: "combined" };
 
 export default function SuppliersPage() {
-  const { user } = useAuth();
-  const companyId = user?.company_id;
+  const { user, activeCompanyId } = useAuth();
+  const companyId = activeCompanyId || user?.company_id;
 
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(false);

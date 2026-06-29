@@ -11,9 +11,9 @@ const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-20
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque"];
 
 export default function CustomerPage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0); // 0=customers, 1=aging
   const TABS = ["Customers", "Aging Report"];
 

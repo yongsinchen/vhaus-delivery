@@ -28,8 +28,8 @@ const STATUS_STYLE = {
 };
 
 export default function PurchaseOrdersPage() {
-  const { user } = useAuth();
-  const companyId = user?.company_id;
+  const { user, activeCompanyId } = useAuth();
+  const companyId = activeCompanyId || user?.company_id;
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);

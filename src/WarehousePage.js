@@ -12,9 +12,9 @@ const DO_STATUS_STYLE = { Processed: "bg-gray-100 text-gray-600", Reviewed: "bg-
 const PKG_STATUS = { pending: "bg-gray-100 text-gray-600", stored: "bg-blue-100 text-blue-700", picked: "bg-amber-100 text-amber-700", loaded: "bg-violet-100 text-violet-700", delivered: "bg-emerald-100 text-emerald-700" };
 
 export default function WarehousePage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
   // Shared

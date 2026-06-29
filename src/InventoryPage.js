@@ -19,8 +19,8 @@ const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveC
 const TABS = ["Stock Levels", "Movements", "Adjust", "Transfer", "Import"];
 
 export default function InventoryPage() {
-  const { user } = useAuth();
-  const companyId = user?.company_id;
+  const { user, activeCompanyId } = useAuth();
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
   const [inventory, setInventory] = useState([]);

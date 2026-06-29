@@ -16,9 +16,9 @@ const AGING_STYLE = {
 const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile"];
 
 export default function FinancePage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
   const [aging, setAging] = useState(null);

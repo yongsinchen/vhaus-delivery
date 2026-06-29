@@ -11,9 +11,9 @@ const TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
 export default function CommissionPage() {
-  const { user } = useAuth();
+  const { user, activeCompanyId } = useAuth();
   const toast = useToast();
-  const companyId = user?.company_id;
+  const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
   const [payout, setPayout] = useState(null);
