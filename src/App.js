@@ -648,8 +648,8 @@ export default function App() {
     return true;
   });
 
-  // ── Sidebar ─────────────────────────────────────────────────────
-  const Sidebar = ({ mobile = false }) => (
+  // ── Sidebar (render helper, not a component — avoids remount on re-render) ──
+  const renderSidebar = (mobile) => (
     <div className={`flex flex-col h-full ${mobile ? "" : "w-60"}`} style={{ background: "#0F0A1E" }}>
       <div className="px-5 py-6 border-b border-white/10">
         <div className="flex items-center gap-3">
@@ -1326,7 +1326,7 @@ export default function App() {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:flex flex-shrink-0 w-60 h-full">
-        <Sidebar />
+        {renderSidebar(false)}
       </div>
 
       {/* Mobile sidebar overlay */}
@@ -1334,7 +1334,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setSidebarOpen(false)} />
           <div className="absolute left-0 top-0 bottom-0 w-60 z-10">
-            <Sidebar mobile />
+            {renderSidebar(true)}
           </div>
         </div>
       )}
