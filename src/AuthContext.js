@@ -105,7 +105,9 @@ export function AuthProvider({ children }) {
       const res = await authFetch(`${API}/permissions/effective`);
       if (res.ok) {
         const data = await res.json();
-        setPermissions(data.permissions || {});
+        // permissions may be an array of strings or an object — normalize to Set-like lookup
+        const permsArr = Array.isArray(data.permissions) ? data.permissions : Object.keys(data.permissions || {});
+        setPermissions(new Set(permsArr));
         if (data.activeCompanyId) setActiveCompanyId(data.activeCompanyId);
         if (data.roleKey) setActiveRoleKey(data.roleKey);
       }
@@ -127,9 +129,14 @@ export function AuthProvider({ children }) {
         setActiveCompanyId(data.activeCompanyId);
         localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
       }
-      if (data.activeRoleKey) setActiveRoleKey(data.activeRoleKey);
-      // Load permissions after profile
-      setTimeout(loadPermissions, 100);
+      if (data.effectiveRole) setActiveRoleKey(data.effectiveRole);
+      else if (data.activeRoleKey) setActiveRoleKey(data.activeRoleKey);
+      // Store effectivePermissions from profile (array of action key strings)
+      if (data.effectivePermissions && data.effectivePermissions.length > 0) {
+        setPermissions(new Set(data.effectivePermissions));
+      } else {
+        setTimeout(loadPermissions, 100);
+      }
     } catch (e) {
       console.error("loadUserProfile error:", e);
       setUser(null);
@@ -146,8 +153,9 @@ export function AuthProvider({ children }) {
       if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to switch"); return false; }
       const data = await res.json();
       setActiveCompanyId(data.activeCompanyId);
-      setActiveRoleKey(data.activeRoleKey);
-      setPermissions(data.permissions || {});
+      setActiveRoleKey(data.effectiveRole || data.activeRoleKey);
+      const permsArr = Array.isArray(data.effectivePermissions) ? data.effectivePermissions : [];
+      setPermissions(new Set(permsArr));
       localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
       return true;
     } catch (e) { console.error("switchCompany error:", e); return false; }
@@ -181,11 +189,35 @@ export function AuthProvider({ children }) {
     setSession(null);
   };
 
+  // Backward-compat alias: old can() action names → permission engine action keys
+  const PERM_ALIASES = {
+    viewSummary: null, viewMonthly: "DASHBOARD_VIEW", viewService: "SERVICE_VIEW",
+    viewDaily: "DASHBOARD_VIEW", viewSchedule: "DELIVERY_VIEW", viewFlagged: "DASHBOARD_VIEW",
+    viewServicePending: "SERVICE_VIEW", viewDoReview: "SUPPLIER_DO_REVIEW",
+    viewAddOrder: "ORDERS_CREATE", viewFinance: "FINANCE_VIEW",
+    editSchedule: "DELIVERY_EDIT", addOrder: "ORDERS_CREATE",
+    editOrder: "ORDERS_EDIT", deleteOrder: "ORDERS_DELETE",
+    recordPayment: "FINANCE_RECORD_PAYMENT", manageUsers: "SYSTEM_MANAGE_USERS",
+    manageCompanies: "SYSTEM_MANAGE_COMPANIES",
+    convertServicePending: "SERVICE_CREATE", resolveDoReview: "SUPPLIER_DO_REVIEW",
+  };
+
   const canPerm = (actionKey) => {
     if (!user) return false;
-    if (user.role === "master" || activeRoleKey === "MASTER") return true;
-    const p = permissions[actionKey];
-    if (p) return p.allowed === true;
+    // super_admin / master bypass
+    if (user.role === "master" || activeRoleKey === "master") return true;
+    // Check permissions Set directly (for engine action keys like ORDERS_VIEW)
+    if (permissions instanceof Set && permissions.size > 0) {
+      // Direct key check (ORDERS_VIEW)
+      if (permissions.has(actionKey)) return true;
+      // Alias lookup (editOrder → ORDERS_EDIT)
+      const aliased = PERM_ALIASES[actionKey];
+      if (aliased === null) return true; // null = always allowed (viewSummary)
+      if (aliased && permissions.has(aliased)) return true;
+      // If we have permissions loaded and key not found, deny
+      return false;
+    }
+    // Fallback to old hardcoded can() when permissions not loaded yet
     return can(user, actionKey);
   };
 
