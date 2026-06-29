@@ -40,25 +40,17 @@ export default function UserManagement() {
     if (compErr) console.error("Load companies error:", compErr);
     setCompanies(comps || []);
 
-    // Load users via backend (service role bypasses RLS)
+    // Load users via backend
     try {
-      const params = new URLSearchParams();
-      if (!isMaster && currentUser?.company_id) {
-        params.set("company_id", currentUser.company_id);
-      }
-      const token = (await supabase.auth.getSession()).data?.session?.access_token;
-      const res = await fetch(`${BACKEND}/admin/users/list?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/admin/users/list`, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Load users error:", e);
-      // Fallback: try direct Supabase query
-      let q = supabase.from("users").select("*, companies(name, code)").order("name");
-      if (!isMaster && currentUser?.company_id) q = q.eq("company_id", currentUser.company_id);
-      const { data, error: uErr } = await q;
-      if (uErr) { setError("Failed to load users: " + uErr.message); }
-      else setUsers(data || []);
+      setError("Failed to load users: " + e.message);
+      setUsers([]);
     }
 
     setLoading(false);
