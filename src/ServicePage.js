@@ -22,11 +22,15 @@ export default function ServicePage() {
   const companyId = activeCompanyId || user?.company_id;
 
   const [services, setServices] = useState([]);
+  const [pending, setPending] = useState([]);
+  const [tab, setTab] = useState("cases"); // "cases" | "pending"
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState("");
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [convertModal, setConvertModal] = useState(null);
+  const [convertRemark, setConvertRemark] = useState("");
 
   // Create form
   const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "" });
@@ -46,7 +50,14 @@ export default function ServicePage() {
     setLoading(false);
   }, [companyId, filterStatus]);
 
-  useEffect(() => { loadServices(); }, [loadServices]);
+  const loadPending = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/service-pending?company_id=${companyId}`);
+    const d = await res.json();
+    setPending(Array.isArray(d) ? d : []);
+  }, [companyId]);
+
+  useEffect(() => { loadServices(); loadPending(); }, [loadServices, loadPending]);
   useEffect(() => {
     if (companyId) af(`${API}/suppliers?company_id=${companyId}`).then(r => r.json()).then(d => setSuppliers(d.suppliers || []));
   }, [companyId]);
@@ -103,29 +114,96 @@ export default function ServicePage() {
     if (detail?.service) openDetail(detail.service);
   };
 
+  const deleteService = async (id) => {
+    if (!window.confirm("Delete this service case? This will also remove all legs and part claims.")) return;
+    const res = await af(`${API}/service-cases/${id}`, { method: "DELETE" });
+    if (res.ok) { toast.success("Service case deleted"); setDetail(null); loadServices(); }
+    else { const d = await res.json(); toast.error(d.error || "Failed to delete"); }
+  };
+
+  const convertPending = async (sp) => {
+    const res = await af(`${API}/service-pending/${sp.id}/convert`, {
+      method: "POST", body: JSON.stringify({ remark: convertRemark, service_type: 1 }),
+    });
+    const d = await res.json();
+    if (d.service) { toast.success("Service case created"); setConvertModal(null); setConvertRemark(""); loadServices(); loadPending(); }
+    else toast.error(d.error || "Failed to convert");
+  };
+
+  const removePending = async (id) => {
+    if (!window.confirm("Remove this pending service?")) return;
+    const res = await af(`${API}/service-pending/${id}`, { method: "DELETE" });
+    if (res.ok) { toast.success("Removed"); loadPending(); }
+    else toast.error("Failed to remove");
+  };
+
   return (
     <div className="p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Services</h1>
         <div className="flex gap-2">
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-            <option value="">All Status</option>
-            {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          {tab === "cases" && (
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="">All Status</option>
+              {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
           <button onClick={() => setShowCreate(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ New Service Case</button>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2">
+        <button onClick={() => setTab("cases")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "cases" ? "bg-violet-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+          Service Cases {services.length > 0 && <span className="ml-1 text-xs opacity-75">({services.length})</span>}
+        </button>
+        <button onClick={() => setTab("pending")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "pending" ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-amber-300"}`}>
+          Pending {pending.length > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pending.length}</span>}
+        </button>
+      </div>
+
+      {/* Pending tab */}
+      {tab === "pending" && (
+        <div className="space-y-2">
+          {pending.length === 0 && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-4xl mb-3">✅</div>
+              <p className="font-medium">No pending services</p>
+              <p className="text-xs mt-1">Service complaints from orders will appear here</p>
+            </div>
+          )}
+          {pending.map(sp => (
+            <div key={sp.id} className="bg-white rounded-2xl border border-amber-200 shadow-sm p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-violet-700 text-sm">SO {sp.so_number}</span>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pending</span>
+                  </div>
+                  <p className="text-sm text-gray-800 mt-1">{sp.customer_name}</p>
+                  {sp.remark && <p className="text-xs text-gray-500 mt-0.5">{sp.remark}</p>}
+                  <p className="text-xs text-gray-400 mt-1">{sp.created_at ? new Date(sp.created_at).toLocaleDateString("en-MY") : ""}</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => removePending(sp.id)} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
+                  <button onClick={() => { setConvertModal(sp); setConvertRemark(""); }} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-xl hover:bg-amber-600">Create Case</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Service list */}
-      {loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-      {!loading && services.length === 0 && (
+      {tab === "cases" && loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
+      {tab === "cases" && !loading && services.length === 0 && (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">🔧</div>
           <p className="font-medium">No service cases</p>
           <p className="text-xs mt-1">Create one from an order or click "+ New Service Case"</p>
         </div>
       )}
-      <div className="space-y-2">
+      {tab === "cases" && <div className="space-y-2">
         {services.map(svc => (
           <div key={svc.id} onClick={() => openDetail(svc)}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
@@ -152,7 +230,31 @@ export default function ServicePage() {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
+
+      {/* Convert Pending Modal */}
+      {convertModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="px-6 py-4 border-b">
+              <h3 className="font-bold text-gray-900">Create Service Case</h3>
+              <p className="text-xs text-gray-500 mt-0.5">From <b>SO {convertModal.so_number}</b> — {convertModal.customer_name}</p>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Remark / Issue</label>
+                <textarea value={convertRemark} onChange={e => setConvertRemark(e.target.value)} rows={3}
+                  placeholder="Describe the issue..."
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex gap-3 justify-end">
+              <button onClick={() => setConvertModal(null)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
+              <button onClick={() => convertPending(convertModal)} className="px-5 py-2 text-sm rounded-xl bg-amber-500 text-white font-medium hover:bg-amber-600">Create Case</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Modal */}
       {showCreate && (
@@ -233,6 +335,8 @@ export default function ServicePage() {
                       className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
                       {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
+                    <button onClick={() => deleteService(detail.service.id)}
+                      className="ml-auto text-xs px-3 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Delete</button>
                   </div>
 
                   {/* Description */}
