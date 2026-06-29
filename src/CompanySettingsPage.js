@@ -19,10 +19,10 @@ const getToken = async () => {
   }
   return session?.access_token || "";
 };
-const authHeaders = async () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${await getToken()}`,
-});
+const authHeaders = async () => {
+  const cid = localStorage.getItem("pulseActiveCompanyId");
+  return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) };
+};
 
 const TABS = ["Company Info", "Branches", "Warehouses", "Operations", "Categories", "Options Library"];
 

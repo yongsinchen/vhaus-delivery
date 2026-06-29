@@ -14,7 +14,7 @@ const getToken = async () => {
   }
   return s?.access_token || "";
 };
-const authHeaders = async () => ({ "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` });
+const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveCompanyId"); return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) }; };
 
 const TABS = ["Stock Levels", "Movements", "Adjust", "Transfer", "Import"];
 

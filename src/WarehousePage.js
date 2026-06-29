@@ -5,7 +5,7 @@ let jsQR = null;
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { let { data } = await supabase.auth.getSession(); let s = data?.session; if (s?.expires_at && s.expires_at * 1000 < Date.now() + 60000) { const { data: r } = await supabase.auth.refreshSession(); s = r?.session || s; } return s?.access_token || ""; };
-const authHeaders = async () => ({ "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` });
+const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveCompanyId"); return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) }; };
 
 const TABS = ["Receive DOs", "Scan & Store", "Pick List", "Loading"];
 const DO_STATUS_STYLE = { Processed: "bg-gray-100 text-gray-600", Reviewed: "bg-blue-100 text-blue-700", Labeled: "bg-violet-100 text-violet-700", Completed: "bg-emerald-100 text-emerald-700" };

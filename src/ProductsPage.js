@@ -9,10 +9,10 @@ const getToken = async () => {
   return data?.session?.access_token || "";
 };
 
-const authHeaders = async () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${await getToken()}`,
-});
+const authHeaders = async () => {
+  const cid = localStorage.getItem("pulseActiveCompanyId");
+  return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) };
+};
 
 const EMPTY_PRODUCT = {
   code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
