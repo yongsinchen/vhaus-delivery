@@ -397,6 +397,7 @@ export default function App() {
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
   const [orders, setOrders] = useState([]);
+  const [allCompanyOrders, setAllCompanyOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [switchingCompany, setSwitchingCompany] = useState(false);
@@ -465,6 +466,7 @@ export default function App() {
     const { data, error: err } = await q;
     if (err) { setError("Failed to load orders: " + err.message); setLoading(false); return; }
     const all = (data || []).map(fromDb);
+    setAllCompanyOrders(all);
     if (isSalesman && user?.salesman_name) {
       const name = user.salesman_name.toLowerCase().trim();
       setOrders(all.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name)));
@@ -827,10 +829,11 @@ export default function App() {
           const weeks = [];
           for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
           const getDs = d => d ? `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
-          const calSalesmen = [...new Set(orders.map(o => o.salesman).filter(Boolean))].sort();
+          const calOrders = isSalesman ? allCompanyOrders : orders;
+          const calSalesmen = [...new Set(calOrders.map(o => o.salesman).filter(Boolean))].sort();
           // Pre-build date→orders map (O(n) instead of O(n*days))
           const ordersByDate = {};
-          orders.forEach(o => { if (o.deliveryDate) { if (!ordersByDate[o.deliveryDate]) ordersByDate[o.deliveryDate] = []; ordersByDate[o.deliveryDate].push(o); } });
+          calOrders.forEach(o => { if (o.deliveryDate) { if (!ordersByDate[o.deliveryDate]) ordersByDate[o.deliveryDate] = []; ordersByDate[o.deliveryDate].push(o); } });
           const ordersOnDay = d => ordersByDate[getDs(d)] || [];
           const isMyOrder = o => {
             if (!calSalesman) return false;
