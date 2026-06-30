@@ -188,16 +188,20 @@ export default function UserManagement() {
 
     if (editId) {
       // Update profile only
-      const { error: updateErr } = await supabase.from("users").update({
-        name: form.name.trim(),
-        role: form.role,
-        company_id: form.company_id || null,
-        telegram_id: form.telegram_id.trim() || null,
-        salesman_name: form.salesman_name.trim() || null,
-        is_active: form.is_active,
-      }).eq("id", editId);
-
-      if (updateErr) { setError("Update failed: " + updateErr.message); setSaving(false); return; }
+      const headers = await getAuthHeaders();
+      const updateRes = await fetch(`${BACKEND}/admin/users/${editId}`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({
+          name: form.name.trim(),
+          role: form.role,
+          company_id: form.company_id || null,
+          telegram_id: form.telegram_id.trim() || null,
+          salesman_name: form.salesman_name.trim() || null,
+          is_active: form.is_active,
+        }),
+      });
+      const updateData = await updateRes.json();
+      if (!updateRes.ok || !updateData.success) { setError("Update failed: " + (updateData.error || `HTTP ${updateRes.status}`)); setSaving(false); return; }
 
       // Update password if provided
       if (form.password.trim()) {
@@ -245,9 +249,16 @@ export default function UserManagement() {
   };
 
   const toggleActive = async u => {
-    const { error } = await supabase.from("users").update({ is_active: !u.is_active }).eq("id", u.id);
-    if (error) alert("Failed: " + error.message);
-    else loadData();
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`${BACKEND}/admin/users/${u.id}`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ is_active: !u.is_active }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) return alert("Failed: " + (d.error || `HTTP ${res.status}`));
+      loadData();
+    } catch (e) { alert("Failed: " + e.message); }
   };
 
   const roleBadge = role => ({
