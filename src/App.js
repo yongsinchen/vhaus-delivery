@@ -19,6 +19,7 @@ const CustomerPage = lazy(() => import("./CustomerPage"));
 const FinancePage = lazy(() => import("./FinancePage"));
 const CommissionPage = lazy(() => import("./CommissionPage"));
 const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
+const OutstandingBalancePage = lazy(() => import("./OutstandingBalancePage"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -73,6 +74,7 @@ const NAV = [
   { id: "deliveries", label: "Deliveries",       icon: "⬡",  canKey: "viewSchedule" },
   { id: "company-deliveries", label: "Company Deliveries", icon: "⬡", canKey: null },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
+  { id: "balance",    label: "Outstanding Balance", icon: "💰", canKey: null },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
   { id: "products",   label: "Products",         icon: "📦", canKey: null, manageOnly: true },
@@ -496,6 +498,16 @@ export default function App() {
     setServicesLoading(false);
   };
 
+  const [estCommission, setEstCommission] = useState(null);
+  const loadCommissionEstimate = async () => {
+    if (!isSalesman) return;
+    try {
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      const d = await authFetch(`${BACKEND}/commission-payout?payout_month=${month}`).then(r => r.json());
+      setEstCommission(Number(d?.total) || 0);
+    } catch (e) { console.error(e); }
+  };
+
   const loadSupplierDOs = async () => {
     setSupplierDOsLoading(true);
     try {
@@ -517,6 +529,7 @@ export default function App() {
     loadServicePending();
     loadDoReview();
     loadServices();
+    loadCommissionEstimate();
     if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
   }, [user?.id, companyId, user?.role]); // eslint-disable-line
 
@@ -644,6 +657,7 @@ export default function App() {
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
     if (n.id === "company-deliveries") return effectiveRole === "salesman";
+    if (n.id === "balance") return isSalesman;
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation"].includes(effectiveRole);
     if (n.id === "commission") return ["master","manager","company_admin","salesman"].includes(effectiveRole);
     if (n.manageOnly) return ["master","manager","company_admin"].includes(effectiveRole);
@@ -673,7 +687,7 @@ export default function App() {
           <button key={n.id} onClick={() => { setPage(n.id); if(mobile) setSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${page===n.id ? "bg-violet-600 text-white shadow-lg shadow-violet-900/50" : "text-purple-300 hover:bg-white/5 hover:text-white"}`}>
             <span className="text-base w-5 text-center">{n.icon}</span>
-            <span>{n.label}</span>
+            <span>{n.id === "orders" && isSalesman ? "My Orders" : n.label}</span>
             {n.id === "operations" && (servicePending.length + doReview.length) > 0 && (
               <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{servicePending.length + doReview.length}</span>
             )}
@@ -708,11 +722,18 @@ export default function App() {
           <h1 className="text-2xl font-bold text-gray-900">Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, {user?.name?.split(" ")[0]} 👋</h1>
           <p className="text-gray-400 text-sm mt-1">{new Date().toLocaleDateString("en-MY", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</p>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage("deliveries")} />
+        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-3`}>
+          <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage(isSalesman ? "company-deliveries" : "deliveries")} />
           <StatCard label="Ready to Deliver" value={readyOrders.filter(o=>!o.deliveryDate).length} sub="items arrived, no date" onClick={() => setPage("ready")} />
-          <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} />
-          <StatCard label="Flagged Orders" value={flaggedOrders.length} sub="need attention" onClick={() => setPage("orders")} />
+          <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={isSalesman ? () => setPage("balance") : undefined} />
+          {isSalesman ? (
+            <StatCard label="Pending Service Cases" value={services.filter(s => s.status !== "Serviced").length} sub="open cases" onClick={() => setPage("services")} />
+          ) : (
+            <StatCard label="Flagged Orders" value={flaggedOrders.length} sub="need attention" onClick={() => setPage("orders")} />
+          )}
+          {isSalesman && (
+            <StatCard label="Est. Commission This Month" value={estCommission === null ? "…" : `RM ${estCommission.toLocaleString()}`} sub="eligible + pending" onClick={() => setPage("commission")} />
+          )}
         </div>
 
         {/* Today's orders */}
@@ -964,6 +985,9 @@ export default function App() {
         <DeliverySchedule readOnly={true} companyId={companyId} isMaster={false} currentUser={user} />
       </div>
     );
+
+    // OUTSTANDING BALANCE (salesman collection dashboard)
+    if (page === "balance") return <OutstandingBalancePage companyId={companyId} />;
 
     // READY TO DELIVER
     if (page === "ready") return (
