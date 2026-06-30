@@ -194,13 +194,19 @@ export default function ProductsPage() {
     setEditId(p.id);
     setForm({
       code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "", size: p.size || "",
-      supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || "",
+      supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || p.organization_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
       is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
     });
     setFormError("");
     setDrawerOpen(true);
   };
+
+  // Categories collapse to org-level for companies in a catalogue group —
+  // GET /categories returns isOrgLevel:true on every item in that case, and
+  // products must then be saved with organization_category_id instead of
+  // category_id (see server.js POST/PUT /products).
+  const categoriesAreOrgLevel = categories.length > 0 && categories[0].isOrgLevel === true;
 
   const saveProduct = async () => {
     if (!form.code.trim() || !form.name.trim()) { setFormError("Code and name are required"); return; }
@@ -209,7 +215,9 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const body = {
       code: form.code, name: form.name, description: form.description || null, color: form.color || null, size: form.size || null,
-      supplier_id: form.supplier_id || null, category_id: form.category_id || null,
+      supplier_id: form.supplier_id || null,
+      category_id: categoriesAreOrgLevel ? null : (form.category_id || null),
+      organization_category_id: categoriesAreOrgLevel ? (form.category_id || null) : null,
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
       is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0,
@@ -286,7 +294,10 @@ export default function ProductsPage() {
   const applyBulk = async () => {
     const set = {};
     if (bulkForm.supplier) set.supplier_id = bulkForm.supplier_id || null;
-    if (bulkForm.category) set.category_id = bulkForm.category_id || null;
+    if (bulkForm.category) {
+      if (categoriesAreOrgLevel) set.organization_category_id = bulkForm.category_id || null;
+      else set.category_id = bulkForm.category_id || null;
+    }
     if (bulkForm.active) set.is_active = bulkForm.is_active;
     if (bulkForm.setCost && bulkForm.unit_cost !== "") set.unit_cost = Number(bulkForm.unit_cost);
     if (bulkForm.setPrice && bulkForm.unit_price !== "") set.unit_price = Number(bulkForm.unit_price);
@@ -610,7 +621,7 @@ export default function ProductsPage() {
                 <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
                 <td className="px-4 py-3 text-gray-500 text-xs hidden lg:table-cell">{p.size || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.suppliers?.name || "—"}</td>
-                <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.product_categories?.name || "—"}</td>
+                <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.product_categories?.name || p.organization_categories?.name || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">{p.color || "—"}</td>
                 <td className="px-4 py-3 text-right text-gray-600">{p.unit_cost != null ? p.unit_cost.toFixed(2) : "—"}</td>
                 <td className="px-4 py-3 text-right text-gray-900 font-medium">{p.unit_price != null ? p.unit_price.toFixed(2) : "—"}</td>
