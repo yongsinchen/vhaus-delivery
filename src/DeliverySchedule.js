@@ -52,7 +52,7 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
 
   return (
     <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
-      draggable onDragStart={onDragStart}>
+      draggable={!isLocked} onDragStart={() => !isLocked && onDragStart()}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-purple-700 text-xs">{trip.so_number}</span>
@@ -858,9 +858,9 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
           <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
-          <button onClick={loadSuggestions} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>
-          <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>
-          <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>
+          {!readOnly && <button onClick={loadSuggestions} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
+          {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
+          {!readOnly && <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>}
         </div>
       </div>
 
@@ -992,7 +992,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                 : combinedUnassigned.map(item => {
                     if (item._type === "trip") {
                       return (
-                        <TripCard key={`trip-${item.id}`} trip={item} teams={teams}
+                        <TripCard key={`trip-${item.id}`} trip={item} teams={teams} isLocked={readOnly}
                           onAssign={assignItem} onDragStart={() => setDragOrder({ ...item, _type: "trip" })} />
                       );
                     }
@@ -1000,7 +1000,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                       const items = parseItems(item.items);
                       return (
                         <div key={`service-${item.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
-                          draggable onDragStart={() => setDragOrder({ ...item, _type: "order" })}>
+                          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1">
                               <span className="text-xs bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
@@ -1014,7 +1014,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                           {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
                           {item.service_note && <p className="text-xs text-purple-600 mt-0.5 truncate">{item.service_note}</p>}
                           <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                          {teams.length > 0 && (
+                          {!readOnly && teams.length > 0 && (
                             <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
                               className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
                               <option value="">Assign to team...</option>
@@ -1030,7 +1030,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                     const items = parseItems(item.items);
                     return (
                       <div key={`order-${item.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
-                        draggable onDragStart={() => setDragOrder({ ...item, _type: "order" })}>
+                        draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
                           {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
@@ -1039,7 +1039,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                         <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
                         {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
                         <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                        {teams.length > 0 && (
+                        {!readOnly && teams.length > 0 && (
                           <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
                             className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
                             <option value="">Assign to team...</option>
@@ -1073,7 +1073,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                   return (
                     <div key={`usvc-${item.id}`}
                       className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
-                      draggable onDragStart={() => setDragOrder({ ...item, _type: "order", _setDate: true })}>
+                      draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order", _setDate: true })}>
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
@@ -1086,7 +1086,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                       <p className="text-xs text-gray-400 leading-tight truncate">{item.address}</p>
                       {item.service_note && <p className="text-xs text-violet-600 mt-0.5 truncate">{item.service_note}</p>}
                       <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                      {teams.length > 0 && (
+                      {!readOnly && teams.length > 0 && (
                         <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order", true); }}
                           className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
                           <option value="">Schedule to team...</option>
@@ -1114,13 +1114,13 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {teams.map(team => {
               const teamStatus = deriveTeamStatus(team.schedules);
-              const isLocked = teamStatus === "Out for Delivery" || teamStatus === "Delivered";
+              const isLocked = readOnly || teamStatus === "Out for Delivery" || teamStatus === "Delivered";
               const isConfirmed = teamStatus === "Confirmed";
               return (
                 <div key={team.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
-                  onDragOver={e => { e.preventDefault(); }}
+                  onDragOver={e => { if (!readOnly) e.preventDefault(); }}
                   onDrop={() => {
-                    if (!dragOrder || isLocked) return;
+                    if (readOnly || !dragOrder || isLocked) return;
                     assignItem(team.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
                     setDragOrder(null);
                   }}>
@@ -1138,25 +1138,29 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                       </div>
                       <div className="flex items-center gap-2 flex-wrap justify-end">
                         <div className="flex flex-col items-end gap-1">
-                          <select value={teamStatus}
-                            onChange={e => updateAllSchedulesStatus(team.id, e.target.value)}
-                            className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(teamStatus)}`}>
-                            {isLocked
-                              ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
-                              : isConfirmed
-                              ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
-                              : ["Pending","Confirmed"].concat(team.team_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
-                            }
-                          </select>
-                          {!isLocked && !isConfirmed && team.team_date !== todayMY && (
+                          {readOnly ? (
+                            <span className={`text-xs rounded px-2 py-0.5 font-medium ${statusColor(teamStatus)}`}>{teamStatus}</span>
+                          ) : (
+                            <select value={teamStatus}
+                              onChange={e => updateAllSchedulesStatus(team.id, e.target.value)}
+                              className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(teamStatus)}`}>
+                              {isLocked
+                                ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
+                                : isConfirmed
+                                ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
+                                : ["Pending","Confirmed"].concat(team.team_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
+                              }
+                            </select>
+                          )}
+                          {!readOnly && !isLocked && !isConfirmed && team.team_date !== todayMY && (
                             <p className="text-xs text-orange-400 text-right">Out for Delivery only on delivery date.</p>
                           )}
-                          {isConfirmed && (
+                          {!readOnly && isConfirmed && (
                             <p className="text-xs text-green-600 text-right font-medium">Confirmed — set to Pending to edit</p>
                           )}
                         </div>
                         <button onClick={() => setPrintTeam({ ...team, team_date: team.team_date || date })} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">Print</button>
-                        {!isLocked && !isConfirmed && (
+                        {!readOnly && !isLocked && !isConfirmed && (
                           <button onClick={() => deleteTeam(team.id)} className="text-gray-400 hover:text-red-500 text-xs">Delete</button>
                         )}
                       </div>

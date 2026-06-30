@@ -71,6 +71,7 @@ const NAV = [
   { id: "overview",   label: "Overview",         icon: "⊞",  canKey: null },
   { id: "orders",     label: "Orders",           icon: "◫",  canKey: "viewMonthly" },
   { id: "deliveries", label: "Deliveries",       icon: "⬡",  canKey: "viewSchedule" },
+  { id: "company-deliveries", label: "Company Deliveries", icon: "⬡", canKey: null },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
@@ -642,6 +643,7 @@ export default function App() {
     if (n.id === "operations") return can("viewServicePending") || can("viewDoReview");
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
+    if (n.id === "company-deliveries") return effectiveRole === "salesman";
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation"].includes(effectiveRole);
     if (n.id === "commission") return ["master","manager","company_admin","salesman"].includes(effectiveRole);
     if (n.manageOnly) return ["master","manager","company_admin"].includes(effectiveRole);
@@ -952,6 +954,14 @@ export default function App() {
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Deliveries</h1>
         <DeliverySchedule readOnly={!can("editSchedule")} companyId={companyId} isMaster={isMaster} currentUser={user} />
+      </div>
+    );
+
+    // COMPANY DELIVERIES (salesman read-only view of all company routes)
+    if (page === "company-deliveries") return (
+      <div>
+        <h1 className="text-xl font-bold text-gray-900 mb-4">Company Deliveries</h1>
+        <DeliverySchedule readOnly={true} companyId={companyId} isMaster={false} currentUser={user} />
       </div>
     );
 
