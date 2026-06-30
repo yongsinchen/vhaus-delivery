@@ -10,6 +10,26 @@ const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFract
 const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
+// Explain why a commission hasn't been paid yet, so salesmen never have to wonder.
+function commissionReason(c) {
+  if (c.status === "paid") return null;
+  if (c.status === "held") {
+    const hold = (c.wrong_item_holds || c._holds || []).find(h => h.status === "held") || (c.wrong_item_holds || c._holds || [])[0];
+    const reasons = { wrong_item: "Wrong Item Hold", cancelled: "Cancelled Order" };
+    return hold ? (reasons[hold.hold_reason] || `Held: ${hold.hold_reason || "under review"}`) : "Wrong Item Hold";
+  }
+  if (c.orders?.status === "Cancelled") return "Cancelled Order";
+  if (c.status === "pending") {
+    if (!c.deposit_met) return "Waiting for Deposit";
+    return "Pending Approval";
+  }
+  if (c.status === "eligible") {
+    if (c.orders?.balance > 0) return "Eligible — awaiting balance collection before payout";
+    return null;
+  }
+  return null;
+}
+
 export default function CommissionPage() {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
@@ -211,15 +231,18 @@ export default function CommissionPage() {
                 <div className="mb-2">
                   <p className="text-xs font-bold text-amber-600 mb-1">PENDING DEPOSIT &lt; 30% ({pending.length})</p>
                   {pending.map(c => (
-                    <div key={c.id} className="flex items-center justify-between text-xs py-1.5 border-t border-gray-50 opacity-60">
-                      <div>
-                        <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
-                        <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                    <div key={c.id} className="text-xs py-1.5 border-t border-gray-50 opacity-80">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
+                          <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-600">⏳ {c.rate_pct}%</span>
+                          <span className="text-gray-400">{money(c.commission_amt)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-amber-600">⏳ {c.rate_pct}%</span>
-                        <span className="text-gray-400">{money(c.commission_amt)}</span>
-                      </div>
+                      <p className="text-amber-600 mt-0.5">{commissionReason(c)}</p>
                     </div>
                   ))}
                 </div>
@@ -233,8 +256,11 @@ export default function CommissionPage() {
                 </div>
               ))}
               {u.holds.filter(h => h.status === "held").length > 0 && (
-                <div className="text-xs text-red-600 font-medium py-1 border-t border-gray-50">
-                  🔒 {u.holds.filter(h => h.status === "held").length} hold(s) — {money(u.holds.filter(h => h.status === "held").reduce((s, h) => s + Number(h.held_amt), 0))} withheld
+                <div className="text-xs text-red-600 py-1 border-t border-gray-50">
+                  <p className="font-medium">🔒 {u.holds.filter(h => h.status === "held").length} hold(s) — {money(u.holds.filter(h => h.status === "held").reduce((s, h) => s + Number(h.held_amt), 0))} withheld</p>
+                  {u.holds.filter(h => h.status === "held").map(h => (
+                    <p key={h.id} className="text-red-500">{h.hold_reason === "wrong_item" ? "Wrong Item Hold" : h.hold_reason === "cancelled" ? "Cancelled Order" : `Held: ${h.hold_reason || "under review"}`}</p>
+                  ))}
                 </div>
               )}
             </div>
@@ -245,15 +271,17 @@ export default function CommissionPage() {
       {/* TAB 1: All Commissions */}
       {tab === 1 && (
         <div className="space-y-2">
-          <div className="flex gap-2 mb-2">
-            <button onClick={async () => {
-              toast.info("Recalculating all commissions...");
-              const res = await af(`${API}/commissions/recalculate-all`, { method: "POST" });
-              const d = await res.json();
-              toast.success(`${d.calculated}/${d.total} orders calculated`);
-              loadCommissions();
-            }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
-          </div>
+          {!isSalesman && (
+            <div className="flex gap-2 mb-2">
+              <button onClick={async () => {
+                toast.info("Recalculating all commissions...");
+                const res = await af(`${API}/commissions/recalculate-all`, { method: "POST" });
+                const d = await res.json();
+                toast.success(`${d.calculated}/${d.total} orders calculated`);
+                loadCommissions();
+              }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
+            </div>
+          )}
           {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
           {!loading && commissions.length === 0 && <div className="text-center py-8 text-gray-400">No commissions yet. Set up rules first, then click "Recalculate All Orders".</div>}
           {commissions.map(c => (
@@ -268,13 +296,16 @@ export default function CommissionPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(c.net_amount)}
                 </p>
+                {commissionReason(c) && <p className="text-xs text-amber-600 mt-0.5">{commissionReason(c)}</p>}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <p className="text-sm font-bold text-gray-900">{money(c.commission_amt)}</p>
-                <div className="flex gap-1">
-                  <button onClick={() => addAdjustment(c.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" title="Adjust">±</button>
-                  {c.status !== "held" && <button onClick={() => addHold(c.id)} className="text-xs px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Hold">🔒</button>}
-                </div>
+                {!isSalesman && (
+                  <div className="flex gap-1">
+                    <button onClick={() => addAdjustment(c.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" title="Adjust">±</button>
+                    {c.status !== "held" && <button onClick={() => addHold(c.id)} className="text-xs px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Hold">🔒</button>}
+                  </div>
+                )}
               </div>
             </div>
           ))}
