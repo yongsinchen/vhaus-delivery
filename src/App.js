@@ -653,7 +653,7 @@ export default function App() {
 
   // ── Nav items visible to this user ──────────────────────────────
   const visibleNav = NAV.filter(n => {
-    if (n.id === "operations") return can("viewServicePending") || can("viewDoReview");
+    if (n.id === "operations") return !isSalesman && (can("viewServicePending") || can("viewDoReview"));
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
     if (n.id === "company-deliveries") return effectiveRole === "salesman";
