@@ -68,7 +68,7 @@ export default function CommissionPage() {
   useEffect(() => { if (tab === 1) loadCommissions(); }, [tab, loadCommissions]);
   useEffect(() => { if (tab === 2) {
     loadRules();
-    af(`${API}/admin/users/list?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen((Array.isArray(d) ? d : []).filter(u => u.salesman_name && u.is_active)));
+    af(`${API}/salesman-names?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen(d.salesmen || []));
     af(`${API}/company-settings?company_id=${companyId}`).then(r=>r.json()).then(d => { try { const ch = JSON.parse(d.settings?.sales_channels || '["branch"]'); if (Array.isArray(ch)) setChannels(ch); } catch {} });
   } }, [tab, loadRules, companyId]);
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);

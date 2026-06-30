@@ -355,8 +355,8 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!companyId) return;
     authHeaders().then(h => fetch(`${API}/branches?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => setBranches(d.branches || []));
-    authHeaders().then(h => fetch(`${API}/admin/users/list?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
-      const names = (d || []).filter(u => u.salesman_name && u.is_active).map(u => u.salesman_name);
+    authHeaders().then(h => fetch(`${API}/salesman-names?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
+      const names = (d.salesmen || []).map(s => s.salesman_name).filter(Boolean);
       setSalesmen([...new Set(names)].sort());
     });
     authHeaders().then(h => fetch(`${API}/spec-options?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
