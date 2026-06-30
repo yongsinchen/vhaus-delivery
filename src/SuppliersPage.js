@@ -20,6 +20,7 @@ export default function SuppliersPage() {
   const companyId = activeCompanyId || user?.company_id;
 
   const [suppliers, setSuppliers] = useState([]);
+  const [orgSupplierMap, setOrgSupplierMap] = useState({}); // organization_supplier_id -> { companyCount, isShared, name }
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -30,17 +31,45 @@ export default function SuppliersPage() {
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState(null);
 
+  // Linked-companies drawer (read-only Phase 2 view)
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [linksData, setLinksData] = useState(null);
+
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
     const token = await getToken();
-    const res = await fetch(`${API}/suppliers?company_id=${companyId}`, { headers: { Authorization: `Bearer ${token}` } });
-    const d = await res.json();
-    setSuppliers(d.suppliers || []);
+    const headers = { Authorization: `Bearer ${token}` };
+    const cid = localStorage.getItem("pulseActiveCompanyId");
+    if (cid) headers["X-Company-ID"] = cid;
+    const [supRes, orgRes] = await Promise.all([
+      fetch(`${API}/suppliers?company_id=${companyId}`, { headers }),
+      fetch(`${API}/organization-suppliers`, { headers }),
+    ]);
+    const supData = await supRes.json();
+    const orgData = await orgRes.json();
+    setSuppliers(supData.suppliers || []);
+    const map = {};
+    for (const o of (orgData.organizationSuppliers || [])) {
+      map[o.id] = { companyCount: o.companyCount, isShared: o.isShared, name: o.name };
+    }
+    setOrgSupplierMap(map);
     setLoading(false);
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const openLinks = async (orgSupplierId) => {
+    setLinksOpen(true);
+    setLinksLoading(true);
+    setLinksData(null);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-suppliers/${orgSupplierId}/companies`, { headers });
+    const d = await res.json();
+    setLinksData(d);
+    setLinksLoading(false);
+  };
 
   const openAdd = () => { setEditId(null); setForm(EMPTY); setError(""); setDrawerOpen(true); };
   const openEdit = (s) => {
@@ -114,13 +143,17 @@ export default function SuppliersPage() {
               <th className="px-4 py-3 hidden sm:table-cell">Code</th>
               <th className="px-4 py-3 hidden md:table-cell">Contact</th>
               <th className="px-4 py-3">Cost Rule</th>
+              <th className="px-4 py-3 hidden lg:table-cell">Scope</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {loading && [1,2,3,4].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-24" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td></tr>)}
-            {!loading && filtered.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No suppliers found</td></tr>}
-            {!loading && filtered.map(s => (
+            {!loading && filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No suppliers found</td></tr>}
+            {!loading && filtered.map(s => {
+              const orgInfo = s.organization_supplier_id ? orgSupplierMap[s.organization_supplier_id] : null;
+              const isShared = orgInfo?.isShared;
+              return (
               <tr key={s.id} className="border-b border-gray-50 hover:bg-violet-50/30 transition-colors">
                 <td className="px-4 py-3 font-medium text-gray-900 cursor-pointer" onClick={() => openEdit(s)}>{s.name}</td>
                 <td className="px-4 py-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{s.code || "—"}</td>
@@ -131,6 +164,16 @@ export default function SuppliersPage() {
                     : <span className="text-gray-400 text-xs">Catalogue cost</span>}
                   {s.color_mode === "split" && <span className="inline-block ml-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Split colours</span>}
                 </td>
+                <td className="px-4 py-3 hidden lg:table-cell">
+                  {isShared ? (
+                    <button onClick={() => openLinks(s.organization_supplier_id)}
+                      className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
+                      Shared · {orgInfo.companyCount} companies
+                    </button>
+                  ) : (
+                    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Single company</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={() => openEdit(s)} className="text-xs text-gray-500 hover:text-violet-600 transition-colors mr-3">Edit</button>
                   <button onClick={() => remove(s)} disabled={deletingId === s.id}
@@ -139,7 +182,7 @@ export default function SuppliersPage() {
                   </button>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>
@@ -189,6 +232,40 @@ export default function SuppliersPage() {
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                 {saving ? "Saving…" : editId ? "Update Supplier" : "Create Supplier"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Linked Companies Drawer — read-only Phase 2 view */}
+      {linksOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setLinksOpen(false)} />
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">{linksData?.organizationSupplier?.name || "Linked Companies"}</h2>
+                <p className="text-xs text-gray-400">Organization supplier — read-only view</p>
+              </div>
+              <button onClick={() => setLinksOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              {linksLoading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
+              {!linksLoading && (linksData?.companies || []).map(c => (
+                <div key={c.supplierId} className="border border-gray-100 rounded-xl p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-900 text-sm">{c.companyName || "Unknown company"}</span>
+                    {c.isActive
+                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Active</span>
+                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Supplier row: <span className="font-mono">{c.name}</span>{c.code ? ` (${c.code})` : ""}</p>
+                  {c.contact && <p className="text-xs text-gray-500 mt-0.5">Contact: {c.contact}</p>}
+                </div>
+              ))}
+              {!linksLoading && (linksData?.companies || []).length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">No linked companies found</p>
+              )}
             </div>
           </div>
         </div>
