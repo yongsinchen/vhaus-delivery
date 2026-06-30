@@ -643,6 +643,7 @@ export default function App() {
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation"].includes(effectiveRole);
+    if (n.id === "commission") return ["master","manager","company_admin","salesman"].includes(effectiveRole);
     if (n.manageOnly) return ["master","manager","company_admin"].includes(effectiveRole);
     if (n.canKey) return can(n.canKey);
     return true;

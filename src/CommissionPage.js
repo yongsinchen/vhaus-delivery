@@ -7,13 +7,18 @@ const getToken = async () => { const { data } = await supabase.auth.getSession()
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 
-const TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
+const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
 export default function CommissionPage() {
-  const { user, activeCompanyId } = useAuth();
+  const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
   const companyId = activeCompanyId || user?.company_id;
+  const effectiveRole = (activeRoleKey || user?.role || "").toLowerCase();
+  const isSalesman = effectiveRole === "salesman";
+  // Salesmen see only their own payout/history — Rules, Product Incentives, and
+  // Holds are admin-only actions that affect everyone's commission, not personal views.
+  const TABS = isSalesman ? ["Payout", "All Commissions"] : ALL_TABS;
   const [tab, setTab] = useState(0);
 
   const [payout, setPayout] = useState(null);
