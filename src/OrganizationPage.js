@@ -13,6 +13,15 @@ const authHeaders = async () => {
   return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) };
 };
 
+function ToggleSwitch({ checked, onChange, disabled }) {
+  return (
+    <button type="button" disabled={disabled} onClick={() => !disabled && onChange()}
+      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-violet-600" : "bg-gray-200"} ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}>
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${checked ? "translate-x-4" : "translate-x-1"}`} />
+    </button>
+  );
+}
+
 const TABS = [
   { id: "companies", label: "Companies" },
   { id: "suppliers", label: "Suppliers" },
@@ -77,6 +86,32 @@ export default function OrganizationPage() {
     setLinksLoading(false);
   };
 
+  const toggleSupplierShare = async (s) => {
+    const next = !s.share_enabled;
+    setOrgSuppliers(prev => prev.map(x => x.id === s.id ? { ...x, share_enabled: next } : x));
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-suppliers/${s.id}`, { method: "PATCH", headers, body: JSON.stringify({ share_enabled: next }) });
+    if (!res.ok) { setOrgSuppliers(prev => prev.map(x => x.id === s.id ? { ...x, share_enabled: s.share_enabled } : x)); const d = await res.json().catch(() => ({})); alert(d.error || "Failed to update"); }
+  };
+
+  const toggleProductShare = async (p) => {
+    const next = !p.share_enabled;
+    setOrgProducts(prev => prev.map(x => x.id === p.id ? { ...x, share_enabled: next } : x));
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-products/${p.id}`, { method: "PATCH", headers, body: JSON.stringify({ share_enabled: next }) });
+    if (!res.ok) { setOrgProducts(prev => prev.map(x => x.id === p.id ? { ...x, share_enabled: p.share_enabled } : x)); const d = await res.json().catch(() => ({})); alert(d.error || "Failed to update"); }
+  };
+
+  const toggleCompanySharing = async (c) => {
+    const next = !c.org_sharing_enabled;
+    setCompanies(prev => prev.map(x => x.id === c.id ? { ...x, org_sharing_enabled: next } : x));
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-companies/${c.id}`, { method: "PATCH", headers, body: JSON.stringify({ org_sharing_enabled: next }) });
+    if (!res.ok) { setCompanies(prev => prev.map(x => x.id === c.id ? { ...x, org_sharing_enabled: c.org_sharing_enabled } : x)); const d = await res.json().catch(() => ({})); alert(d.error || "Failed to update"); }
+  };
+
+  const canManageCompanySharing = user?.role === "master";
+
   const filteredSuppliers = orgSuppliers.filter(s =>
     !search || s.name?.toLowerCase().includes(search.toLowerCase()) || s.code?.toLowerCase().includes(search.toLowerCase()));
   const filteredProducts = orgProducts.filter(p =>
@@ -111,11 +146,12 @@ export default function OrganizationPage() {
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3 hidden sm:table-cell">Code</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Open for sharing</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
-              {!loading && companies.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">No companies found</td></tr>}
+              {loading && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+              {!loading && companies.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No companies found</td></tr>}
               {!loading && companies.map(c => (
                 <tr key={c.id} className="border-b border-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
@@ -124,6 +160,9 @@ export default function OrganizationPage() {
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${c.is_active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
                       {c.is_active ? "Active" : "Inactive"}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <ToggleSwitch checked={c.org_sharing_enabled !== false} disabled={!canManageCompanySharing} onChange={() => toggleCompanySharing(c)} />
                   </td>
                 </tr>
               ))}
@@ -140,11 +179,12 @@ export default function OrganizationPage() {
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3 hidden sm:table-cell">Code</th>
                 <th className="px-4 py-3">Scope</th>
+                <th className="px-4 py-3">Open for sharing</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
-              {!loading && filteredSuppliers.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">No suppliers found</td></tr>}
+              {loading && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+              {!loading && filteredSuppliers.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No suppliers found</td></tr>}
               {!loading && filteredSuppliers.map(s => (
                 <tr key={s.id} className="border-b border-gray-50">
                   <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
@@ -158,6 +198,9 @@ export default function OrganizationPage() {
                     ) : (
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{s.companyCount} company</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <ToggleSwitch checked={s.share_enabled !== false} onChange={() => toggleSupplierShare(s)} />
                   </td>
                 </tr>
               ))}
@@ -174,11 +217,12 @@ export default function OrganizationPage() {
                 <th className="px-4 py-3">Code</th>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Scope</th>
+                <th className="px-4 py-3">Open for sharing</th>
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
-              {!loading && filteredProducts.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+              {loading && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">Loading…</td></tr>}
+              {!loading && filteredProducts.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
               {!loading && filteredProducts.map(p => (
                 <tr key={p.id} className="border-b border-gray-50">
                   <td className="px-4 py-3 font-mono text-xs text-violet-700 font-medium">{p.code}</td>
@@ -192,6 +236,9 @@ export default function OrganizationPage() {
                     ) : (
                       <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{p.companyCount} company</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <ToggleSwitch checked={p.share_enabled !== false} onChange={() => toggleProductShare(p)} />
                   </td>
                 </tr>
               ))}
