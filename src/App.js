@@ -1027,7 +1027,12 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                        {isSalesman && can("recordPayment") && parseFloat(o.balance) > 0 && (
+                        {isSalesman ? (
+                          <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
+                            {o.contact && <a href={`tel:${o.contact}`} className="flex-1 text-center text-xs bg-violet-50 text-violet-700 py-1.5 rounded-xl hover:bg-violet-100 font-medium">📞 Call</a>}
+                            {o.contact && <a href={`https://wa.me/6${o.contact.replace(/[^0-9]/g, "").replace(/^0/, "")}`} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs bg-emerald-50 text-emerald-700 py-1.5 rounded-xl hover:bg-emerald-100 font-medium">💬 Arrange Delivery</a>}
+                          </div>
+                        ) : can("recordPayment") && parseFloat(o.balance) > 0 && (
                           <button onClick={e=>{e.stopPropagation();setPaymentModal(o);}} className="mt-3 w-full text-xs bg-emerald-600 text-white py-1.5 rounded-xl hover:bg-emerald-700">💰 Record Payment</button>
                         )}
                       </div>
@@ -1055,10 +1060,24 @@ export default function App() {
                             <div key={i} className="flex items-center gap-2 text-xs">
                               <span className={`w-4 h-4 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 ${item.arrivalDate?"bg-emerald-100 text-emerald-600":"bg-gray-100 text-gray-400"}`}>{item.arrivalDate?"✓":"·"}</span>
                               <span className={`font-medium truncate ${item.arrivalDate?"text-gray-700":"text-gray-400"}`}>{item.itemName}</span>
-                              {item.arrivalDate && <span className="text-gray-400 flex-shrink-0">{fmt(item.arrivalDate)}</span>}
+                              {item.arrivalDate ? <span className="text-gray-400 flex-shrink-0">{fmt(item.arrivalDate)}</span> : item.supplier && <span className="text-gray-400 flex-shrink-0 truncate max-w-[80px]">{item.supplier}</span>}
                             </div>
                           ))}
                         </div>
+                        {(() => {
+                          const missing = (o.items || []).filter(i => i.itemName && !i.arrivalDate);
+                          const arrived = (o.items || []).filter(i => i.arrivalDate).length;
+                          const totalCount = (o.items || []).filter(i => i.itemName).length;
+                          return missing.length > 0 ? (
+                            <p className="text-xs text-amber-600 mt-2">{arrived}/{totalCount} arrived · waiting on {missing.map(i => i.itemName).join(", ")}</p>
+                          ) : null;
+                        })()}
+                        {isSalesman && o.contact && (
+                          <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
+                            <a href={`tel:${o.contact}`} className="flex-1 text-center text-xs bg-violet-50 text-violet-700 py-1.5 rounded-xl hover:bg-violet-100 font-medium">📞 Call</a>
+                            <a href={`https://wa.me/6${o.contact.replace(/[^0-9]/g, "").replace(/^0/, "")}`} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs bg-emerald-50 text-emerald-700 py-1.5 rounded-xl hover:bg-emerald-100 font-medium">💬 WhatsApp</a>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1072,14 +1091,19 @@ export default function App() {
                     <h2 className="font-bold text-gray-800">Waiting for items ({waiting.length})</h2>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {waiting.map(o => (
-                      <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => handleView(o)}>
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <div><span className="font-bold text-violet-700 text-sm">{o.soNumber}</span><p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p></div>
+                    {waiting.map(o => {
+                      const items = (o.items || []).filter(i => i.itemName);
+                      const suppliers = [...new Set(items.map(i => i.supplier).filter(Boolean))];
+                      return (
+                        <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onClick={() => handleView(o)}>
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <div><span className="font-bold text-violet-700 text-sm">{o.soNumber}</span><p className="font-semibold text-gray-800 text-sm mt-0.5">{o.customerName}</p></div>
+                          </div>
+                          <p className="text-xs text-gray-400 truncate">{items.map(i=>i.itemName).join(", ")}</p>
+                          {suppliers.length > 0 && <p className="text-xs text-gray-300 truncate mt-0.5">Supplier: {suppliers.join(", ")}</p>}
                         </div>
-                        <p className="text-xs text-gray-400 truncate">{o.items?.filter(i=>i.itemName).map(i=>i.itemName).join(", ")}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
