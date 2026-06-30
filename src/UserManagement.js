@@ -27,8 +27,8 @@ export default function UserManagement() {
   const [addAccess, setAddAccess] = useState({ company_id: "", role_id: "" });
 
   const availableRoles = isMaster
-    ? ["master", "manager", "company_admin", "salesman", "driver", "finance"]
-    : ["company_admin", "salesman", "driver", "finance"];
+    ? ["master", "manager", "company_admin", "salesman", "driver", "operation", "finance"]
+    : ["company_admin", "salesman", "driver", "operation", "finance"];
 
   const loadData = useCallback(async () => {
     setLoading(true);
