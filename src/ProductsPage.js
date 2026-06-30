@@ -15,7 +15,7 @@ const authHeaders = async () => {
 };
 
 const EMPTY_PRODUCT = {
-  code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
+  code: "", name: "", description: "", color: "", size: "", supplier_id: "", supplier_name: "", category_id: "",
   unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0,
 };
 
@@ -167,7 +167,7 @@ export default function ProductsPage() {
     setEditId(p.id);
     setForm({
       code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "", size: p.size || "",
-      supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || "",
+      supplier_id: p.suppliers?.id || "", supplier_name: p.suppliers?.name || "", category_id: p.product_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
       is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
     });
@@ -557,6 +557,7 @@ export default function ProductsPage() {
               </th>
               <th className="px-4 py-3">Code</th>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3 hidden lg:table-cell">Company</th>
               <th className="px-4 py-3 hidden lg:table-cell">Size</th>
               <th className="px-4 py-3 hidden md:table-cell">Supplier</th>
               <th className="px-4 py-3 hidden md:table-cell">Category</th>
@@ -569,7 +570,7 @@ export default function ProductsPage() {
           </thead>
           <tbody>
             {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
-            {!loading && products.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {!loading && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
             {!loading && products.map(p => (
               <tr key={p.id} className={`border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer ${selectedIds.has(p.id) ? "bg-violet-50/50" : ""}`} onClick={() => openEdit(p)}>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
@@ -577,6 +578,7 @@ export default function ProductsPage() {
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-violet-700 font-medium">{p.code}</td>
                 <td className="px-4 py-3 font-medium text-gray-900">{p.name}</td>
+                <td className="px-4 py-3 text-gray-500 text-xs hidden lg:table-cell">{p.companies?.name || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 text-xs hidden lg:table-cell">{p.size || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.suppliers?.name || "—"}</td>
                 <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{p.product_categories?.name || "—"}</td>
@@ -636,9 +638,11 @@ export default function ProductsPage() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Supplier</label>
-                <select value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}
+                <select value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value, supplier_name: "" }))}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                   <option value="">None</option>
+                  {form.supplier_id && form.supplier_name && !suppliers.some(s => s.id === form.supplier_id) &&
+                    <option value={form.supplier_id}>{form.supplier_name} (other company)</option>}
                   {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
                 <div className="flex gap-1 mt-1">
