@@ -9,6 +9,7 @@ const ResetPasswordPage = lazy(() => import("./ResetPassword"));
 const ProductsPage = lazy(() => import("./ProductsPage"));
 const OrdersPage = lazy(() => import("./OrdersPage"));
 const SuppliersPage = lazy(() => import("./SuppliersPage"));
+const OrganizationPage = lazy(() => import("./OrganizationPage"));
 const CompanySettingsPage = lazy(() => import("./CompanySettingsPage"));
 const PurchaseOrdersPage = lazy(() => import("./PurchaseOrdersPage"));
 const InventoryPage = lazy(() => import("./InventoryPage"));
@@ -86,6 +87,7 @@ const NAV = [
   { id: "finance",    label: "Finance",          icon: "💰", canKey: null, manageOnly: true },
   { id: "commission", label: "Commission",       icon: "📊", canKey: null, manageOnly: true },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
+  { id: "organization", label: "Organization",   icon: "🏢", canKey: "manageCompanies" },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
   { id: "permissions",label: "Permissions",      icon: "🔐", canKey: "manageCompanies" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
@@ -1372,6 +1374,7 @@ export default function App() {
 
     // SUPPLIERS
     if (page === "suppliers") return <SuppliersPage />;
+    if (page === "organization") return <OrganizationPage />;
 
     // SETTINGS
     if (page === "settings") return <CompanySettingsPage />;

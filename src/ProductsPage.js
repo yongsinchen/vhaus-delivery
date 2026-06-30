@@ -26,6 +26,10 @@ export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [orgProductMap, setOrgProductMap] = useState({}); // organization_product_id -> { companyCount, isShared, name }
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [linksData, setLinksData] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -95,6 +99,29 @@ export default function ProductsPage() {
     setCategories(d.categories || []);
   }, [companyId]);
 
+  const loadOrgProducts = useCallback(async () => {
+    if (!companyId) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-products`, { headers });
+    const d = await res.json();
+    const map = {};
+    for (const o of (d.organizationProducts || [])) {
+      map[o.id] = { companyCount: o.companyCount, isShared: o.isShared, name: o.name };
+    }
+    setOrgProductMap(map);
+  }, [companyId]);
+
+  const openLinks = async (orgProductId) => {
+    setLinksOpen(true);
+    setLinksLoading(true);
+    setLinksData(null);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-products/${orgProductId}/companies`, { headers });
+    const d = await res.json();
+    setLinksData(d);
+    setLinksLoading(false);
+  };
+
   const loadProducts = useCallback(async (p = 1) => {
     if (!companyId) return;
     setLoading(true);
@@ -112,7 +139,7 @@ export default function ProductsPage() {
     setLoading(false);
   }, [companyId, debouncedSearch, filterSupplier, filterCategory, filterActive]);
 
-  useEffect(() => { loadSuppliers(); loadCategories(); }, [loadSuppliers, loadCategories]);
+  useEffect(() => { loadSuppliers(); loadCategories(); loadOrgProducts(); }, [loadSuppliers, loadCategories, loadOrgProducts]);
   useEffect(() => { loadProducts(1); }, [loadProducts]);
 
   const loadReviewQueue = async () => {
@@ -564,13 +591,17 @@ export default function ProductsPage() {
               <th className="px-4 py-3 text-right">Cost</th>
               <th className="px-4 py-3 text-right">Price</th>
               <th className="px-4 py-3 text-center">Status</th>
+              <th className="px-4 py-3 hidden lg:table-cell">Scope</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
-            {!loading && products.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
-            {!loading && products.map(p => (
+            {!loading && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {!loading && products.map(p => {
+              const orgInfo = p.organization_product_id ? orgProductMap[p.organization_product_id] : null;
+              const isShared = orgInfo?.isShared;
+              return (
               <tr key={p.id} className={`border-b border-gray-50 hover:bg-violet-50/30 transition-colors cursor-pointer ${selectedIds.has(p.id) ? "bg-violet-50/50" : ""}`} onClick={() => openEdit(p)}>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
@@ -589,6 +620,16 @@ export default function ProductsPage() {
                   </span>
                   {p.is_customizable && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Custom</span>}
                 </td>
+                <td className="px-4 py-3 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
+                  {isShared ? (
+                    <button onClick={() => openLinks(p.organization_product_id)}
+                      className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
+                      Shared · {orgInfo.companyCount} companies
+                    </button>
+                  ) : (
+                    <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Single company</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={e => { e.stopPropagation(); toggleActive(p); }}
                     className="text-xs text-gray-400 hover:text-violet-600 transition-colors mr-3">
@@ -600,7 +641,7 @@ export default function ProductsPage() {
                   </button>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>
@@ -1038,6 +1079,40 @@ export default function ProductsPage() {
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                 {bulkSaving ? "Applying…" : `Apply to ${selectedIds.size} product${selectedIds.size !== 1 ? "s" : ""}`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Linked Companies Drawer — read-only organization product visibility */}
+      {linksOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setLinksOpen(false)} />
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">{linksData?.organizationProduct?.name || "Linked Companies"}</h2>
+                <p className="text-xs text-gray-400">Organization product — read-only view</p>
+              </div>
+              <button onClick={() => setLinksOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              {linksLoading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
+              {!linksLoading && (linksData?.companies || []).map(c => (
+                <div key={c.productId} className="border border-gray-100 rounded-xl p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-900 text-sm">{c.companyName || "Unknown company"}</span>
+                    {c.isActive
+                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Active</span>
+                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Inactive</span>}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Product row: <span className="font-mono">{c.name}</span>{c.code ? ` (${c.code})` : ""}</p>
+                  {c.unitPrice != null && <p className="text-xs text-gray-500 mt-0.5">Price: {Number(c.unitPrice).toFixed(2)}</p>}
+                </div>
+              ))}
+              {!linksLoading && (linksData?.companies || []).length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">No linked companies found</p>
+              )}
             </div>
           </div>
         </div>
