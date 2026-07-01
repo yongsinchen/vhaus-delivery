@@ -50,6 +50,28 @@ export default function FinancePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Master-only: delete a recorded payment. The server reverses every effect —
+  // restores the order balance, rolls back the sales-order paid total, and
+  // recalculates commissions — so the customer records and Orders screen stay
+  // in sync. We reload after so the Finance figures reflect the reversal.
+  const isMaster = user?.role === "master";
+  const [deletingId, setDeletingId] = useState(null);
+  const deletePayment = async (p) => {
+    if (deletingId) return;
+    if (!window.confirm(`Delete this ${money(p.amount)} payment?\n\nThis restores the order's outstanding balance and updates the customer's payment records. This cannot be undone.`)) return;
+    setDeletingId(p.id);
+    try {
+      const res = await af(`${API}/payments/${p.id}`, { method: "DELETE" });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { toast.success("Payment deleted · balances restored"); await loadData(); }
+      else toast.error(d.error || "Failed to delete payment");
+    } catch (err) {
+      toast.error(err.message || "Failed to delete payment");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const loadUploads = useCallback(async () => {
     if (!companyId) return;
     const res = await af(`${API}/statements?company_id=${companyId}`);
@@ -240,15 +262,23 @@ export default function FinancePage() {
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
+              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {filteredPayments.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No payments in this period</td></tr>}
+                {filteredPayments.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No payments in this period</td></tr>}
                 {filteredPayments.map(p => (
                   <tr key={p.id} className="border-t border-gray-50">
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
                     <td className="px-4 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method || "Cash"}</span></td>
                     <td className="px-4 py-2 text-xs text-gray-500">{p.reference_no || "-"}</td>
                     <td className="px-4 py-2 text-right font-bold text-emerald-700">{money(p.amount)}</td>
+                    {isMaster && (
+                      <td className="px-4 py-2 text-right">
+                        <button onClick={() => deletePayment(p)} disabled={deletingId === p.id}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                          {deletingId === p.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
