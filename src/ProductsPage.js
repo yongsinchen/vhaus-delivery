@@ -24,10 +24,8 @@ export default function ProductsPage() {
   const companyId = activeCompanyId || user?.company_id;
 
   const [products, setProducts] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  // isCatalogueGroup: true when the active company belongs to a catalogue group.
-  // Derived from whether the fetched supplier rows have organization_supplier_id set.
-  // Used to deduplicate supplier options by org master and show canonical names.
+  const [suppliers, setSuppliers] = useState([]);   // company-level rows (for form / import cost-divisor lookup)
+  const [orgSuppliers, setOrgSuppliers] = useState([]); // org master list (for filter dropdown in catalogue-group mode)
   const [isCatalogueGroup, setIsCatalogueGroup] = useState(false);
   const [categories, setCategories] = useState([]);
   const [orgProductMap, setOrgProductMap] = useState({}); // organization_product_id -> { companyCount, isShared, name }
@@ -98,13 +96,15 @@ export default function ProductsPage() {
   const loadSuppliers = useCallback(async () => {
     if (!companyId) return;
     const headers = await authHeaders();
-    const res = await fetch(`${API}/suppliers?company_id=${companyId}`, { headers });
-    const d = await res.json();
-    const rows = d.suppliers || [];
-    setSuppliers(rows);
-    // Infer catalogue-group status: if any row has an org master link, this company
-    // is in a catalogue group and we should show canonical org master names.
-    setIsCatalogueGroup(rows.some(s => !!s.organization_supplier_id));
+    const [supRes, orgRes] = await Promise.all([
+      fetch(`${API}/suppliers?company_id=${companyId}`, { headers }),
+      fetch(`${API}/organization-suppliers`, { headers }),
+    ]);
+    const supData = await supRes.json();
+    const orgData = await orgRes.json();
+    setSuppliers(supData.suppliers || []);
+    setOrgSuppliers(orgData.organizationSuppliers || []);
+    setIsCatalogueGroup(!!orgData.isCatalogueGroup);
   }, [companyId]);
 
   const loadCategories = useCallback(async () => {
@@ -144,7 +144,8 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const params = new URLSearchParams({ company_id: companyId, page: p, limit: 50 });
     if (debouncedSearch) params.set("search", debouncedSearch);
-    if (filterSupplier) params.set("supplier_id", filterSupplier);
+    // catalogue-group companies filter by org master id; backend resolves to company row
+    if (filterSupplier) params.set(isCatalogueGroup ? "org_supplier_id" : "supplier_id", filterSupplier);
     if (filterCategory) params.set("category_id", filterCategory);
     if (filterActive !== "all") params.set("is_active", filterActive);
     const res = await fetch(`${API}/products?${params}`, { headers });
@@ -153,7 +154,7 @@ export default function ProductsPage() {
     setTotal(d.total || 0);
     setPage(p);
     setLoading(false);
-  }, [companyId, debouncedSearch, filterSupplier, filterCategory, filterActive]);
+  }, [companyId, debouncedSearch, filterSupplier, filterCategory, filterActive, isCatalogueGroup]);
 
   useEffect(() => { loadSuppliers(); loadCategories(); loadOrgProducts(); }, [loadSuppliers, loadCategories, loadOrgProducts]);
   useEffect(() => { loadProducts(1); }, [loadProducts]);
@@ -256,22 +257,13 @@ export default function ProductsPage() {
   // category_id (see server.js POST/PUT /products).
   const categoriesAreOrgLevel = categories.length > 0 && categories[0].isOrgLevel === true;
 
-  // For catalogue-group companies: deduplicate suppliers by org master and show
-  // the canonical org master name. Each option's value is still the company-level
-  // supplier id (needed for GET /products?supplier_id filter and products.supplier_id FK).
-  const supplierOptions = (() => {
-    if (!isCatalogueGroup) return suppliers.map(s => ({ id: s.id, label: s.name }));
-    const seen = new Set();
-    return suppliers
-      .filter(s => {
-        const key = s.organization_supplier_id || s.id;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .map(s => ({ id: s.id, label: s.organization_suppliers?.name || s.name }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  })();
+  // For catalogue-group companies: dropdown uses org master list (same for all
+  // companies in the group). Filter passes org_supplier_id to the backend which
+  // resolves to this company's own supplier row internally.
+  // For non-catalogue-group companies: uses company-specific supplier rows as before.
+  const supplierOptions = isCatalogueGroup
+    ? orgSuppliers.map(s => ({ id: s.id, label: s.name, isOrg: true })).sort((a, b) => a.label.localeCompare(b.label))
+    : suppliers.map(s => ({ id: s.id, label: s.name, isOrg: false }));
 
   const saveProduct = async () => {
     if (!form.code.trim() || !form.name.trim()) { setFormError("Code and name are required"); return; }
