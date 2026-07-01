@@ -36,6 +36,15 @@ export default function SuppliersPage() {
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksData, setLinksData] = useState(null);
 
+  // Search-first supplier creation (catalogue-group companies only)
+  const [isCatalogueGroup, setIsCatalogueGroup] = useState(false);
+  const [orgSupStep, setOrgSupStep] = useState("form"); // "pick" | "form"
+  const [orgSupQuery, setOrgSupQuery] = useState("");
+  const [orgSupResults, setOrgSupResults] = useState([]);
+  const [orgSupSearching, setOrgSupSearching] = useState(false);
+  const [selectedOrgSupplierId, setSelectedOrgSupplierId] = useState(null);
+  const [selectedOrgSupplierLabel, setSelectedOrgSupplierLabel] = useState("");
+
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
@@ -55,6 +64,7 @@ export default function SuppliersPage() {
       map[o.id] = { companyCount: o.companyCount, isShared: o.isShared, name: o.name };
     }
     setOrgSupplierMap(map);
+    setIsCatalogueGroup(!!orgData.isCatalogueGroup);
     setLoading(false);
   }, [companyId]);
 
@@ -71,7 +81,41 @@ export default function SuppliersPage() {
     setLinksLoading(false);
   };
 
-  const openAdd = () => { setEditId(null); setForm(EMPTY); setError(""); setDrawerOpen(true); };
+  const searchOrgSuppliers = async (q) => {
+    setOrgSupQuery(q);
+    if (!q.trim()) { setOrgSupResults([]); return; }
+    setOrgSupSearching(true);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-suppliers/search?q=${encodeURIComponent(q.trim())}`, { headers });
+    const d = await res.json();
+    setOrgSupResults(d.suppliers || []);
+    setOrgSupSearching(false);
+  };
+
+  const pickOrgSupplier = (s) => {
+    setSelectedOrgSupplierId(s.id);
+    setSelectedOrgSupplierLabel(s.name);
+    setForm(f => ({ ...f, name: s.name || "" }));
+    setOrgSupStep("form");
+  };
+
+  const createSupplierAsNew = () => {
+    setSelectedOrgSupplierId(null);
+    setSelectedOrgSupplierLabel("");
+    setOrgSupStep("form");
+  };
+
+  const openAdd = () => {
+    setEditId(null);
+    setForm(EMPTY);
+    setError("");
+    setSelectedOrgSupplierId(null);
+    setSelectedOrgSupplierLabel("");
+    setOrgSupQuery("");
+    setOrgSupResults([]);
+    setOrgSupStep(isCatalogueGroup ? "pick" : "form");
+    setDrawerOpen(true);
+  };
   const openEdit = (s) => {
     setEditId(s.id);
     setForm({
@@ -91,6 +135,7 @@ export default function SuppliersPage() {
       name: form.name.trim(), code: form.code.trim() || null, contact: form.contact.trim() || null,
       cost_divisor: form.cost_divisor === "" ? null : Number(form.cost_divisor),
       color_mode: form.color_mode,
+      ...(selectedOrgSupplierId && !editId ? { organization_supplier_id: selectedOrgSupplierId } : {}),
     };
     const url = editId ? `${API}/suppliers/${editId}` : `${API}/suppliers`;
     const method = editId ? "PUT" : "POST";
@@ -198,6 +243,53 @@ export default function SuppliersPage() {
             <div className="px-6 py-4 space-y-4">
               {error && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{error}</div>}
 
+              {/* Search-first step for catalogue-group companies */}
+              {!editId && orgSupStep === "pick" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">Search the shared supplier catalogue to avoid creating duplicates. Pick an existing supplier or create a new one.</p>
+                  <input
+                    autoFocus
+                    value={orgSupQuery}
+                    onChange={e => searchOrgSuppliers(e.target.value)}
+                    placeholder="Search by name…"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400"
+                  />
+                  {orgSupSearching && <p className="text-xs text-gray-400">Searching…</p>}
+                  {!orgSupSearching && orgSupQuery.trim() && orgSupResults.length === 0 && (
+                    <p className="text-xs text-gray-400">No matching suppliers found.</p>
+                  )}
+                  {orgSupResults.length > 0 && (
+                    <div className="border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
+                      {orgSupResults.map(s => (
+                        <button key={s.id} onClick={() => pickOrgSupplier(s)}
+                          className="w-full text-left px-4 py-3 hover:bg-violet-50 transition-colors">
+                          <div className="text-sm font-medium text-gray-800">{s.name}</div>
+                          {s.code && <div className="text-xs text-gray-400 mt-0.5">{s.code}</div>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={createSupplierAsNew}
+                    className="w-full py-2.5 rounded-xl text-sm font-medium border border-violet-300 text-violet-700 hover:bg-violet-50 transition-colors">
+                    + Create as New Supplier
+                  </button>
+                </div>
+              )}
+
+              {/* Form step */}
+              {(editId || orgSupStep === "form") && (
+                <div className="space-y-4">
+                  {!editId && isCatalogueGroup && (
+                    <button onClick={() => setOrgSupStep("pick")} className="text-xs text-violet-600 hover:underline">
+                      ← Back to search
+                    </button>
+                  )}
+                  {selectedOrgSupplierId && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 text-xs text-violet-700">
+                      Linked to master: <span className="font-medium">{selectedOrgSupplierLabel}</span>
+                    </div>
+                  )}
+
               <SField label="Name *" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Supplier name" />
               <SField label="Code" value={form.code} onChange={v => setForm(f => ({ ...f, code: v }))} placeholder="Optional" />
               <SField label="Contact" value={form.contact} onChange={v => setForm(f => ({ ...f, contact: v }))} placeholder="Phone / email / person" />
@@ -232,6 +324,8 @@ export default function SuppliersPage() {
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                 {saving ? "Saving…" : editId ? "Update Supplier" : "Create Supplier"}
               </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

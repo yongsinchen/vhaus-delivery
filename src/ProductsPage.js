@@ -76,6 +76,14 @@ export default function ProductsPage() {
   const [newSupplier, setNewSupplier] = useState("");
   const [newCategory, setNewCategory] = useState("");
 
+  // Search-first product creation (catalogue-group companies only)
+  const [orgProdStep, setOrgProdStep] = useState("form"); // "pick" | "form"
+  const [orgProdQuery, setOrgProdQuery] = useState("");
+  const [orgProdResults, setOrgProdResults] = useState([]);
+  const [orgProdSearching, setOrgProdSearching] = useState(false);
+  const [selectedOrgProductId, setSelectedOrgProductId] = useState(null);
+  const [selectedOrgProductLabel, setSelectedOrgProductLabel] = useState("");
+
   // Bulk edit
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -182,11 +190,43 @@ export default function ProductsPage() {
     setLinkResults(prev => ({ ...prev, [groupKey]: d.products || [] }));
   };
 
+  // Search org-level product masters (catalogue-group companies only)
+  const searchOrgProducts = async (q) => {
+    setOrgProdQuery(q);
+    if (!q.trim()) { setOrgProdResults([]); return; }
+    setOrgProdSearching(true);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/organization-products/search?q=${encodeURIComponent(q.trim())}`, { headers });
+    const d = await res.json();
+    setOrgProdResults(d.products || []);
+    setOrgProdSearching(false);
+  };
+
+  const pickOrgProduct = (p) => {
+    setSelectedOrgProductId(p.id);
+    const label = [p.code, p.name, p.size, p.color].filter(Boolean).join(" · ");
+    setSelectedOrgProductLabel(label);
+    setForm(f => ({ ...f, code: p.code || "", name: p.name || "", size: p.size || "", color: p.color || "" }));
+    setOrgProdStep("form");
+  };
+
+  const createAsNew = () => {
+    setSelectedOrgProductId(null);
+    setSelectedOrgProductLabel("");
+    setOrgProdStep("form");
+  };
+
   // ── Product drawer ────────────────────────────────────────────────
   const openAdd = () => {
     setEditId(null);
     setForm(EMPTY_PRODUCT);
     setFormError("");
+    setSelectedOrgProductId(null);
+    setSelectedOrgProductLabel("");
+    setOrgProdQuery("");
+    setOrgProdResults([]);
+    // For catalogue-group companies, start on the search step; otherwise go direct to form
+    setOrgProdStep(categoriesAreOrgLevel ? "pick" : "form");
     setDrawerOpen(true);
   };
 
@@ -221,6 +261,8 @@ export default function ProductsPage() {
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
       is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0,
+      // Pass explicit org master link when user picked one in the search-first flow
+      ...(selectedOrgProductId && !editId ? { organization_product_id: selectedOrgProductId } : {}),
     };
     const url = editId ? `${API}/products/${editId}` : `${API}/products`;
     const method = editId ? "PUT" : "POST";
@@ -680,6 +722,55 @@ export default function ProductsPage() {
             <div className="px-6 py-4 space-y-4">
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
 
+              {/* Search-first step: only for catalogue-group companies when adding new products */}
+              {!editId && orgProdStep === "pick" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">Search the shared product catalogue to avoid creating duplicates. Pick an existing product or create a new one.</p>
+                  <input
+                    autoFocus
+                    value={orgProdQuery}
+                    onChange={e => searchOrgProducts(e.target.value)}
+                    placeholder="Search by code or name…"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400"
+                  />
+                  {orgProdSearching && <p className="text-xs text-gray-400">Searching…</p>}
+                  {!orgProdSearching && orgProdQuery.trim() && orgProdResults.length === 0 && (
+                    <p className="text-xs text-gray-400">No matching products found.</p>
+                  )}
+                  {orgProdResults.length > 0 && (
+                    <div className="border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
+                      {orgProdResults.map(p => (
+                        <button key={p.id} onClick={() => pickOrgProduct(p)}
+                          className="w-full text-left px-4 py-3 hover:bg-violet-50 transition-colors">
+                          <div className="text-sm font-medium text-gray-800">{p.name}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {[p.code, p.size, p.color].filter(Boolean).join(" · ")}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={createAsNew}
+                    className="w-full py-2.5 rounded-xl text-sm font-medium border border-violet-300 text-violet-700 hover:bg-violet-50 transition-colors">
+                    + Create as New Product
+                  </button>
+                </div>
+              )}
+
+              {/* Form step: normal fields, shown for edit or after search-pick */}
+              {(editId || orgProdStep === "form") && (
+                <div className="space-y-4">
+                  {!editId && (
+                    <button onClick={() => setOrgProdStep("pick")} className="text-xs text-violet-600 hover:underline flex items-center gap-1">
+                      ← Back to search
+                    </button>
+                  )}
+                  {selectedOrgProductId && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 text-xs text-violet-700">
+                      Linked to master: <span className="font-medium">{selectedOrgProductLabel}</span>
+                    </div>
+                  )}
+
               <Field label="Code *" value={form.code} onChange={v => setForm(f => ({ ...f, code: v }))} placeholder="e.g. SF-001" />
               <Field label="Name *" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Product name" />
               <Field label="Description" value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} placeholder="Optional" />
@@ -741,6 +832,8 @@ export default function ProductsPage() {
                 className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                 {saving ? "Saving…" : editId ? "Update Product" : "Create Product"}
               </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
