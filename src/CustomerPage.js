@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce } from "./UIComponents";
 
@@ -40,6 +40,8 @@ export default function CustomerPage() {
   const [payAllocations, setPayAllocations] = useState([]);
   const [payProofs, setPayProofs] = useState([]); // uploaded proof URLs
   const [payUploading, setPayUploading] = useState(false);
+  const [paySaving, setPaySaving] = useState(false); // drives button label/disabled
+  const paySavingRef = useRef(false); // synchronous guard — blocks a double-click before re-render
 
   // Aging
   const [aging, setAging] = useState(null);
@@ -111,13 +113,23 @@ export default function CustomerPage() {
   };
 
   const submitPayment = async () => {
+    if (paySavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
-    const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
-    const d = await res.json();
-    if (d.payment) { toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer); }
-    else toast.error(d.error || "Failed");
+    paySavingRef.current = true;
+    setPaySaving(true);
+    try {
+      const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
+      const d = await res.json();
+      if (d.payment) { toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer); }
+      else toast.error(d.error || "Failed");
+    } catch (err) {
+      toast.error(err.message || "Failed to record payment");
+    } finally {
+      paySavingRef.current = false;
+      setPaySaving(false);
+    }
   };
 
   return (
@@ -430,9 +442,9 @@ export default function CustomerPage() {
               </div>
             </div>
             <div className="px-6 py-4 border-t">
-              <button onClick={submitPayment} disabled={!payAmount || Number(payAmount) <= 0}
-                className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                Record {money(payAmount || 0)} Payment
+              <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0}
+                className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                {paySaving ? "Recording…" : `Record ${money(payAmount || 0)} Payment`}
               </button>
             </div>
           </div>
