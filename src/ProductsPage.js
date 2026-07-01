@@ -243,7 +243,11 @@ export default function ProductsPage() {
     setEditId(p.id);
     setForm({
       code: p.code || "", name: p.name || "", description: p.description || "", color: p.color || "", size: p.size || "",
-      supplier_id: p.suppliers?.id || "", category_id: p.product_categories?.id || p.organization_categories?.id || "",
+      // Catalogue-group companies pick from the org master supplier list, so the
+      // selected value must be the shared org supplier id (org_supplier_id), not
+      // this company's own supplier row id.
+      supplier_id: isCatalogueGroup ? (p.org_supplier_id || "") : (p.suppliers?.id || ""),
+      category_id: p.product_categories?.id || p.organization_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
       is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
     });
@@ -272,7 +276,10 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const body = {
       code: form.code, name: form.name, description: form.description || null, color: form.color || null, size: form.size || null,
-      supplier_id: form.supplier_id || null,
+      // For catalogue-group companies the dropdown holds an org supplier id — send
+      // it as org_supplier_id so the backend shares it across all companies. Other
+      // companies keep sending their own supplier row id.
+      ...(isCatalogueGroup ? { org_supplier_id: form.supplier_id || null } : { supplier_id: form.supplier_id || null }),
       category_id: categoriesAreOrgLevel ? null : (form.category_id || null),
       organization_category_id: categoriesAreOrgLevel ? (form.category_id || null) : null,
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
@@ -352,7 +359,12 @@ export default function ProductsPage() {
 
   const applyBulk = async () => {
     const set = {};
-    if (bulkForm.supplier) set.supplier_id = bulkForm.supplier_id || null;
+    // Catalogue-group dropdown holds an org supplier id — send it as org_supplier_id
+    // so the backend shares it across all companies (see saveProduct).
+    if (bulkForm.supplier) {
+      if (isCatalogueGroup) set.org_supplier_id = bulkForm.supplier_id || null;
+      else set.supplier_id = bulkForm.supplier_id || null;
+    }
     if (bulkForm.category) {
       if (categoriesAreOrgLevel) set.organization_category_id = bulkForm.category_id || null;
       else set.category_id = bulkForm.category_id || null;
