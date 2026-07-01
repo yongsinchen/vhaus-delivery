@@ -571,7 +571,7 @@ export default function App() {
       }));
       const body = {
         order_number: form.soNumber, customer_name: form.customerName, customer_contact: form.contact,
-        customer_address: form.address, salesman_names: form.salesman, delivery_date: form.deliveryDate || null,
+        customer_address: form.address, salesman_names: form.salesman, order_date: form.orderDate || null, delivery_date: form.deliveryDate || null,
         delivery_time_slot: form.timeSlot || null, delivery_type: form.type || "Delivery",
         remark: form.remark || null, status: "confirmed",
         subtotal: Number(form.orderAmount) || 0, deposit: (Number(form.orderAmount) || 0) - (Number(form.balance) || 0),
