@@ -25,6 +25,10 @@ export default function ProductsPage() {
 
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  // isCatalogueGroup: true when the active company belongs to a catalogue group.
+  // Derived from whether the fetched supplier rows have organization_supplier_id set.
+  // Used to deduplicate supplier options by org master and show canonical names.
+  const [isCatalogueGroup, setIsCatalogueGroup] = useState(false);
   const [categories, setCategories] = useState([]);
   const [orgProductMap, setOrgProductMap] = useState({}); // organization_product_id -> { companyCount, isShared, name }
   const [linksOpen, setLinksOpen] = useState(false);
@@ -96,7 +100,11 @@ export default function ProductsPage() {
     const headers = await authHeaders();
     const res = await fetch(`${API}/suppliers?company_id=${companyId}`, { headers });
     const d = await res.json();
-    setSuppliers(d.suppliers || []);
+    const rows = d.suppliers || [];
+    setSuppliers(rows);
+    // Infer catalogue-group status: if any row has an org master link, this company
+    // is in a catalogue group and we should show canonical org master names.
+    setIsCatalogueGroup(rows.some(s => !!s.organization_supplier_id));
   }, [companyId]);
 
   const loadCategories = useCallback(async () => {
@@ -247,6 +255,23 @@ export default function ProductsPage() {
   // products must then be saved with organization_category_id instead of
   // category_id (see server.js POST/PUT /products).
   const categoriesAreOrgLevel = categories.length > 0 && categories[0].isOrgLevel === true;
+
+  // For catalogue-group companies: deduplicate suppliers by org master and show
+  // the canonical org master name. Each option's value is still the company-level
+  // supplier id (needed for GET /products?supplier_id filter and products.supplier_id FK).
+  const supplierOptions = (() => {
+    if (!isCatalogueGroup) return suppliers.map(s => ({ id: s.id, label: s.name }));
+    const seen = new Set();
+    return suppliers
+      .filter(s => {
+        const key = s.organization_supplier_id || s.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map(s => ({ id: s.id, label: s.organization_suppliers?.name || s.name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
 
   const saveProduct = async () => {
     if (!form.code.trim() || !form.name.trim()) { setFormError("Code and name are required"); return; }
@@ -593,7 +618,7 @@ export default function ProductsPage() {
         <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="">All Suppliers</option>
-          {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {supplierOptions.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
         <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
@@ -782,7 +807,7 @@ export default function ProductsPage() {
                 <select value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                   <option value="">None</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {supplierOptions.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
                 <div className="flex gap-1 mt-1">
                   <input value={newSupplier} onChange={e => setNewSupplier(e.target.value)} placeholder="New supplier…"
@@ -861,7 +886,7 @@ export default function ProductsPage() {
                     <select value={importSupplier} onChange={e => onImportSupplierChange(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                       <option value="">None</option>
-                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {supplierOptions.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
                   </div>
 
