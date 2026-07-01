@@ -14,7 +14,7 @@ const STATUS_STYLE = {
   delivered: { bg: "bg-emerald-100", text: "text-emerald-700", label: "Delivered" },
 };
 
-const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go"];
+const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Instalment"];
 
 export default function DriverPage() {
   useAuth();

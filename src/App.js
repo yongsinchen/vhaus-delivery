@@ -30,6 +30,7 @@ const authFetch = async (url, opts = {}) => {
   const cid = localStorage.getItem("pulseActiveCompanyId");
   return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
+const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque", "Instalment"];
 const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
 const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
 
@@ -422,6 +423,7 @@ export default function App() {
   const [converting, setConverting] = useState(false);
   const [paymentModal, setPaymentModal] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
@@ -627,12 +629,12 @@ export default function App() {
     try {
       const res = await authFetch(`${BACKEND}/payments/record`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: paymentModal.id, amount, payment_method: "cash" }),
+        body: JSON.stringify({ order_id: paymentModal.id, amount, payment_method: paymentMethod }),
       });
       if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setPaymentSaving(false); return; }
       const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
       setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
-      setPaymentModal(null); setPaymentAmount("");
+      setPaymentModal(null); setPaymentAmount(""); setPaymentMethod("Cash");
     } catch (e) { alert("Failed: " + e.message); }
     setPaymentSaving(false);
   };
@@ -1601,9 +1603,13 @@ export default function App() {
             <h3 className="font-bold text-gray-900 mb-1">Record Payment</h3>
             <p className="text-sm text-gray-500 mb-1">SO <span className="font-semibold text-violet-700">{paymentModal.soNumber}</span> — {paymentModal.customerName}</p>
             <p className="text-sm text-gray-500 mb-4">Balance: <span className="font-bold text-red-600">RM {paymentModal.balance}</span></p>
-            <input type="number" value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} placeholder="Amount (RM)" autoFocus className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-4" />
+            <input type="number" value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} placeholder="Amount (RM)" autoFocus className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-3" />
+            <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
+            <select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-4">
+              {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
             <div className="flex gap-3 justify-end">
-              <button onClick={()=>{setPaymentModal(null);setPaymentAmount("");}} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
+              <button onClick={()=>{setPaymentModal(null);setPaymentAmount("");setPaymentMethod("Cash");}} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
               <button onClick={recordPayment} disabled={paymentSaving} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50">{paymentSaving?"Saving...":"Record Payment"}</button>
             </div>
           </div>

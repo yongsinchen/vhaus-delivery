@@ -32,7 +32,7 @@ const STATUS_STYLE = {
 
 const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 
-const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"];
+const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque", "Instalment"];
 
 const EMPTY_ORDER = {
   order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
