@@ -30,6 +30,11 @@ const STATUS_STYLE = {
   cancelled: "bg-red-100 text-red-600",
 };
 
+// Today's date (Malaysia, UTC+8) as YYYY-MM-DD for date inputs
+const todayMY = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
 const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 
 const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque", "Instalment"];
@@ -37,6 +42,7 @@ const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"
 const EMPTY_ORDER = {
   order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
   status: "draft", notes: "", items: [],
+  order_date: "",
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
   discount: "", deposit: "", payment_method: "", payment_proofs: [],
   branch_id: "", salesman_names: "",
@@ -160,7 +166,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
   const orderGst = order.gst_waived ? 0 : (order.gst_amount != null ? Number(order.gst_amount) : Math.round(afterDisc * orderGstRate) / 100);
   const total = afterDisc + orderGst;
   const balance = total - deposit;
-  const dateStr = order.created_at ? new Date(order.created_at).toLocaleDateString("en-MY") : new Date().toLocaleDateString("en-MY");
+  const dateStr = new Date((order.order_date || order.created_at || new Date().toISOString()) + (order.order_date ? "T00:00:00" : "")).toLocaleDateString("en-MY");
 
   const sig = signatureDataUrl || order.customer_signature || null;
 
@@ -447,7 +453,7 @@ export default function OrdersPage() {
     setEditId(null);
     setEditingOrder(null);
     setArrivalItems(null);
-    setForm({ ...EMPTY_ORDER, salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
+    setForm({ ...EMPTY_ORDER, order_date: todayMY(), salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
     setFormError("");
     setDrawerOpen(true);
   };
@@ -466,6 +472,7 @@ export default function OrdersPage() {
       customer_address: f.customer_address || "",
       status: f.status || "draft", sales_channel: f.sales_channel || "branch",
       notes: f.notes || "",
+      order_date: f.order_date || "",
       delivery_type: f.delivery_type || "Delivery",
       delivery_date: f.delivery_date || "",
       delivery_time_slot: f.delivery_time_slot || "",
@@ -598,6 +605,7 @@ export default function OrdersPage() {
       sales_channel: form.sales_channel || "branch",
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
       customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
+      order_date: form.order_date || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
       delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
       discount: form.discount === "" ? 0 : Number(form.discount),
@@ -1047,6 +1055,14 @@ export default function OrdersPage() {
                   </div>
                 </div>
               )}
+
+              {/* Order date (backdatable) */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Order Date</label>
+                <input type="date" value={form.order_date || ""} max={todayMY()}
+                  onChange={e => setForm(f => ({ ...f, order_date: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              </div>
 
               {/* Customer info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
