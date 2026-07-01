@@ -38,6 +38,8 @@ export default function CustomerPage() {
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRef, setPayRef] = useState("");
   const [payAllocations, setPayAllocations] = useState([]);
+  const [payProofs, setPayProofs] = useState([]); // uploaded proof URLs
+  const [payUploading, setPayUploading] = useState(false);
 
   // Aging
   const [aging, setAging] = useState(null);
@@ -95,6 +97,7 @@ export default function CustomerPage() {
     setPayAmount("");
     setPayMethod("Cash");
     setPayRef("");
+    setPayProofs([]);
     setPayModal({ customer, orders: withBalance });
   };
 
@@ -111,7 +114,7 @@ export default function CustomerPage() {
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
-    const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, allocations }) });
+    const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
     const d = await res.json();
     if (d.payment) { toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer); }
     else toast.error(d.error || "Failed");
@@ -372,6 +375,34 @@ export default function CustomerPage() {
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
                 </div>
               )}
+              {/* Payment Proof upload */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Proof</label>
+                <div className="space-y-1">
+                  {payProofs.map((url, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2 py-1">
+                      <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-violet-600 underline truncate">{url.split("/").pop()}</a>
+                      <button type="button" onClick={() => setPayProofs(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600">✕</button>
+                    </div>
+                  ))}
+                </div>
+                <label className={`mt-1 flex items-center gap-2 text-xs cursor-pointer ${payUploading ? "text-gray-400" : "text-violet-600 hover:text-violet-800"}`}>
+                  <span>{payUploading ? "Uploading…" : "+ Upload receipt / screenshot"}</span>
+                  <input type="file" accept="image/*,application/pdf" className="hidden" disabled={payUploading} onChange={async e => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    setPayUploading(true);
+                    try {
+                      const token = await getToken();
+                      const fd = new FormData(); fd.append("file", file);
+                      const res = await fetch(`${API}/sales-orders/upload-attachment`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                      const d = await res.json();
+                      if (d.url) setPayProofs(prev => [...prev, d.url]);
+                      else toast.error(d.error || "Upload failed");
+                    } catch (err) { toast.error("Upload failed"); }
+                    finally { setPayUploading(false); e.target.value = ""; }
+                  }} />
+                </label>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-2">Allocate to Orders</label>
                 <p className="text-xs text-gray-400 mb-2">Amount auto-distributed to oldest orders first. Adjust manually if needed.</p>
