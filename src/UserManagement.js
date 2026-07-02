@@ -38,7 +38,7 @@ export default function UserManagement() {
 
     // Load companies
     const { data: comps, error: compErr } = await supabase
-      .from("companies").select("*").order("name");
+      .from("companies").select("id, name, code").order("name");
     if (compErr) console.error("Load companies error:", compErr);
     setCompanies(comps || []);
 

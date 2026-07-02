@@ -472,7 +472,9 @@ export default function App() {
   // ── Data loading ────────────────────────────────────────────────
   const loadOrders = async () => {
     if (orders.length === 0) setLoading(true); setError(null);
-    let q = supabase.from("orders").select("*").order("created_at", { ascending: true });
+    // Exactly the columns fromDb() maps — keep the two lists in sync
+    const ORDER_COLS = "id, created_at, so_number, customer_name, address, contact, order_date, salesman, order_amount, balance, delivery_date, time_slot, plate_no, type, service_note, sv_number, remark, status, items, photo_url, linked_so, company_id";
+    let q = supabase.from("orders").select(ORDER_COLS).order("created_at", { ascending: true });
     // Scope to the user's own company (master included). Only a user with no
     // company_id (super-admin) sees everything.
     if (companyId) q = q.eq("company_id", companyId);
