@@ -74,13 +74,10 @@ export default function ServicePage() {
   const searchOrders = async (q) => {
     setOrderSearch(q);
     if (q.length < 2) { setOrderResults([]); return; }
-    const res = await af(`${API}/services?company_id=${companyId}`);
+    // Search real (non-Service) orders to link to, server-side.
+    const res = await af(`${API}/orders?search=${encodeURIComponent(q)}${companyId ? `&company_id=${companyId}` : ""}`);
     const all = await res.json();
-    const filtered = (Array.isArray(all) ? all : []).filter(o =>
-      (o.so_number || "").toLowerCase().includes(q.toLowerCase()) ||
-      (o.customer_name || "").toLowerCase().includes(q.toLowerCase())
-    ).slice(0, 10);
-    setOrderResults(filtered);
+    setOrderResults((Array.isArray(all) ? all : []).slice(0, 10));
   };
 
   const createService = async () => {
