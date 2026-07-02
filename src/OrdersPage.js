@@ -330,6 +330,7 @@ export default function OrdersPage() {
   const [arrivalItems, setArrivalItems] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
   const [viewArrival, setViewArrival] = useState(null);
+  const [orderServices, setOrderServices] = useState(null); // services linked to the viewed order
   const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
   // Delivery Orders (Phase 2B) — shipments of the viewed sales order
@@ -538,12 +539,30 @@ export default function OrdersPage() {
   // avoids flashing partial list data and re-rendering when the rest arrives.
   const openView = async (o) => {
     setDoData(null);
+    setOrderServices(null);
     try {
-      const { order: full, legacy_order } = await withLoading("Loading order…", () => getFullOrder(o));
-      setViewArrival(parseLegacyArrival(legacy_order));
-      setViewingOrder(full);
-      loadDeliveryOrders(o.id); // delivery-order section streams in after the drawer opens
+      // Keep the overlay up until the related sections (delivery orders +
+      // services) are loaded too, so "loading done" means the drawer is ready.
+      await withLoading("Loading order…", async () => {
+        const { order: full, legacy_order } = await getFullOrder(o);
+        setViewArrival(parseLegacyArrival(legacy_order));
+        setViewingOrder(full);
+        await Promise.all([loadDeliveryOrders(o.id), loadOrderServices(full)]);
+      });
     } catch (e) { toast.error("Failed to load order: " + e.message); }
+  };
+
+  // Services linked to this order (matched by so_number via the legacy order).
+  const loadOrderServices = async (order) => {
+    try {
+      const soNum = order?.order_number || order?.so_number;
+      if (!soNum) { setOrderServices([]); return; }
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/service-cases?so_number=${encodeURIComponent(soNum)}`, { headers });
+      if (!res.ok) { setOrderServices([]); return; }
+      const d = await res.json();
+      setOrderServices(d.services || []);
+    } catch { setOrderServices([]); }
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
@@ -1106,6 +1125,21 @@ export default function OrdersPage() {
                         <button onClick={() => changeStatus(o, "confirmed")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">✓ Re-confirm</button>
                       </div>
                       {o.notes && <p className="text-xs text-amber-700 whitespace-pre-wrap mt-1">{o.notes}</p>}
+                    </div>
+                  )}
+
+                  {/* Linked service cases */}
+                  {Array.isArray(orderServices) && orderServices.length > 0 && (
+                    <div className="bg-white border border-gray-200 rounded-xl p-3">
+                      <div className="text-sm font-bold text-gray-700 mb-2">Services ({orderServices.length})</div>
+                      <div className="space-y-1.5">
+                        {orderServices.map(sv => (
+                          <div key={sv.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                            <span className="text-gray-700 truncate">{({ 1: "Warranty", 2: "Assembly", 3: "Exchange" })[sv.service_type] || `Type ${sv.service_type}`}{sv.description ? ` — ${sv.description}` : ""}</span>
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">{sv.schedule_tbc ? "TBC" : sv.status}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
