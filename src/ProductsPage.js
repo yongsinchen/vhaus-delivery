@@ -29,6 +29,7 @@ export default function ProductsPage() {
   const [isCatalogueGroup, setIsCatalogueGroup] = useState(false);
   const [categories, setCategories] = useState([]);
   const [orgProductMap, setOrgProductMap] = useState({}); // organization_product_id -> { companyCount, isShared, name }
+  const [orgMapReady, setOrgMapReady] = useState(false);  // gate table render until scope data arrives (no "Single company" flash)
   const [linksOpen, setLinksOpen] = useState(false);
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksData, setLinksData] = useState(null);
@@ -117,14 +118,17 @@ export default function ProductsPage() {
 
   const loadOrgProducts = useCallback(async () => {
     if (!companyId) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/organization-products`, { headers });
-    const d = await res.json();
-    const map = {};
-    for (const o of (d.organizationProducts || [])) {
-      map[o.id] = { companyCount: o.companyCount, isShared: o.isShared, name: o.name };
-    }
-    setOrgProductMap(map);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/organization-products`, { headers });
+      const d = await res.json();
+      const map = {};
+      for (const o of (d.organizationProducts || [])) {
+        map[o.id] = { companyCount: o.companyCount, isShared: o.isShared, name: o.name };
+      }
+      setOrgProductMap(map);
+    } catch (e) { console.error("loadOrgProducts:", e); }
+    finally { setOrgMapReady(true); } // render the table even if the scope fetch failed
   }, [companyId]);
 
   const openLinks = async (orgProductId) => {
@@ -514,9 +518,18 @@ export default function ProductsPage() {
       color: r.color, size: r.size, is_customizable: r.is_customizable || false, supplier_name: r.supplier_name,
       unit_cost: r.unit_cost, unit_price: r.unit_price, action: r._action,
     }));
-    await fetch(`${API}/catalogue-import/${importJobId}/rows`, {
+    // The row save MUST succeed before committing — otherwise edits made in
+    // the review table (Custom flags, prices, codes) are silently lost and
+    // the commit runs on the original parsed values.
+    const saveRes = await fetch(`${API}/catalogue-import/${importJobId}/rows`, {
       method: "PUT", headers, body: JSON.stringify({ rows: rowEdits }),
     });
+    if (!saveRes.ok) {
+      const sd = await saveRes.json().catch(() => ({}));
+      setCommitting(false);
+      setImportError(sd.error || "Failed to save row edits — commit aborted so your changes are not lost. Try again.");
+      return;
+    }
     // Commit
     const res = await fetch(`${API}/catalogue-import/${importJobId}/commit`, { method: "POST", headers });
     const d = await res.json();
@@ -678,9 +691,12 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
-            {!loading && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
-            {!loading && products.map(p => {
+            {/* Skeleton until BOTH the product page and the org scope map are
+                loaded — otherwise rows flash "Single company" and flip to
+                "Shared · 3 companies" a moment later. */}
+            {(loading || !orgMapReady) && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
+            {!loading && orgMapReady && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {!loading && orgMapReady && products.map(p => {
               const orgInfo = p.organization_product_id ? orgProductMap[p.organization_product_id] : null;
               const isShared = orgInfo?.isShared;
               return (
