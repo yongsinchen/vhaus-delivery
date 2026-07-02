@@ -12,6 +12,7 @@ const STATUS_STYLE = {
   "Out for Delivery": { bg: "bg-indigo-100", text: "text-indigo-700", label: "On the Way" },
   arrived: { bg: "bg-amber-100", text: "text-amber-700", label: "Arrived" },
   delivered: { bg: "bg-emerald-100", text: "text-emerald-700", label: "Delivered" },
+  failed: { bg: "bg-red-100", text: "text-red-600", label: "Failed" },
 };
 
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Instalment"];
@@ -51,6 +52,17 @@ export default function DriverPage() {
       toast.success(status === "delivered" ? "Delivery completed!" : `Status: ${status}`);
       loadRoute();
     } else { toast.error(d.error || "Failed"); }
+    setActionLoading(null);
+  };
+
+  // Phase 5: mark a DO stop as failed with a reason — the attempt closes and
+  // the DO returns to the admin's reschedule pool.
+  const failDelivery = async (scheduleId, reason) => {
+    setActionLoading(scheduleId);
+    const res = await af(`${API}/driver/schedule/${scheduleId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "failed", reason }) });
+    const d = await res.json();
+    if (d.schedule) { toast.warning("Marked failed — office will reschedule"); loadRoute(); }
+    else { toast.error(d.error || "Failed"); }
     setActionLoading(null);
   };
 
@@ -243,6 +255,18 @@ export default function DriverPage() {
                         <button onClick={() => updateStatus(sc.id, "Confirmed")} disabled={actionLoading === sc.id}
                           className="w-full py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
                           {actionLoading === sc.id ? "Updating..." : "✓ Confirm Stop"}
+                        </button>
+                      )}
+                      {/* Failed delivery (Phase 5) — DO stops only. Closes this
+                          attempt with a reason; admin reschedules from the pool. */}
+                      {dord && ["Out for Delivery", "arrived"].includes(sc.status) && (
+                        <button onClick={() => {
+                          const reason = window.prompt("Why did this delivery fail? (customer not home, refused, access issue…)");
+                          if (reason === null) return; // cancelled prompt
+                          failDelivery(sc.id, reason);
+                        }} disabled={actionLoading === sc.id}
+                          className="w-full py-2.5 rounded-xl text-sm font-bold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 disabled:opacity-50">
+                          ⚠️ Delivery Failed
                         </button>
                       )}
                     </div>

@@ -694,16 +694,17 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
         af(`${API}/delivery-schedules?date=${date}${qs}`),
         af(`${API}/delivery/unassigned?date=${date}${qs}`),
         af(`${API}/order-trips?date=${date}`),
-        // Phase 2B: draft DOs feed the pool; draft+scheduled DOs exclude their
-        // SO from whole-order scheduling (an order ships as DOs OR whole, never both)
-        af(`${API}/delivery-orders?status=draft,scheduled,out_for_delivery,arrived`),
+        // Phase 2B/5: draft + failed DOs feed the pool; any active DO excludes
+        // its SO from whole-order scheduling (an order ships as DOs OR whole)
+        af(`${API}/delivery-orders?status=draft,scheduled,out_for_delivery,arrived,failed`),
       ]);
       const [teamsData, schedulesData, unassignedData, tripsData, dosData] = await Promise.all([
         teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
         dosRes.ok ? dosRes.json() : Promise.resolve({ delivery_orders: [] }),
       ]);
       const allActiveDos = dosData.delivery_orders || [];
-      setUnassignedDos(allActiveDos.filter(d => d.status === "draft"));
+      // Pool: drafts + failed attempts awaiting reschedule (Phase 5)
+      setUnassignedDos(allActiveDos.filter(d => d.status === "draft" || d.status === "failed"));
       setActiveDoSoNumbers(new Set(allActiveDos.map(d => d.sales_orders?.order_number).filter(Boolean)));
 
       const teamsList = teamsData.teams || (Array.isArray(teamsData) ? teamsData : []);
@@ -785,7 +786,8 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     ...trips.map(t => ({ ...t, _type: "trip" })),
     // A DO with a target delivery_date only appears in the pool on that date's
     // tab; undated drafts appear on every date (they still need a slot).
-    ...unassignedDos.filter(d => !d.delivery_date || d.delivery_date === date).map(d => ({ ...d, _type: "do" })),
+    // Failed attempts (Phase 5) always show — they need rescheduling urgently.
+    ...unassignedDos.filter(d => d.status === "failed" || !d.delivery_date || d.delivery_date === date).map(d => ({ ...d, _type: "do" })),
   ].sort((a, b) => {
     const aTime = (a._type === "order" || a._type === "service") ? (a.time_slot || "") : (a.orders?.time_slot || "");
     const bTime = (b._type === "order" || b._type === "service") ? (b.time_slot || "") : (b.orders?.time_slot || "");
@@ -1037,6 +1039,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                               <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">DO</span>
                               <span className="font-bold text-violet-700 text-xs">{item.do_number}</span>
                               <span className="text-xs text-gray-400">{so.order_number}</span>
+                              {item.status === "failed" && <span className="text-xs bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded">FAILED — retry</span>}
                             </div>
                             <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
                           </div>
