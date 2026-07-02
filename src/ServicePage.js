@@ -34,7 +34,7 @@ export default function ServicePage() {
   const [convertRemark, setConvertRemark] = useState("");
 
   // Create form
-  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "" });
+  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false });
   const [orderSearch, setOrderSearch] = useState("");
   const [orderResults, setOrderResults] = useState([]);
 
@@ -89,7 +89,7 @@ export default function ServicePage() {
         const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify(createForm) });
         const d = await res.json();
         if (!d.service) throw new Error(d.error || "Failed");
-        toast.success("Service case created"); setShowCreate(false); setCreateForm({ order_id: "", service_type: 1, description: "" }); loadServices();
+        toast.success("Service case created"); setShowCreate(false); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false }); loadServices();
       });
     } catch (e) { toast.error(e.message); }
   };
@@ -329,6 +329,23 @@ export default function ServicePage() {
                 <textarea value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
                   placeholder="What's the issue? What needs to be done?" rows={3}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Service Creation Date</label>
+                  <input type="date" value={createForm.service_date} onChange={e => setCreateForm(f => ({ ...f, service_date: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Schedule Date</label>
+                  <input type="date" value={createForm.schedule_tbc ? "" : createForm.delivery_date} disabled={createForm.schedule_tbc}
+                    onChange={e => setCreateForm(f => ({ ...f, delivery_date: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400 disabled:bg-gray-100 disabled:text-gray-400" />
+                  <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-600">
+                    <input type="checkbox" checked={createForm.schedule_tbc} onChange={e => setCreateForm(f => ({ ...f, schedule_tbc: e.target.checked }))} />
+                    TBC — hidden from delivery route
+                  </label>
+                </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t flex gap-3 justify-end">
