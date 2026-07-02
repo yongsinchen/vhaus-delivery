@@ -104,7 +104,12 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
   const [saving, setSaving] = useState(false);
   if (!o || !o.so_number) return null;
 
-  const items = parseItems(o.items);
+  // Phase 2B: a DO schedule shows ONLY that shipment's items (mapped to the
+  // legacy {itemName, unit} shape the card already renders).
+  const dord = schedule.delivery_orders || null;
+  const items = dord
+    ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)) }))
+    : parseItems(o.items);
   const preferredTime = o.time_slot || "";
   const tripInfo = isTrip ? schedule : null;
   const isLegacy = String(schedule.id).startsWith("legacy-");
@@ -140,6 +145,9 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
         {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab">&#8942;&#8942;</span>}
         <span className="text-xs text-gray-400 font-medium flex-shrink-0">#{index + 1}</span>
         <span className={`font-bold text-xs flex-shrink-0 ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
+        {dord && (
+          <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded flex-shrink-0" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>
+        )}
         {isTrip && tripInfo && (
           <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0 ${tripStatusColor(tripInfo.trip_status)}`}>
             Trip {tripInfo.trip_no}/{tripInfo.total_trips}
@@ -235,9 +243,12 @@ function TeamPrintView({ team, onClose }) {
   (team.schedules || []).forEach(sc => {
     const o = sc.orders;
     if (!o) return;
-    const items = parseItemsSafe(o.items);
+    // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO number
+    const items = sc.delivery_orders
+      ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)) }))
+      : parseItemsSafe(o.items);
     const displayItems = items.length > 0 ? items : [{}];
-    displayItems.forEach((item, idx) => { allRows.push({ o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
+    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
   });
 
   return (
@@ -666,6 +677,8 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   const [serviceOrders, setServiceOrders] = useState([]);
   const [unscheduledServices, setUnscheduledServices] = useState([]);
+  const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
+  const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
   const [readiness, setReadiness] = useState(null);
   const [suggestions, setSuggestions] = useState(null);
   const [showReadiness, setShowReadiness] = useState(false);
@@ -676,15 +689,22 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     setLoading(true);
     try {
       const qs = companyId ? `&company_id=${companyId}` : "";
-      const [teamsRes, schedulesRes, unassignedRes, tripsRes] = await Promise.all([
+      const [teamsRes, schedulesRes, unassignedRes, tripsRes, dosRes] = await Promise.all([
         af(`${API}/delivery-teams?date=${date}${qs}`),
         af(`${API}/delivery-schedules?date=${date}${qs}`),
         af(`${API}/delivery/unassigned?date=${date}${qs}`),
         af(`${API}/order-trips?date=${date}`),
+        // Phase 2B: draft DOs feed the pool; draft+scheduled DOs exclude their
+        // SO from whole-order scheduling (an order ships as DOs OR whole, never both)
+        af(`${API}/delivery-orders?status=draft,scheduled,out_for_delivery,arrived`),
       ]);
-      const [teamsData, schedulesData, unassignedData, tripsData] = await Promise.all([
+      const [teamsData, schedulesData, unassignedData, tripsData, dosData] = await Promise.all([
         teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
+        dosRes.ok ? dosRes.json() : Promise.resolve({ delivery_orders: [] }),
       ]);
+      const allActiveDos = dosData.delivery_orders || [];
+      setUnassignedDos(allActiveDos.filter(d => d.status === "draft"));
+      setActiveDoSoNumbers(new Set(allActiveDos.map(d => d.sales_orders?.order_number).filter(Boolean)));
 
       const teamsList = teamsData.teams || (Array.isArray(teamsData) ? teamsData : []);
       const schedulesList = schedulesData.schedules || (Array.isArray(schedulesData) ? schedulesData : []);
@@ -756,11 +776,14 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   const activeVehicles = vehicles.filter(v => v.status === "Active");
 
-  // Combined unassigned list: regular orders + service orders + trips
+  // Combined unassigned list: regular orders + service orders + trips + DOs.
+  // Orders whose SO has active Delivery Orders are removed from the
+  // whole-order pool — they are scheduled per-DO instead.
   const combinedUnassigned = [
-    ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service").map(o => ({ ...o, _type: "order" })),
+    ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service" && !activeDoSoNumbers.has(o.so_number)).map(o => ({ ...o, _type: "order" })),
     ...serviceOrders.map(o => ({ ...o, _type: "service" })),
     ...trips.map(t => ({ ...t, _type: "trip" })),
+    ...unassignedDos.map(d => ({ ...d, _type: "do" })),
   ].sort((a, b) => {
     const aTime = (a._type === "order" || a._type === "service") ? (a.time_slot || "") : (a.orders?.time_slot || "");
     const bTime = (b._type === "order" || b._type === "service") ? (b.time_slot || "") : (b.orders?.time_slot || "");
@@ -792,6 +815,16 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
       await af(`${API}/orders/${id}/set-date`, {
         method: "PATCH", body: JSON.stringify({ delivery_date: date }),
       }).catch(() => {});
+    }
+
+    if (type === "do") {
+      // Phase 2B: schedule a Delivery Order — backend flips the DO to
+      // "scheduled" and logs the event.
+      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ delivery_order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      loadData();
+      return;
     }
 
     if (type === "trip") {
@@ -990,6 +1023,37 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
               {combinedUnassigned.length === 0
                 ? <p className="text-xs text-gray-400 text-center py-4">All assigned!</p>
                 : combinedUnassigned.map(item => {
+                    if (item._type === "do") {
+                      // Delivery Order card (Phase 2B) — one shipment of a sales order
+                      const so = item.sales_orders || {};
+                      const doItems = (item.delivery_order_items || []).filter(i => i.status !== "cancelled");
+                      return (
+                        <div key={`do-${item.id}`} className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
+                          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "do" })}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">DO</span>
+                              <span className="font-bold text-violet-700 text-xs">{item.do_number}</span>
+                              <span className="text-xs text-gray-400">{so.order_number}</span>
+                            </div>
+                            <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
+                          </div>
+                          <p className="text-xs font-medium text-gray-700">{so.customer_name}</p>
+                          <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
+                          {item.delivery_date && <p className="text-xs text-indigo-600 font-medium">target {item.delivery_date}</p>}
+                          <p className="text-xs text-gray-400 mt-1 truncate">{doItems.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</p>
+                          {!readOnly && teams.length > 0 && (
+                            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "do"); }}
+                              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+                              <option value="">Assign to team...</option>
+                              {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending" || deriveTeamStatus(t.schedules) === "Confirmed").map(t => (
+                                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      );
+                    }
                     if (item._type === "trip") {
                       return (
                         <TripCard key={`trip-${item.id}`} trip={item} teams={teams} isLocked={readOnly}

@@ -27,7 +27,19 @@ const STATUS_STYLE = {
   confirmed: "bg-violet-100 text-violet-700",
   amended: "bg-amber-100 text-amber-700",
   delivered: "bg-emerald-100 text-emerald-700",
+  partially_delivered: "bg-indigo-100 text-indigo-700",
   cancelled: "bg-red-100 text-red-600",
+};
+
+// Delivery Order (shipment) statuses — Phase 2B
+const DO_STATUS_STYLE = {
+  draft: "bg-gray-100 text-gray-600",
+  scheduled: "bg-blue-100 text-blue-700",
+  out_for_delivery: "bg-indigo-100 text-indigo-700",
+  arrived: "bg-amber-100 text-amber-700",
+  completed: "bg-emerald-100 text-emerald-700",
+  failed: "bg-red-100 text-red-600",
+  cancelled: "bg-gray-100 text-gray-400",
 };
 
 // Today's date (Malaysia, UTC+8) as YYYY-MM-DD for date inputs
@@ -317,6 +329,15 @@ export default function OrdersPage() {
   const [arrivalItems, setArrivalItems] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
   const [viewArrival, setViewArrival] = useState(null);
+
+  // Delivery Orders (Phase 2B) — shipments of the viewed sales order
+  const [doData, setDoData] = useState(null);      // { delivery_orders, items } or null (no permission / not loaded)
+  const [doModalOpen, setDoModalOpen] = useState(false);
+  const [doPick, setDoPick] = useState({});         // sales_order_item_id -> qty string
+  const [doDate, setDoDate] = useState("");
+  const [doRemark, setDoRemark] = useState("");
+  const [doOverride, setDoOverride] = useState(false);
+  const [doSaving, setDoSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_ORDER);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -439,13 +460,86 @@ export default function OrdersPage() {
     return { orderId: legacyOrder.id, items: Array.isArray(items) ? items : [] };
   };
 
+  // ── Delivery Orders (Phase 2B) ──────────────────────────────────
+  // Loads DOs + per-item allocation summary for the viewed order. 403
+  // (no DELIVERY_ORDER_VIEW) hides the section rather than erroring.
+  const loadDeliveryOrders = async (orderId) => {
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${orderId}/delivery-orders`, { headers });
+      if (!res.ok) { setDoData(null); return; }
+      const d = await res.json();
+      setDoData({ delivery_orders: d.delivery_orders || [], items: d.items || [] });
+    } catch { setDoData(null); }
+  };
+
+  const openDoModal = async () => {
+    // Prefill quantities from the deterministic recommendation (ready items,
+    // full remaining qty). Falls back to empty picks if the call fails.
+    const pick = {};
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-recommendation`, { headers });
+      if (res.ok) {
+        const rec = await res.json();
+        for (const s of (rec.suggested_items_for_next_do || [])) pick[s.sales_order_item_id] = String(s.quantity);
+      }
+    } catch {}
+    setDoPick(pick);
+    setDoDate(viewingOrder?.delivery_date && viewingOrder.delivery_date !== "TBC" ? viewingOrder.delivery_date : "");
+    setDoRemark("");
+    setDoOverride(false);
+    setDoModalOpen(true);
+  };
+
+  const createDeliveryOrder = async () => {
+    const items = Object.entries(doPick)
+      .map(([id, q]) => ({ sales_order_item_id: id, quantity: Number(q) }))
+      .filter(i => i.quantity > 0);
+    if (items.length === 0) { toast.warning("Select at least one item with quantity"); return; }
+    // Client-side over-allocation guard (server enforces it authoritatively)
+    for (const i of items) {
+      const summary = (doData?.items || []).find(s => s.sales_order_item_id === i.sales_order_item_id);
+      if (summary && i.quantity > summary.remaining_qty) {
+        toast.error(`${summary.product_name}: only ${summary.remaining_qty} remaining`);
+        return;
+      }
+    }
+    setDoSaving(true);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-orders`, {
+        method: "POST", headers,
+        body: JSON.stringify({ items, delivery_date: doDate || null, remark: doRemark || null, override_arrival: doOverride }),
+      });
+      const d = await res.json();
+      if (!res.ok) { toast.error(d.error || "Failed to create Delivery Order"); setDoSaving(false); return; }
+      toast.success(`${d.delivery_order.do_number} created`);
+      setDoModalOpen(false);
+      loadDeliveryOrders(viewingOrder.id);
+    } catch (e) { toast.error("Network error"); }
+    setDoSaving(false);
+  };
+
+  const cancelDeliveryOrder = async (dord) => {
+    if (!window.confirm(`Cancel ${dord.do_number}? Its quantities return to the pool.`)) return;
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/delivery-orders/${dord.id}/cancel`, { method: "POST", headers, body: JSON.stringify({}) });
+    const d = await res.json();
+    if (!res.ok) { toast.error(d.error || "Failed"); return; }
+    toast.success(`${dord.do_number} cancelled`);
+    loadDeliveryOrders(viewingOrder.id);
+  };
+
   // ── Order View (read-only detail) ──────────────────────────────
   const openView = async (o) => {
     setViewingOrder(o); // show instantly with list data
     setViewArrival(null);
+    setDoData(null);
     const { order: full, legacy_order } = await getFullOrder(o);
     setViewingOrder(full);
     setViewArrival(parseLegacyArrival(legacy_order));
+    loadDeliveryOrders(o.id);
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
@@ -920,6 +1014,50 @@ export default function OrdersPage() {
                     </div>
                   </div>
 
+                  {/* Delivery Orders (shipments) — Phase 2B */}
+                  {doData && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-gray-500">DELIVERY ORDERS ({doData.delivery_orders.filter(d => d.status !== "cancelled").length})</p>
+                        {o.status !== "cancelled" && doData.items.some(i => i.remaining_qty > 0) && (
+                          <button onClick={openDoModal} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">+ Create Delivery Order</button>
+                        )}
+                      </div>
+                      {/* Per-item delivered/remaining progress */}
+                      <div className="space-y-1 mb-2">
+                        {doData.items.map(it => (
+                          <div key={it.sales_order_item_id} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                            <span className="flex-1 truncate text-gray-800">{it.product_name}{it.size ? ` (${it.size})` : ""}</span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${it.arrived ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{it.arrived ? "arrived" : "waiting"}</span>
+                            <span className="text-gray-500 whitespace-nowrap">{it.delivered_qty}/{it.ordered_qty} delivered{it.allocated_qty > 0 ? ` · ${it.allocated_qty} scheduled` : ""}{it.remaining_qty > 0 ? ` · ${it.remaining_qty} left` : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* DO cards */}
+                      <div className="space-y-1.5">
+                        {doData.delivery_orders.length === 0 && <p className="text-xs text-gray-400">No delivery orders yet — this order ships as a whole unless you split it.</p>}
+                        {doData.delivery_orders.map(d => (
+                          <div key={d.id} className={`border rounded-xl p-2.5 ${d.status === "cancelled" ? "border-gray-100 bg-gray-50 opacity-60" : "border-violet-100 bg-violet-50/40"}`}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold text-violet-700">{d.do_number}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${DO_STATUS_STYLE[d.status] || "bg-gray-100 text-gray-600"}`}>{d.status.replace(/_/g, " ")}</span>
+                                {d.delivery_date && <span className="text-xs text-gray-500">{d.delivery_date}</span>}
+                              </div>
+                              {["draft", "scheduled"].includes(d.status) && (
+                                <button onClick={() => cancelDeliveryOrder(d)} className="text-[10px] text-red-400 hover:text-red-600">Cancel</button>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1">
+                              {(d.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}
+                            </p>
+                            {d.remark && <p className="text-[10px] text-gray-400 mt-0.5">{d.remark}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Item Arrival Status */}
                   {viewArrival && viewArrival.items.length > 0 && (
                     <div>
@@ -966,6 +1104,72 @@ export default function OrdersPage() {
                 </div>
               </>);
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Create Delivery Order modal (Phase 2B) */}
+      {doModalOpen && viewingOrder && doData && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="px-5 py-3.5 border-b flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-gray-900">Create Delivery Order</h3>
+                <p className="text-xs text-gray-500">{viewingOrder.order_number} · pick items and quantities for this shipment</p>
+              </div>
+              <button onClick={() => setDoModalOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+            </div>
+            <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+              {doData.items.filter(i => i.remaining_qty > 0).map(it => {
+                const picked = doPick[it.sales_order_item_id] || "";
+                const blocked = !it.arrived && !doOverride;
+                return (
+                  <div key={it.sales_order_item_id} className={`flex items-center gap-2 rounded-xl border p-2.5 ${blocked ? "border-amber-200 bg-amber-50/50" : "border-gray-200"}`}>
+                    <input type="checkbox" checked={Number(picked) > 0} disabled={blocked}
+                      onChange={e => setDoPick(p => ({ ...p, [it.sales_order_item_id]: e.target.checked ? String(it.remaining_qty) : "" }))} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{it.product_name}{it.size ? ` (${it.size})` : ""}</p>
+                      <p className="text-[10px] text-gray-400">
+                        {it.remaining_qty} of {it.ordered_qty} remaining
+                        <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-medium ${it.arrived ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{it.arrived ? "arrived" : "not arrived"}</span>
+                      </p>
+                    </div>
+                    <input type="number" min="1" max={it.remaining_qty} value={picked} disabled={blocked}
+                      onChange={e => {
+                        const v = e.target.value;
+                        // clamp to remaining — over-allocation prevented at input level
+                        const n = Number(v);
+                        setDoPick(p => ({ ...p, [it.sales_order_item_id]: v === "" ? "" : String(Math.max(0, Math.min(it.remaining_qty, n || 0))) }));
+                      }}
+                      className="w-16 px-2 py-1.5 text-sm text-right rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400 disabled:bg-gray-50" />
+                  </div>
+                );
+              })}
+              {doData.items.some(i => i.remaining_qty > 0 && !i.arrived) && (
+                <label className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 rounded-xl p-2.5 cursor-pointer">
+                  <input type="checkbox" checked={doOverride} onChange={e => setDoOverride(e.target.checked)} />
+                  Override arrival check — schedule items that have not arrived yet (requires permission)
+                </label>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Target delivery date</label>
+                  <input type="date" value={doDate} onChange={e => setDoDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Remark</label>
+                  <input value={doRemark} onChange={e => setDoRemark(e.target.value)} placeholder="Optional"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3.5 border-t">
+              <button onClick={createDeliveryOrder} disabled={doSaving || !Object.values(doPick).some(v => Number(v) > 0)}
+                className="w-full py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                {doSaving ? "Creating…" : "Create Delivery Order"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -116,7 +116,13 @@ export default function DriverPage() {
 
         {!loading && allSchedules.map((sc, i) => {
           const o = sc.orders || {};
-          const items = parseItems(o.items);
+          // Phase 2B: a Delivery Order stop shows ONLY that shipment's items —
+          // the driver never sees the rest of the sales order. Legacy stops
+          // (no delivery_orders join) render the full order items as before.
+          const dord = sc.delivery_orders || null;
+          const items = dord
+            ? (dord.delivery_order_items || []).filter(it => it.status !== "cancelled").map(it => ({ itemCode: it.product_code, itemName: [it.product_name, it.size, it.color].filter(Boolean).join(" "), unit: String(Number(it.quantity)) }))
+            : parseItems(o.items);
           const st = STATUS_STYLE[sc.status] || STATUS_STYLE.scheduled;
           const isExpanded = expandedStop === sc.id;
           const hasBalance = parseFloat(o.balance) > 0;
@@ -131,8 +137,9 @@ export default function DriverPage() {
                     {isDone ? "✓" : i + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-gray-900">{o.so_number || "-"}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-gray-900">{dord ? dord.do_number : (o.so_number || "-")}</span>
+                      {dord && <span className="text-xs text-gray-400">{o.so_number}</span>}
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.bg} ${st.text}`}>{st.label}</span>
                     </div>
                     <p className="text-sm text-gray-700 font-medium">{o.customer_name || "-"}</p>
