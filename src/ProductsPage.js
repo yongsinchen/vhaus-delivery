@@ -29,7 +29,12 @@ export default function ProductsPage() {
   const [isCatalogueGroup, setIsCatalogueGroup] = useState(false);
   const [categories, setCategories] = useState([]);
   const [orgProductMap, setOrgProductMap] = useState({}); // organization_product_id -> { companyCount, isShared, name }
-  const [orgMapReady, setOrgMapReady] = useState(false);  // gate table render until scope data arrives (no "Single company" flash)
+  // Initial-load progress (one slice per data source): the table renders only
+  // at 100%, with a % bar shown while sources arrive — no half-loaded flash.
+  const [orgMapReady, setOrgMapReady] = useState(false);
+  const [productsReady, setProductsReady] = useState(false);
+  const [suppliersReady, setSuppliersReady] = useState(false);
+  const [categoriesReady, setCategoriesReady] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksData, setLinksData] = useState(null);
@@ -96,24 +101,30 @@ export default function ProductsPage() {
 
   const loadSuppliers = useCallback(async () => {
     if (!companyId) return;
-    const headers = await authHeaders();
-    const [supRes, orgRes] = await Promise.all([
-      fetch(`${API}/suppliers?company_id=${companyId}`, { headers }),
-      fetch(`${API}/organization-suppliers`, { headers }),
-    ]);
-    const supData = await supRes.json();
-    const orgData = await orgRes.json();
-    setSuppliers(supData.suppliers || []);
-    setOrgSuppliers(orgData.organizationSuppliers || []);
-    setIsCatalogueGroup(!!orgData.isCatalogueGroup);
+    try {
+      const headers = await authHeaders();
+      const [supRes, orgRes] = await Promise.all([
+        fetch(`${API}/suppliers?company_id=${companyId}`, { headers }),
+        fetch(`${API}/organization-suppliers`, { headers }),
+      ]);
+      const supData = await supRes.json();
+      const orgData = await orgRes.json();
+      setSuppliers(supData.suppliers || []);
+      setOrgSuppliers(orgData.organizationSuppliers || []);
+      setIsCatalogueGroup(!!orgData.isCatalogueGroup);
+    } catch (e) { console.error("loadSuppliers:", e); }
+    finally { setSuppliersReady(true); }
   }, [companyId]);
 
   const loadCategories = useCallback(async () => {
     if (!companyId) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/categories?company_id=${companyId}`, { headers });
-    const d = await res.json();
-    setCategories(d.categories || []);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/categories?company_id=${companyId}`, { headers });
+      const d = await res.json();
+      setCategories(d.categories || []);
+    } catch (e) { console.error("loadCategories:", e); }
+    finally { setCategoriesReady(true); }
   }, [companyId]);
 
   const loadOrgProducts = useCallback(async () => {
@@ -152,12 +163,15 @@ export default function ProductsPage() {
     if (filterSupplier) params.set(isCatalogueGroup ? "org_supplier_id" : "supplier_id", filterSupplier);
     if (filterCategory) params.set("category_id", filterCategory);
     if (filterActive !== "all") params.set("is_active", filterActive);
-    const res = await fetch(`${API}/products?${params}`, { headers });
-    const d = await res.json();
-    setProducts(d.products || []);
-    setTotal(d.total || 0);
-    setPage(p);
+    try {
+      const res = await fetch(`${API}/products?${params}`, { headers });
+      const d = await res.json();
+      setProducts(d.products || []);
+      setTotal(d.total || 0);
+      setPage(p);
+    } catch (e) { console.error("loadProducts:", e); }
     setLoading(false);
+    setProductsReady(true);
   }, [companyId, debouncedSearch, filterSupplier, filterCategory, filterActive, isCatalogueGroup]);
 
   useEffect(() => { loadSuppliers(); loadCategories(); loadOrgProducts(); }, [loadSuppliers, loadCategories, loadOrgProducts]);
@@ -543,6 +557,11 @@ export default function ProductsPage() {
   // ── Pagination ────────────────────────────────────────────────────
   const totalPages = Math.ceil(total / 50);
 
+  // ── Initial load progress (one slice per data source) ─────────────
+  const readyFlags = [productsReady, suppliersReady, categoriesReady, orgMapReady];
+  const loadProgress = Math.round((readyFlags.filter(Boolean).length / readyFlags.length) * 100);
+  const initialReady = loadProgress === 100;
+
   // ── Render ────────────────────────────────────────────────────────
 
   return (
@@ -691,12 +710,23 @@ export default function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {/* Skeleton until BOTH the product page and the org scope map are
-                loaded — otherwise rows flash "Single company" and flip to
-                "Shared · 3 companies" a moment later. */}
-            {(loading || !orgMapReady) && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
-            {!loading && orgMapReady && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
-            {!loading && orgMapReady && products.map(p => {
+            {/* Initial load: % progress bar until ALL data sources (products,
+                suppliers, categories, org scope map) are in — the table then
+                renders once, fully correct (no "Single company" flash). */}
+            {!initialReady && (
+              <tr><td colSpan={12} className="px-4 py-16">
+                <div className="max-w-xs mx-auto text-center">
+                  <div className="w-full bg-gray-100 rounded-full h-2.5 mb-3 overflow-hidden">
+                    <div className="bg-violet-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${Math.max(loadProgress, 5)}%` }} />
+                  </div>
+                  <p className="text-sm font-medium text-gray-500">Loading products… {loadProgress}%</p>
+                </div>
+              </td></tr>
+            )}
+            {/* Subsequent page/filter loads keep the lightweight skeleton */}
+            {initialReady && loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-16" /></td><td colSpan={5} className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
+            {initialReady && !loading && products.length === 0 && <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No products found</td></tr>}
+            {initialReady && !loading && products.map(p => {
               const orgInfo = p.organization_product_id ? orgProductMap[p.organization_product_id] : null;
               const isShared = orgInfo?.isShared;
               return (
