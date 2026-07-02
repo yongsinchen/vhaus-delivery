@@ -685,7 +685,6 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   const [trips, setTrips] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [firstLoad, setFirstLoad] = useState(true); // skeleton only on initial load; refetches keep the board mounted (no blink)
   const [showAddTeam, setShowAddTeam] = useState(false);
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [dragOrder, setDragOrder] = useState(null);
@@ -754,7 +753,6 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
       setTrips(Array.isArray(tripsData) ? tripsData : []);
     } catch (e) { console.error(e); }
     setLoading(false);
-    setFirstLoad(false);
   }, [date, companyId, vehicles]);
 
   const loadVehicles = useCallback(async () => {
@@ -810,6 +808,10 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   const combinedUnassigned = [
     ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service" && !activeDoSoNumbers.has(o.so_number)).map(o => ({ ...o, _type: "order" })),
     ...serviceOrders.map(o => ({ ...o, _type: "service" })),
+    // Undated (unscheduled) service orders — created without a date, so they
+    // don't come back from /delivery/unassigned?date=. Show them in the pool so
+    // they can be scheduled. Dedupe against dated serviceOrders by id.
+    ...unscheduledServices.filter(u => !serviceOrders.some(so => so.id === u.id)).map(o => ({ ...o, _type: "service" })),
     ...trips.map(t => ({ ...t, _type: "trip" })),
     // A DO with a target delivery_date only appears in the pool on that date's
     // tab; undated drafts appear on every date (they still need a slot).
@@ -942,8 +944,7 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
         </div>
       </div>
 
-      {loading && firstLoad && <div className="flex flex-col xl:flex-row gap-4"><div className="xl:w-72 space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}</div><div className="flex-1 space-y-3">{[1,2].map(i=><div key={i} className="h-40 bg-white rounded-xl border border-gray-200 animate-pulse" />)}</div></div>}
-      {loading && !firstLoad && <div className="absolute inset-0 z-40 flex items-start justify-center pt-24 bg-white/40 pointer-events-none"><div className="flex items-center gap-2 bg-white shadow-lg rounded-full px-4 py-2 text-sm text-gray-600 border"><span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />Updating…</div></div>}
+      {loading && <div className="absolute inset-0 z-40 flex items-start justify-center pt-24 bg-white/40 pointer-events-none"><div className="flex items-center gap-2 bg-white shadow-lg rounded-full px-4 py-2 text-sm text-gray-600 border"><span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />Updating…</div></div>}
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
