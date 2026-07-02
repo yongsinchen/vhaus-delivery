@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback , memo } from "react";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { useLoading } from "./UIComponents";
 
 const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", is_active: true };
 
-export default function UserManagement() {
+function UserManagement() {
   const { user: currentUser, activeCompanyId } = useAuth();
   const { withLoading } = useLoading();
   const isMaster = currentUser?.role === "master";
@@ -552,3 +552,5 @@ export default function UserManagement() {
     </div>
   );
 }
+
+export default memo(UserManagement);

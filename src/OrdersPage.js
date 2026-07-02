@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
@@ -300,7 +300,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
   setTimeout(() => { w.print(); }, 350);
 }
 
-export default function OrdersPage() {
+function OrdersPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -1859,3 +1859,5 @@ function AttachmentField({ idx, url, onUpload, onClear }) {
     </div>
   );
 }
+
+export default memo(OrdersPage);

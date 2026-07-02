@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo , memo } from "react";
 import { supabase } from "./AuthContext";
 
 const API = "https://vhaus-bot-production.up.railway.app";
@@ -25,7 +25,7 @@ function agingBadge(days) {
   return { label: "Critical", cls: "bg-red-100 text-red-700" };
 }
 
-export default function OutstandingBalancePage({ companyId }) {
+function OutstandingBalancePage({ companyId }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
@@ -138,3 +138,5 @@ export default function OutstandingBalancePage({ companyId }) {
     </div>
   );
 }
+
+export default memo(OutstandingBalancePage);

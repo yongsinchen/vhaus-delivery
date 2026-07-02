@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
@@ -30,7 +30,7 @@ function commissionReason(c) {
   return null;
 }
 
-export default function CommissionPage() {
+function CommissionPage() {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -525,3 +525,5 @@ export default function CommissionPage() {
     </div>
   );
 }
+
+export default memo(CommissionPage);

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback , memo } from "react";
 import { useAuth } from "./AuthContext";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
-export default function UserPermissionsPage() {
+function UserPermissionsPage() {
   const { authFetch } = useAuth();
   const [users, setUsers] = useState([]);
   const [modules, setModules] = useState([]);
@@ -280,3 +280,5 @@ function ModuleSection({ mod, expanded, onToggle, getEffective, togglePerm, rese
     </div>
   );
 }
+
+export default memo(UserPermissionsPage);

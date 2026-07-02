@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
@@ -15,7 +15,7 @@ const AGING_STYLE = {
 };
 const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile"];
 
-export default function FinancePage() {
+function FinancePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -454,3 +454,5 @@ export default function FinancePage() {
     </div>
   );
 }
+
+export default memo(FinancePage);

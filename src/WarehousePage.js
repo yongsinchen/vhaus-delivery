@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 let jsQR = null;
@@ -11,7 +11,7 @@ const TABS = ["Receive DOs", "Scan & Store", "Pick List", "Loading"];
 const DO_STATUS_STYLE = { Processed: "bg-gray-100 text-gray-600", Reviewed: "bg-blue-100 text-blue-700", Labeled: "bg-violet-100 text-violet-700", Completed: "bg-emerald-100 text-emerald-700" };
 const PKG_STATUS = { pending: "bg-gray-100 text-gray-600", stored: "bg-blue-100 text-blue-700", picked: "bg-amber-100 text-amber-700", loaded: "bg-violet-100 text-violet-700", delivered: "bg-emerald-100 text-emerald-700" };
 
-export default function WarehousePage() {
+function WarehousePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -534,3 +534,5 @@ export default function WarehousePage() {
     </div>
   );
 }
+
+export default memo(WarehousePage);

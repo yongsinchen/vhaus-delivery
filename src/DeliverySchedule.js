@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback , memo } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 
@@ -676,7 +676,7 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
 }
 
 // -- Main Component ----------------------------------------------------
-export default function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
+function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
@@ -1318,3 +1318,5 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     </div>
   );
 }
+
+export default memo(DeliverySchedule);

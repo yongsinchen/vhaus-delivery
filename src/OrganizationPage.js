@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 
 const API = "https://vhaus-bot-production.up.railway.app";
@@ -44,7 +44,7 @@ const TABS = [
 const EMPTY_SUP = { name: "", notes: "", contact: "", phone: "", email: "", address: "", is_active: true };
 const EMPTY_PROD = { name: "", brand: "", description: "", dimensions: "", specification: "", image_url: "", barcode: "", unit_cost: "", unit_price: "", is_customizable: false, is_active: true };
 
-export default function OrganizationPage() {
+function OrganizationPage() {
   const { user, activeCompanyId } = useAuth();
   const companyId = activeCompanyId || user?.company_id;
 
@@ -512,3 +512,5 @@ export default function OrganizationPage() {
     </div>
   );
 }
+
+export default memo(OrganizationPage);

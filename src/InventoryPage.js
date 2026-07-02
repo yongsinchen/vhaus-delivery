@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
@@ -18,7 +18,7 @@ const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveC
 
 const TABS = ["Stock Levels", "Movements", "Adjust", "Import"];
 
-export default function InventoryPage() {
+function InventoryPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -312,3 +312,5 @@ export default function InventoryPage() {
     </div>
   );
 }
+
+export default memo(InventoryPage);

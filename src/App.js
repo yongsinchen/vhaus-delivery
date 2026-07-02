@@ -472,25 +472,71 @@ export default function App() {
   };
 
   // ── Data loading ────────────────────────────────────────────────
-  const loadOrders = async () => {
-    if (orders.length === 0) setLoading(true); setError(null);
-    // Exactly the columns fromDb() maps — keep the two lists in sync
-    const ORDER_COLS = "id, created_at, so_number, customer_name, address, contact, order_date, salesman, order_amount, balance, delivery_date, time_slot, plate_no, type, service_note, sv_number, remark, status, items, photo_url, linked_so, company_id";
-    let q = supabase.from("orders").select(ORDER_COLS).order("created_at", { ascending: true });
-    // Scope to the user's own company (master included). Only a user with no
-    // company_id (super-admin) sees everything.
-    if (companyId) q = q.eq("company_id", companyId);
-    const { data, error: err } = await q;
-    if (err) { setError("Failed to load orders: " + err.message); setLoading(false); return; }
-    const all = (data || []).map(fromDb);
+  // Exactly the columns fromDb() maps — keep the two lists in sync
+  const ORDER_COLS = "id, created_at, so_number, customer_name, address, contact, order_date, salesman, order_amount, balance, delivery_date, time_slot, plate_no, type, service_note, sv_number, remark, status, items, photo_url, linked_so, company_id";
+  // Dashboard window: how far back closed orders stay in the startup fetch.
+  // Older months are fetched on demand when the calendar navigates to them.
+  const ORDER_WINDOW_DAYS = 120;
+
+  const applySalesmanFilter = (all) => {
     setAllCompanyOrders(all);
     if (isSalesman && user?.salesman_name) {
       const name = user.salesman_name.toLowerCase().trim();
       setOrders(all.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name)));
     } else { setOrders(all); }
-    setLoading(false);
-
   };
+
+  const loadOrders = async () => {
+    if (orders.length === 0) setLoading(true); setError(null);
+    const cutoff = new Date(Date.now() - ORDER_WINDOW_DAYS * 86400000).toISOString().split("T")[0];
+    // Windowed fetch instead of the full table: an order is loaded when it is
+    // still open, OR still owes money, OR is recent enough for the dashboard
+    // views (today / next-3-days / recent calendar months). Closed months
+    // beyond the window load lazily via loadCalendarMonth below.
+    let q = supabase.from("orders").select(ORDER_COLS)
+      .or(`status.not.in.("Delivered","Serviced","Cancelled"),balance.gt.0,delivery_date.gte.${cutoff},created_at.gte.${cutoff}`)
+      .order("created_at", { ascending: true });
+    // Scope to the user's own company (master included). Only a user with no
+    // company_id (super-admin) sees everything.
+    if (companyId) q = q.eq("company_id", companyId);
+    const { data, error: err } = await q;
+    if (err) { setError("Failed to load orders: " + err.message); setLoading(false); return; }
+    fetchedMonthsRef.current = new Set();
+    applySalesmanFilter((data || []).map(fromDb));
+    setLoading(false);
+  };
+
+  // Lazy history: when the calendar shows a month older than the startup
+  // window, fetch that month's orders once and merge them into state.
+  const fetchedMonthsRef = useRef(new Set());
+  const loadCalendarMonth = async (monthStr) => {
+    if (fetchedMonthsRef.current.has(monthStr)) return;
+    fetchedMonthsRef.current.add(monthStr);
+    const [y, m] = monthStr.split("-").map(Number);
+    const start = `${monthStr}-01`;
+    const end = `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    let q = supabase.from("orders").select(ORDER_COLS).gte("delivery_date", start).lte("delivery_date", end);
+    if (companyId) q = q.eq("company_id", companyId);
+    const { data, error: err } = await q;
+    if (err || !data?.length) return;
+    setAllCompanyOrders(prev => {
+      const seen = new Set(prev.map(o => o.id));
+      const merged = [...prev, ...data.filter(o => !seen.has(o.id)).map(fromDb)];
+      // keep the salesman-filtered list in sync
+      if (isSalesman && user?.salesman_name) {
+        const name = user.salesman_name.toLowerCase().trim();
+        setOrders(merged.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name)));
+      } else { setOrders(merged); }
+      return merged;
+    });
+  };
+
+  // Trigger the lazy month fetch whenever the calendar month falls outside the window
+  useEffect(() => {
+    if (!user || !calMonthStr) return;
+    const cutoffMonth = new Date(Date.now() - ORDER_WINDOW_DAYS * 86400000).toISOString().slice(0, 7);
+    if (calMonthStr < cutoffMonth) loadCalendarMonth(calMonthStr);
+  }, [calMonthStr, user, companyId]); // eslint-disable-line
 
   const loadServicePending = async () => {
     setSpLoading(true);
@@ -591,6 +637,8 @@ export default function App() {
   }), [orders]);
 
   const todayOrders = useMemo(() => orders.filter(o => o.deliveryDate === todayStr), [orders]);
+  const balanceOrders = useMemo(() => orders.filter(o => parseFloat(o.balance) > 0).sort((a,b) => new Date(a.deliveryDate)-new Date(b.deliveryDate)), [orders]);
+  const flaggedOrders = useMemo(() => orders.filter(o => o.status === "Flagged"), [orders]);
 
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = o => setViewOrder(o);
@@ -778,8 +826,7 @@ export default function App() {
   );
 
   // ── Page content ────────────────────────────────────────────────
-  const balanceOrders = orders.filter(o => parseFloat(o.balance) > 0).sort((a,b) => new Date(a.deliveryDate)-new Date(b.deliveryDate));
-  const flaggedOrders = orders.filter(o => o.status === "Flagged");
+  // (balanceOrders / flaggedOrders are memoized above, before the early returns)
 
   const renderPage = () => {
     // OVERVIEW

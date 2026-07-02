@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
@@ -19,7 +19,7 @@ const EMPTY_PRODUCT = {
   unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0,
 };
 
-export default function ProductsPage() {
+function ProductsPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -1343,3 +1343,5 @@ function Field({ label, value, onChange, type = "text", placeholder }) {
     </div>
   );
 }
+
+export default memo(ProductsPage);

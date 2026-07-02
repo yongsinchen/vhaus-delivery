@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
@@ -27,7 +27,7 @@ const authHeaders = async () => {
 
 const TABS = ["Company Info", "Branches", "Warehouses", "Operations", "Categories", "Options Library"];
 
-export default function CompanySettingsPage() {
+function CompanySettingsPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -673,3 +673,5 @@ function Field({ label, value, onChange, placeholder }) {
     </div>
   );
 }
+
+export default memo(CompanySettingsPage);

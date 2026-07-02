@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
 
@@ -17,7 +17,7 @@ const STATUS_STYLE = {
 
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Instalment"];
 
-export default function DriverPage() {
+function DriverPage() {
   useAuth();
   const toast = useToast();
   const [date] = useState(new Date().toISOString().slice(0, 10));
@@ -334,3 +334,5 @@ export default function DriverPage() {
     </div>
   );
 }
+
+export default memo(DriverPage);

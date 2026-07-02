@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
@@ -24,7 +24,7 @@ const ITEM_STATUS_BADGE = (it) => {
   return <span className={`px-2 py-0.5 rounded-full text-xs ${style[it.reason] || "bg-gray-100 text-gray-600"}`}>{(it.reason || "pending").replace(/_/g, " ")}</span>;
 };
 
-export default function SupplierDOPage() {
+function SupplierDOPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -355,3 +355,5 @@ export default function SupplierDOPage() {
     </div>
   );
 }
+
+export default memo(SupplierDOPage);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 
 const API = "https://vhaus-bot-production.up.railway.app";
@@ -15,7 +15,7 @@ const authHeaders = async () => {
 
 const EMPTY = { name: "", code: "", contact: "", cost_divisor: "", color_mode: "combined" };
 
-export default function SuppliersPage() {
+function SuppliersPage() {
   const { user, activeCompanyId } = useAuth();
   const companyId = activeCompanyId || user?.company_id;
 
@@ -446,3 +446,5 @@ function SField({ label, value, onChange, placeholder, disabled }) {
     </div>
   );
 }
+
+export default memo(SuppliersPage);

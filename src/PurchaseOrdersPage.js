@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
@@ -27,7 +27,7 @@ const STATUS_STYLE = {
   cancelled: "bg-red-100 text-red-600",
 };
 
-export default function PurchaseOrdersPage() {
+function PurchaseOrdersPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -296,3 +296,5 @@ export default function PurchaseOrdersPage() {
     </div>
   );
 }
+
+export default memo(PurchaseOrdersPage);
