@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -33,6 +33,7 @@ function commissionReason(c) {
 export default function CommissionPage() {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const effectiveRole = (activeRoleKey || user?.role || "").toLowerCase();
   const isSalesman = effectiveRole === "salesman";
@@ -99,24 +100,36 @@ export default function CommissionPage() {
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
 
   const saveRule = async () => {
-    const payload = { ...ruleForm };
-    if (!payload.user_id) delete payload.user_id;
-    const res = await af(`${API}/commission-rules`, { method: "POST", body: JSON.stringify(payload) });
-    const d = await res.json();
-    if (d.rule) { toast.success("Rule created"); setShowRuleForm(false); loadRules(); }
-    else toast.error(d.error || "Failed");
+    try {
+      await withLoading("Saving rule…", async () => {
+        const payload = { ...ruleForm };
+        if (!payload.user_id) delete payload.user_id;
+        const res = await af(`${API}/commission-rules`, { method: "POST", body: JSON.stringify(payload) });
+        const d = await res.json();
+        if (!d.rule) throw new Error(d.error || "Failed");
+        toast.success("Rule created"); setShowRuleForm(false); loadRules();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const saveIncentive = async () => {
-    const res = await af(`${API}/product-incentives`, { method: "POST", body: JSON.stringify(incForm) });
-    const d = await res.json();
-    if (d.incentive) { toast.success("Incentive added"); setShowIncForm(false); setIncForm({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" }); loadIncentives(); }
-    else toast.error(d.error || "Failed");
+    try {
+      await withLoading("Saving incentive…", async () => {
+        const res = await af(`${API}/product-incentives`, { method: "POST", body: JSON.stringify(incForm) });
+        const d = await res.json();
+        if (!d.incentive) throw new Error(d.error || "Failed");
+        toast.success("Incentive added"); setShowIncForm(false); setIncForm({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" }); loadIncentives();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const deleteIncentive = async (id) => {
-    await af(`${API}/product-incentives/${id}`, { method: "DELETE" });
-    toast.success("Removed"); loadIncentives();
+    try {
+      await withLoading("Removing incentive…", async () => {
+        await af(`${API}/product-incentives/${id}`, { method: "DELETE" });
+        toast.success("Removed"); loadIncentives();
+      });
+    } catch (e) { toast.error("Failed to remove: " + e.message); }
   };
 
   const searchProducts = async (q) => {
@@ -128,26 +141,42 @@ export default function CommissionPage() {
   };
 
   const deleteRule = async (id) => {
-    await af(`${API}/commission-rules/${id}`, { method: "DELETE" });
-    toast.success("Rule deactivated"); loadRules();
+    try {
+      await withLoading("Deactivating rule…", async () => {
+        await af(`${API}/commission-rules/${id}`, { method: "DELETE" });
+        toast.success("Rule deactivated"); loadRules();
+      });
+    } catch (e) { toast.error("Failed: " + e.message); }
   };
 
   const addAdjustment = async (commId) => {
     const amount = window.prompt("Adjustment amount (negative for clawback):");
     if (!amount) return;
     const reason = window.prompt("Reason:") || "";
-    await af(`${API}/commission-adjustments`, { method: "POST", body: JSON.stringify({ commission_id: commId, delta_amt: Number(amount), reason, adjustment_type: Number(amount) < 0 ? "clawback" : "bonus" }) });
-    toast.success("Adjustment recorded"); loadCommissions(); loadPayout();
+    try {
+      await withLoading("Recording adjustment…", async () => {
+        await af(`${API}/commission-adjustments`, { method: "POST", body: JSON.stringify({ commission_id: commId, delta_amt: Number(amount), reason, adjustment_type: Number(amount) < 0 ? "clawback" : "bonus" }) });
+        toast.success("Adjustment recorded"); loadCommissions(); loadPayout();
+      });
+    } catch (e) { toast.error("Failed: " + e.message); }
   };
 
   const addHold = async (commId) => {
-    await af(`${API}/wrong-item-holds`, { method: "POST", body: JSON.stringify({ commission_id: commId }) });
-    toast.warning("Commission held"); loadCommissions(); loadPayout();
+    try {
+      await withLoading("Holding commission…", async () => {
+        await af(`${API}/wrong-item-holds`, { method: "POST", body: JSON.stringify({ commission_id: commId }) });
+        toast.warning("Commission held"); loadCommissions(); loadPayout();
+      });
+    } catch (e) { toast.error("Failed: " + e.message); }
   };
 
   const releaseHold = async (holdId) => {
-    await af(`${API}/wrong-item-holds/${holdId}`, { method: "PATCH", body: JSON.stringify({ status: "released" }) });
-    toast.success("Hold released"); loadCommissions(); loadPayout();
+    try {
+      await withLoading("Releasing hold…", async () => {
+        await af(`${API}/wrong-item-holds/${holdId}`, { method: "PATCH", body: JSON.stringify({ status: "released" }) });
+        toast.success("Hold released"); loadCommissions(); loadPayout();
+      });
+    } catch (e) { toast.error("Failed: " + e.message); }
   };
 
   return (
@@ -274,11 +303,14 @@ export default function CommissionPage() {
           {!isSalesman && (
             <div className="flex gap-2 mb-2">
               <button onClick={async () => {
-                toast.info("Recalculating all commissions...");
-                const res = await af(`${API}/commissions/recalculate-all`, { method: "POST" });
-                const d = await res.json();
-                toast.success(`${d.calculated}/${d.total} orders calculated`);
-                loadCommissions();
+                try {
+                  await withLoading("Recalculating all commissions… this may take a moment", async () => {
+                    const res = await af(`${API}/commissions/recalculate-all`, { method: "POST" });
+                    const d = await res.json();
+                    toast.success(`${d.calculated}/${d.total} orders calculated`);
+                    loadCommissions();
+                  });
+                } catch (e) { toast.error("Recalculation failed: " + e.message); }
               }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
             </div>
           )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce } from "./UIComponents";
+import { useDebounce, useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -21,6 +21,8 @@ const EMPTY_PRODUCT = {
 
 export default function ProductsPage() {
   const { user, activeCompanyId } = useAuth();
+  const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
   const [products, setProducts] = useState([]);
@@ -188,24 +190,36 @@ export default function ProductsPage() {
   };
 
   const linkToProduct = async (itemIds, productId) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/product-review-queue/link`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds, product_id: productId }) });
-    loadReviewQueue();
+    try {
+      await withLoading("Linking to product…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/product-review-queue/link`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds, product_id: productId }) });
+        loadReviewQueue();
+      });
+    } catch (e) { toast.error("Failed to link: " + e.message); }
   };
 
   const createAndLink = async (group) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/product-review-queue/create-and-link`, { method: "POST", headers, body: JSON.stringify({
-      item_ids: group.item_ids, product_code: group.product_code, product_name: group.product_name,
-      size: group.size, color: group.color, unit_price: group.sample_price,
-    }) });
-    loadReviewQueue(); loadProducts(1);
+    try {
+      await withLoading("Creating product…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/product-review-queue/create-and-link`, { method: "POST", headers, body: JSON.stringify({
+          item_ids: group.item_ids, product_code: group.product_code, product_name: group.product_name,
+          size: group.size, color: group.color, unit_price: group.sample_price,
+        }) });
+        loadReviewQueue(); loadProducts(1);
+      });
+    } catch (e) { toast.error("Failed to create: " + e.message); }
   };
 
   const dismissItems = async (itemIds) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/product-review-queue/dismiss`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds }) });
-    loadReviewQueue();
+    try {
+      await withLoading("Dismissing…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/product-review-queue/dismiss`, { method: "POST", headers, body: JSON.stringify({ item_ids: itemIds }) });
+        loadReviewQueue();
+      });
+    } catch (e) { toast.error("Failed to dismiss: " + e.message); }
   };
 
   const searchForLink = async (groupKey, q) => {
@@ -317,41 +331,61 @@ export default function ProductsPage() {
   };
 
   const toggleActive = async (p) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/products/${p.id}/toggle`, { method: "PATCH", headers });
-    loadProducts(page);
+    try {
+      await withLoading("Updating product…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/products/${p.id}/toggle`, { method: "PATCH", headers });
+        loadProducts(page);
+      });
+    } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
   const deleteProduct = async (p) => {
     const label = `${p.code}${p.size ? " · " + p.size : ""}`;
     if (!window.confirm(`Delete "${p.name}" (${label})? This cannot be undone.`)) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/products/${p.id}`, { method: "DELETE", headers });
-    if (res.ok) { setSelectedIds(prev => { const n = new Set(prev); n.delete(p.id); return n; }); loadProducts(page); }
-    else { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to delete"); }
+    try {
+      await withLoading("Deleting product…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/products/${p.id}`, { method: "DELETE", headers });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to delete"); }
+        setSelectedIds(prev => { const n = new Set(prev); n.delete(p.id); return n; }); loadProducts(page);
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const bulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.size} selected product(s)? This cannot be undone.`)) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/products/bulk-delete`, { method: "POST", headers, body: JSON.stringify({ ids: Array.from(selectedIds) }) });
-    if (res.ok) { clearSelection(); loadProducts(page); }
-    else { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to delete"); }
+    try {
+      await withLoading(`Deleting ${selectedIds.size} product(s)…`, async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/products/bulk-delete`, { method: "POST", headers, body: JSON.stringify({ ids: Array.from(selectedIds) }) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to delete"); }
+        clearSelection(); loadProducts(page);
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   // ── Add supplier/category inline ──────────────────────────────────
   const addSupplier = async () => {
     if (!newSupplier.trim()) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/suppliers`, { method: "POST", headers, body: JSON.stringify({ name: newSupplier.trim() }) });
-    if (res.ok) { setNewSupplier(""); loadSuppliers(); }
+    try {
+      await withLoading("Adding supplier…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/suppliers`, { method: "POST", headers, body: JSON.stringify({ name: newSupplier.trim() }) });
+        if (res.ok) { setNewSupplier(""); loadSuppliers(); }
+      });
+    } catch (e) { toast.error("Failed to add supplier: " + e.message); }
   };
 
   const addCategory = async () => {
     if (!newCategory.trim()) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/categories`, { method: "POST", headers, body: JSON.stringify({ name: newCategory.trim() }) });
-    if (res.ok) { setNewCategory(""); loadCategories(); }
+    try {
+      await withLoading("Adding category…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/categories`, { method: "POST", headers, body: JSON.stringify({ name: newCategory.trim() }) });
+        if (res.ok) { setNewCategory(""); loadCategories(); }
+      });
+    } catch (e) { toast.error("Failed to add category: " + e.message); }
   };
 
   // ── Bulk edit ─────────────────────────────────────────────────────
@@ -505,7 +539,7 @@ export default function ProductsPage() {
 
   // Split a review row whose colour holds several options (e.g. "Natural / Walnut")
   // into one row per colour. Saves current edits first so nothing is lost.
-  const splitReviewRow = async (row) => {
+  const splitReviewRow = async (row) => await withLoading("Splitting row…", async () => {
     const headers = await authHeaders();
     const rowEdits = importRows.map(r => ({
       id: r.id, product_code: r.product_code, product_name: r.product_name,
@@ -517,7 +551,7 @@ export default function ProductsPage() {
     const d = await res.json();
     if (res.ok && d.rows) setImportRows(d.rows.map(r => ({ ...r, _action: r.action })));
     else if (!res.ok) setImportError(d.error || "Failed to split row");
-  };
+  });
 
   // Reload suppliers after upload so a newly-saved costing rule is reflected
   useEffect(() => { if (importStep === "review") loadSuppliers(); }, [importStep, loadSuppliers]);

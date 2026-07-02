@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
+import { FullPageLoader, useLoading, useToast } from "./UIComponents";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
@@ -117,6 +118,7 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
   const hasBalance = parseFloat(o.balance) > 0;
   const [trips, setTrips] = useState([]);
   const [tripsLoading, setTripsLoading] = useState(false);
+  const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null);
   useEffect(() => {
     if (!o.soNumber) return;
     setTripsLoading(true);
@@ -176,13 +178,16 @@ function OrderViewModal({ order: o, onClose, onEdit, onDelete, onViewPhoto, orde
                       <div><span className="text-gray-400">Sent: </span><span className="font-medium">{fmt(item.supplierSentDate)}</span></div>
                       <div>
                         <span className="text-gray-400">Arrived: </span>
-                        <input type="date" value={item.arrivalDate || ""} onChange={async e => {
+                        <input type="date" value={item.arrivalDate || ""} disabled={arrivalSavingIdx !== null} onChange={async e => {
                           const val = e.target.value;
-                          const token = (await supabase.auth.getSession()).data?.session?.access_token;
-                          await fetch(`${BACKEND}/orders/${o.id}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                          o.items[i].arrivalDate = val;
-                          if (onRefresh) onRefresh();
-                        }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] focus:outline-none focus:border-violet-400 ${item.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                          setArrivalSavingIdx(i);
+                          try {
+                            const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                            await fetch(`${BACKEND}/orders/${o.id}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                            o.items[i].arrivalDate = val;
+                            if (onRefresh) onRefresh();
+                          } finally { setArrivalSavingIdx(null); }
+                        }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] focus:outline-none focus:border-violet-400 ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${item.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
                       </div>
                     </div>
                   </div>
@@ -389,6 +394,8 @@ function DoReviewItem({ item, orders, onResolve, onDismiss, onView, warehouses, 
 export default function App() {
   const { user, signOut, can: legacyCan, canPerm, availableCompanies, activeCompanyId, activeRoleKey, switchCompany } = useAuth();
   const { loading: authLoading } = useAuth();
+  const { withLoading } = useLoading();
+  const toast = useToast();
   const can = canPerm || legacyCan;
   const companyId = activeCompanyId || user?.company_id;
   const effectiveRole = activeRoleKey || user?.role;
@@ -400,6 +407,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [allCompanyOrders, setAllCompanyOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [switchingCompany, setSwitchingCompany] = useState(false);
   const [error, setError] = useState(null);
@@ -433,6 +441,7 @@ export default function App() {
   const [supplierDOs, setSupplierDOs] = useState([]);
   const [doWarehouses, setDoWarehouses] = useState([]);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
+  const [doUploading, setDoUploading] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [doDateFrom, setDoDateFrom] = useState("");
   const [doDateTo, setDoDateTo] = useState("");
@@ -556,10 +565,13 @@ export default function App() {
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
   const handleDelete = async id => {
     try {
-      const res = await authFetch(`${BACKEND}/orders/${id}`, { method: "DELETE" });
-      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); return; }
-      setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null);
-    } catch (e) { alert("Failed to delete: " + e.message); }
+      await withLoading("Deleting order…", async () => {
+        const res = await authFetch(`${BACKEND}/orders/${id}`, { method: "DELETE" });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Unknown"); }
+        setOrders(p => p.filter(o => o.id !== id)); setViewOrder(null);
+      });
+      toast.success("Order deleted");
+    } catch (e) { toast.error("Failed to delete: " + e.message); }
   };
   const handleSubmit = async () => {
     if (!form.soNumber) return alert("SO Number required.");
@@ -595,22 +607,39 @@ export default function App() {
   };
 
   const resolveDoReview = async (id, soNumber=null, itemCode=null) => {
-    const token = (await supabase.auth.getSession()).data?.session?.access_token;
-    const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, { method:"PATCH", headers:{"Content-Type":"application/json", Authorization: `Bearer ${token}`}, body: JSON.stringify({ so_number: soNumber, item_code: itemCode }) }).then(r=>r.json());
-    if (res.success) { loadDoReview(); loadOrders(); } else alert("Failed: "+(res.error||"Unknown"));
+    try {
+      await withLoading("Resolving item…", async () => {
+        const token = (await supabase.auth.getSession()).data?.session?.access_token;
+        const res = await fetch(`${BACKEND}/do-review/${id}/resolve`, { method:"PATCH", headers:{"Content-Type":"application/json", Authorization: `Bearer ${token}`}, body: JSON.stringify({ so_number: soNumber, item_code: itemCode }) }).then(r=>r.json());
+        if (!res.success) throw new Error(res.error || "Unknown");
+        loadDoReview(); loadOrders();
+      });
+      toast.success("Item resolved");
+    } catch (e) { toast.error("Failed: " + e.message); }
   };
   const addToStockDoReview = async (id, product_id, warehouse_id, quantity) => {
-    const token = (await supabase.auth.getSession()).data?.session?.access_token;
-    const res = await fetch(`${BACKEND}/do-review/${id}/add-to-stock`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ product_id, warehouse_id, quantity: Number(quantity) || 1 }) });
-    const d = await res.json();
-    if (d.success) { loadDoReview(); alert("Added to stock & resolved"); } else alert(d.error || "Failed");
+    try {
+      await withLoading("Adding to stock…", async () => {
+        const token = (await supabase.auth.getSession()).data?.session?.access_token;
+        const res = await fetch(`${BACKEND}/do-review/${id}/add-to-stock`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ product_id, warehouse_id, quantity: Number(quantity) || 1 }) });
+        const d = await res.json();
+        if (!d.success) throw new Error(d.error || "Failed");
+        loadDoReview();
+      });
+      toast.success("Added to stock & resolved");
+    } catch (e) { toast.error(e.message); }
   };
 
   const dismissDoReview = async id => {
     if (!window.confirm("Dismiss this item?")) return;
-    const token = (await supabase.auth.getSession()).data?.session?.access_token;
-    const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method:"PATCH", headers:{Authorization:`Bearer ${token}`} }).then(r=>r.json());
-    if (res.success) loadDoReview();
+    try {
+      await withLoading("Dismissing item…", async () => {
+        const token = (await supabase.auth.getSession()).data?.session?.access_token;
+        const res = await fetch(`${BACKEND}/do-review/${id}/dismiss`, { method:"PATCH", headers:{Authorization:`Bearer ${token}`} }).then(r=>r.json());
+        if (!res.success) throw new Error(res.error || "Failed");
+        loadDoReview();
+      });
+    } catch (e) { toast.error("Failed to dismiss: " + e.message); }
   };
   const confirmConvert = async () => {
     if (!convertModal || converting) return;
@@ -651,10 +680,10 @@ export default function App() {
 
   // ── Auth guards ─────────────────────────────────────────────────
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
-  if (authLoading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading PulseOS...</p></div></div>;
+  if (authLoading) return <FullPageLoader message="Loading PulseOS…" subtext="Preparing your workspace" />;
   if (!user) return <LoginPage />;
-  if (switchingCompany) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3 animate-pulse">🏢</div><p className="text-gray-700 font-bold text-lg mb-1">Switching Company...</p><p className="text-gray-400 text-sm">Loading data for the selected company</p></div></div>;
-  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><div className="text-5xl mb-3">⚡</div><p className="text-gray-500 font-medium">Loading your data...</p></div></div>;
+  if (switchingCompany) return <FullPageLoader message="Switching company…" subtext="Loading data for the selected company" />;
+  if (loading) return <FullPageLoader message="Fetching your data…" subtext="Loading orders and deliveries" />;
   if (error) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center bg-white rounded-2xl shadow p-8"><div className="text-4xl mb-3">⚠️</div><p className="text-red-600 mb-4">{error}</p><button onClick={loadOrders} className="bg-violet-600 text-white px-4 py-2 rounded-xl text-sm">Retry</button></div></div>;
 
   // ── Nav items visible to this user ──────────────────────────────
@@ -1147,7 +1176,7 @@ export default function App() {
                       <Badge color="amber">Not Settled</Badge>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { if(window.confirm("Remove?")) authFetch(`${BACKEND}/service-pending/${sp.id}`,{method:"DELETE"}).then(()=>loadServicePending()); }} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
+                      <button onClick={async () => { if(!window.confirm("Remove?")) return; try { await withLoading("Removing…", async () => { await authFetch(`${BACKEND}/service-pending/${sp.id}`,{method:"DELETE"}); await loadServicePending(); }); } catch (e) { toast.error("Failed to remove: " + e.message); } }} className="text-xs border border-red-200 text-red-600 px-3 py-1.5 rounded-xl hover:bg-red-50">Remove</button>
                       <button onClick={() => { setConvertModal(sp); setConvertRemark(""); }} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-xl hover:bg-amber-600">Create Service Case</button>
                     </div>
                   </div>
@@ -1182,9 +1211,13 @@ export default function App() {
                     <tbody className="divide-y divide-gray-50">
                       {supplierDOs.map((d,i)=>(
                         <tr key={i} className="hover:bg-gray-50 cursor-pointer" onClick={async ()=>{
-                          const res = await authFetch(`${BACKEND}/supplier-deliveries/${d.id}`);
-                          const data = await res.json();
-                          setDoDetail({ ...d, ...data.delivery, items: data.items || [] });
+                          try {
+                            await withLoading("Fetching DO details…", async () => {
+                              const res = await authFetch(`${BACKEND}/supplier-deliveries/${d.id}`);
+                              const data = await res.json();
+                              setDoDetail({ ...d, ...data.delivery, items: data.items || [] });
+                            });
+                          } catch (e) { toast.error("Failed to load DO: " + e.message); }
                         }}>
                           <td className="px-4 py-3 font-semibold text-gray-800">{d.supplier||"-"}</td>
                           <td className="px-4 py-3 text-violet-700 font-medium">{d.do_number||"-"}</td>
@@ -1196,9 +1229,13 @@ export default function App() {
                           <td className="px-4 py-3 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                             <button onClick={async ()=>{
                               if (!window.confirm(`Delete DO #${d.do_number||""}? This also removes related review items.`)) return;
-                              const token = (await supabase.auth.getSession()).data?.session?.access_token;
-                              await fetch(`${BACKEND}/supplier-deliveries/${d.id}`, { method:"DELETE", headers:{Authorization:`Bearer ${token}`} });
-                              loadSupplierDOs(); loadDoReview();
+                              try {
+                                await withLoading("Deleting DO…", async () => {
+                                  const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                                  await fetch(`${BACKEND}/supplier-deliveries/${d.id}`, { method:"DELETE", headers:{Authorization:`Bearer ${token}`} });
+                                  loadSupplierDOs(); loadDoReview();
+                                });
+                              } catch (e) { toast.error("Failed to delete: " + e.message); }
                             }} className="text-xs text-red-500 hover:underline">Delete</button>
                           </td>
                         </tr>
@@ -1309,26 +1346,27 @@ export default function App() {
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-gray-500">{doReview.length} items pending review</p>
               <div className="flex gap-2">
-                <label className="text-xs border border-violet-200 bg-violet-50 text-violet-700 px-3 py-1.5 rounded-xl hover:bg-violet-100 cursor-pointer flex items-center gap-1">
-                  📤 Upload DO
-                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={async e => {
+                <label className={`text-xs border border-violet-200 bg-violet-50 text-violet-700 px-3 py-1.5 rounded-xl flex items-center gap-1 ${doUploading ? "opacity-60 cursor-wait" : "hover:bg-violet-100 cursor-pointer"}`}>
+                  {doUploading ? <><span className="w-3 h-3 border-2 border-violet-300 border-t-violet-700 rounded-full animate-spin" /> Processing…</> : "📤 Upload DO"}
+                  <input type="file" accept="image/*,.pdf" className="hidden" disabled={doUploading} onChange={async e => {
                     const file = e.target.files?.[0];
                     if (!file) return;
-                    const token = (await supabase.auth.getSession()).data?.session?.access_token;
-                    const fd = new FormData();
-                    fd.append("file", file);
-                    const btn = e.target.parentElement;
-                    btn.textContent = "Processing...";
+                    setDoUploading(true);
                     try {
-                      const res = await fetch(`${BACKEND}/do-upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
-                      const d = await res.json();
-                      if (!res.ok) { alert(d.error || "Upload failed"); return; }
-                      let msg = `DO Processed: ${d.supplier || "Unknown"}\n${d.matched} matched, ${d.pending_review} pending review, ${d.showroom} showroom`;
-                      if (d.unrecognized > 0) msg += `\n\n⚠️ ${d.unrecognized} item(s) not in product master:\n${(d.results?.unrecognized || []).map(u => `${u.code} — ${u.name}`).join("\n")}\n\nPlease add these to Products.`;
-                      alert(msg);
-                      loadDoReview();
-                    } catch (err) { alert("Upload failed: " + err.message); }
-                    finally { btn.innerHTML = "📤 Upload DO"; e.target.value = ""; }
+                      await withLoading("Processing document… this may take a moment", async () => {
+                        const token = (await supabase.auth.getSession()).data?.session?.access_token;
+                        const fd = new FormData();
+                        fd.append("file", file);
+                        const res = await fetch(`${BACKEND}/do-upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                        const d = await res.json();
+                        if (!res.ok) throw new Error(d.error || "Upload failed");
+                        let msg = `DO Processed: ${d.supplier || "Unknown"}\n${d.matched} matched, ${d.pending_review} pending review, ${d.showroom} showroom`;
+                        if (d.unrecognized > 0) msg += `\n\n⚠️ ${d.unrecognized} item(s) not in product master:\n${(d.results?.unrecognized || []).map(u => `${u.code} — ${u.name}`).join("\n")}\n\nPlease add these to Products.`;
+                        alert(msg);
+                        loadDoReview();
+                      });
+                    } catch (err) { toast.error("Upload failed: " + err.message); }
+                    finally { setDoUploading(false); e.target.value = ""; }
                   }} />
                 </label>
                 <button onClick={loadDoReview} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">Refresh</button>
@@ -1418,14 +1456,17 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
-            <button onClick={loadOrders} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔄</button>
+            <button onClick={async () => { if (refreshing) return; setRefreshing(true); try { await loadOrders(); } finally { setRefreshing(false); } }} disabled={refreshing}
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm disabled:opacity-60">
+              {refreshing ? <span className="w-4 h-4 border-2 border-gray-300 border-t-violet-600 rounded-full animate-spin" /> : "🔄"}
+            </button>
           </div>
         </div>
 
         {/* Page content */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-7xl mx-auto px-4 py-6 pb-24 lg:pb-6">
-            <Suspense fallback={<div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-3 border-violet-200 border-t-violet-600 rounded-full animate-spin" /></div>}>{renderPage()}</Suspense>
+            <Suspense fallback={<div className="flex flex-col items-center justify-center py-16"><div className="w-8 h-8 border-3 border-violet-200 border-t-violet-600 rounded-full animate-spin mb-3" /><p className="text-xs text-gray-400">Loading page…</p></div>}>{renderPage()}</Suspense>
           </div>
         </div>
 

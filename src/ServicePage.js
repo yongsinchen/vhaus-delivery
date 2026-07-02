@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -19,6 +19,7 @@ const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue
 export default function ServicePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
   const [services, setServices] = useState([]);
@@ -83,58 +84,90 @@ export default function ServicePage() {
   };
 
   const createService = async () => {
-    const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify(createForm) });
-    const d = await res.json();
-    if (d.service) { toast.success("Service case created"); setShowCreate(false); setCreateForm({ order_id: "", service_type: 1, description: "" }); loadServices(); }
-    else toast.error(d.error || "Failed");
+    try {
+      await withLoading("Creating service case…", async () => {
+        const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify(createForm) });
+        const d = await res.json();
+        if (!d.service) throw new Error(d.error || "Failed");
+        toast.success("Service case created"); setShowCreate(false); setCreateForm({ order_id: "", service_type: 1, description: "" }); loadServices();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const updateServiceStatus = async (id, status) => {
-    await af(`${API}/service-cases/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-    loadServices();
-    if (detail?.service?.id === id) openDetail(detail.service);
+    try {
+      await withLoading("Updating status…", async () => {
+        await af(`${API}/service-cases/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+        loadServices();
+        if (detail?.service?.id === id) openDetail(detail.service);
+      });
+    } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
   const updateLeg = async (legId, updates) => {
-    await af(`${API}/service-legs/${legId}`, { method: "PATCH", body: JSON.stringify(updates) });
-    if (detail?.service) openDetail(detail.service);
-    loadServices();
+    try {
+      await withLoading("Updating…", async () => {
+        await af(`${API}/service-legs/${legId}`, { method: "PATCH", body: JSON.stringify(updates) });
+        if (detail?.service) openDetail(detail.service);
+        loadServices();
+      });
+    } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
   const addClaim = async (serviceId) => {
     const partName = window.prompt("Part name / description:");
     if (!partName) return;
-    await af(`${API}/service-part-claims`, { method: "POST", body: JSON.stringify({ service_id: serviceId, part_name: partName }) });
-    toast.success("Claim added");
-    openDetail(detail.service);
+    try {
+      await withLoading("Adding claim…", async () => {
+        await af(`${API}/service-part-claims`, { method: "POST", body: JSON.stringify({ service_id: serviceId, part_name: partName }) });
+      });
+      toast.success("Claim added");
+      openDetail(detail.service);
+    } catch (e) { toast.error("Failed to add claim: " + e.message); }
   };
 
   const updateClaim = async (claimId, updates) => {
-    await af(`${API}/service-part-claims/${claimId}`, { method: "PATCH", body: JSON.stringify(updates) });
-    if (detail?.service) openDetail(detail.service);
+    try {
+      await withLoading("Updating claim…", async () => {
+        await af(`${API}/service-part-claims/${claimId}`, { method: "PATCH", body: JSON.stringify(updates) });
+        if (detail?.service) openDetail(detail.service);
+      });
+    } catch (e) { toast.error("Failed to update claim: " + e.message); }
   };
 
   const deleteService = async (id) => {
     if (!window.confirm("Delete this service case? This will also remove all legs and part claims.")) return;
-    const res = await af(`${API}/service-cases/${id}`, { method: "DELETE" });
-    if (res.ok) { toast.success("Service case deleted"); setDetail(null); loadServices(); }
-    else { const d = await res.json(); toast.error(d.error || "Failed to delete"); }
+    try {
+      await withLoading("Deleting service case…", async () => {
+        const res = await af(`${API}/service-cases/${id}`, { method: "DELETE" });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to delete"); }
+        toast.success("Service case deleted"); setDetail(null); loadServices();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const convertPending = async (sp) => {
-    const res = await af(`${API}/service-pending/${sp.id}/convert`, {
-      method: "POST", body: JSON.stringify({ remark: convertRemark, service_type: 1 }),
-    });
-    const d = await res.json();
-    if (d.service) { toast.success("Service case created"); setConvertModal(null); setConvertRemark(""); loadServices(); loadPending(); }
-    else toast.error(d.error || "Failed to convert");
+    try {
+      await withLoading("Creating service case…", async () => {
+        const res = await af(`${API}/service-pending/${sp.id}/convert`, {
+          method: "POST", body: JSON.stringify({ remark: convertRemark, service_type: 1 }),
+        });
+        const d = await res.json();
+        if (!d.service) throw new Error(d.error || "Failed to convert");
+        toast.success("Service case created"); setConvertModal(null); setConvertRemark(""); loadServices(); loadPending();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const removePending = async (id) => {
     if (!window.confirm("Remove this pending service?")) return;
-    const res = await af(`${API}/service-pending/${id}`, { method: "DELETE" });
-    if (res.ok) { toast.success("Removed"); loadPending(); }
-    else toast.error("Failed to remove");
+    try {
+      await withLoading("Removing…", async () => {
+        const res = await af(`${API}/service-pending/${id}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Failed to remove");
+        toast.success("Removed"); loadPending();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   return (

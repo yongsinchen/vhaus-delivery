@@ -1,20 +1,34 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "./AuthContext";
+import { useLoading } from "./UIComponents";
 
 export default function LoginPage() {
   const { signIn } = useAuth();
+  const { showLoading, hideLoading } = useLoading();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // On success the page unmounts when the dashboard takes over — make sure
+  // the global overlay never outlives the login flow.
+  useEffect(() => () => hideLoading(), [hideLoading]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (loading) return; // prevent double submit
     setError("");
     setLoading(true);
+    showLoading("Signing you in…");
     const err = await signIn(email.trim(), password);
-    if (err) setError(err.message === "Invalid login credentials" ? "Incorrect email or password." : err.message);
-    setLoading(false);
+    if (err) {
+      hideLoading();
+      setError(err.message === "Invalid login credentials" ? "Incorrect email or password." : err.message);
+      setLoading(false);
+      return;
+    }
+    // Success: keep the overlay up — AuthContext flips to the boot screen
+    // ("Loading PulseOS…") and this page unmounts, which hides the overlay.
   };
 
   return (
@@ -41,7 +55,8 @@ export default function LoginPage() {
                 placeholder="you@example.com"
                 required
                 autoFocus
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                disabled={loading}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:bg-gray-50"
               />
             </div>
 
@@ -53,7 +68,8 @@ export default function LoginPage() {
                 onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                disabled={loading}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent disabled:bg-gray-50"
               />
             </div>
 
@@ -66,9 +82,10 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {loading ? "Signing in..." : "Sign In"}
+              {loading && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              {loading ? "Signing in…" : "Sign In"}
             </button>
           </form>
 

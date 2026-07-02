@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -18,6 +18,7 @@ const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile"
 export default function FinancePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -80,10 +81,14 @@ export default function FinancePage() {
   }, [companyId]);
 
   const openUpload = async (u) => {
-    const res = await af(`${API}/statements/${u.id}`);
-    const d = await res.json();
-    setActiveUpload(d.upload);
-    setRecTxns(d.transactions || []);
+    try {
+      await withLoading("Fetching statement…", async () => {
+        const res = await af(`${API}/statements/${u.id}`);
+        const d = await res.json();
+        setActiveUpload(d.upload);
+        setRecTxns(d.transactions || []);
+      });
+    } catch (e) { toast.error("Failed to load statement: " + e.message); }
   };
 
   const uploadStatement = async (file, type) => {
@@ -100,8 +105,12 @@ export default function FinancePage() {
   };
 
   const updateTxn = async (txnId, updates) => {
-    await af(`${API}/statement-transactions/${txnId}`, { method: "PATCH", body: JSON.stringify(updates) });
-    if (activeUpload) openUpload(activeUpload);
+    try {
+      await withLoading("Updating transaction…", async () => {
+        await af(`${API}/statement-transactions/${txnId}`, { method: "PATCH", body: JSON.stringify(updates) });
+      });
+      if (activeUpload) openUpload(activeUpload);
+    } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
   const reconcileAll = async () => {

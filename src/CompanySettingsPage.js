@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
+import { useToast, useLoading } from "./UIComponents";
 
 const af = async (url, opts = {}) => {
   const { data } = await supabase.auth.getSession();
@@ -28,6 +29,8 @@ const TABS = ["Company Info", "Branches", "Warehouses", "Operations", "Categorie
 
 export default function CompanySettingsPage() {
   const { user, activeCompanyId } = useAuth();
+  const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -123,19 +126,27 @@ export default function CompanySettingsPage() {
 
   const saveWarehouse = async () => {
     if (!whForm.name.trim()) return;
-    const headers = await authHeaders();
-    const url = whEditId ? `${API}/warehouses/${whEditId}` : `${API}/warehouses`;
-    const method = whEditId ? "PUT" : "POST";
-    const res = await fetch(url, { method, headers, body: JSON.stringify(whForm) });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed"); return; }
-    setWhForm({ name: "", type: "warehouse", address: "" }); setWhEditId(null); loadWarehouses();
+    try {
+      await withLoading("Saving location…", async () => {
+        const headers = await authHeaders();
+        const url = whEditId ? `${API}/warehouses/${whEditId}` : `${API}/warehouses`;
+        const method = whEditId ? "PUT" : "POST";
+        const res = await fetch(url, { method, headers, body: JSON.stringify(whForm) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+        setWhForm({ name: "", type: "warehouse", address: "" }); setWhEditId(null); loadWarehouses();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const deleteWarehouse = async (id) => {
     if (!window.confirm("Deactivate this location?")) return;
-    const headers = await authHeaders();
-    await fetch(`${API}/warehouses/${id}`, { method: "DELETE", headers });
-    loadWarehouses();
+    try {
+      await withLoading("Deactivating location…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/warehouses/${id}`, { method: "DELETE", headers });
+        loadWarehouses();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   // ── Zones & Racks ──────────────────────────────────────────────────
@@ -193,38 +204,54 @@ export default function CompanySettingsPage() {
   // ── Branch CRUD ───────────────────────────────────────────────────
   const saveBranch = async () => {
     if (!branchForm.name.trim()) return;
-    const headers = await authHeaders();
-    const url = branchEditId ? `${API}/branches/${branchEditId}` : `${API}/branches`;
-    const method = branchEditId ? "PUT" : "POST";
-    const res = await fetch(url, { method, headers, body: JSON.stringify(branchForm) });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed to save branch"); return; }
-    setBranchForm({ name: "" }); setBranchEditId(null); loadBranches();
+    try {
+      await withLoading("Saving branch…", async () => {
+        const headers = await authHeaders();
+        const url = branchEditId ? `${API}/branches/${branchEditId}` : `${API}/branches`;
+        const method = branchEditId ? "PUT" : "POST";
+        const res = await fetch(url, { method, headers, body: JSON.stringify(branchForm) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to save branch"); }
+        setBranchForm({ name: "" }); setBranchEditId(null); loadBranches();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const deleteBranch = async (id) => {
     if (!window.confirm("Delete this branch?")) return;
-    const headers = await authHeaders();
-    await fetch(`${API}/branches/${id}`, { method: "DELETE", headers });
-    loadBranches();
+    try {
+      await withLoading("Deleting branch…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/branches/${id}`, { method: "DELETE", headers });
+        loadBranches();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   // ── Category CRUD ─────────────────────────────────────────────────
   const saveCategory = async () => {
     if (!catForm.name.trim()) return;
-    const headers = await authHeaders();
-    if (catEditId) {
-      await fetch(`${API}/categories/${catEditId}`, { method: "PUT", headers, body: JSON.stringify(catForm) });
-    } else {
-      await fetch(`${API}/categories`, { method: "POST", headers, body: JSON.stringify(catForm) });
-    }
-    setCatForm({ name: "" }); setCatEditId(null); loadCategories();
+    try {
+      await withLoading("Saving category…", async () => {
+        const headers = await authHeaders();
+        if (catEditId) {
+          await fetch(`${API}/categories/${catEditId}`, { method: "PUT", headers, body: JSON.stringify(catForm) });
+        } else {
+          await fetch(`${API}/categories`, { method: "POST", headers, body: JSON.stringify(catForm) });
+        }
+        setCatForm({ name: "" }); setCatEditId(null); loadCategories();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const deleteCategory = async (id) => {
     if (!window.confirm("Delete this category? Products using it will be unlinked.")) return;
-    const headers = await authHeaders();
-    await fetch(`${API}/categories/${id}`, { method: "DELETE", headers });
-    loadCategories();
+    try {
+      await withLoading("Deleting category…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/categories/${id}`, { method: "DELETE", headers });
+        loadCategories();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   return (

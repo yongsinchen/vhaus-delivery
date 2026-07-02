@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useLoading } from "./UIComponents";
 let jsQR = null;
 
 const API = "https://vhaus-bot-production.up.railway.app";
@@ -14,6 +14,7 @@ const PKG_STATUS = { pending: "bg-gray-100 text-gray-600", stored: "bg-blue-100 
 export default function WarehousePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -41,6 +42,7 @@ export default function WarehousePage() {
   const [pickItems, setPickItems] = useState([]);
   const [pickDays, setPickDays] = useState(3);
   const [pickLoading, setPickLoading] = useState(false);
+  const [loadListLoading, setLoadListLoading] = useState(false);
 
   // Loading
   const [loadingItems, setLoadingItems] = useState([]);
@@ -71,30 +73,37 @@ export default function WarehousePage() {
 
   const selectDO = async (d) => {
     setSelectedDO(d);
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/supplier-deliveries/${d.id}`, { headers });
-    const data = await res.json();
-    const items = (data.items || []).map(it => ({ ...it, carton_count: 1 }));
-    setLabelItems(items);
-    const lRes = await fetch(`${API}/package-labels?supplier_delivery_id=${d.id}`, { headers });
-    const lData = await lRes.json();
-    setLabels(lData.labels || []);
+    try {
+      await withLoading("Fetching DO items…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/supplier-deliveries/${d.id}`, { headers });
+        const data = await res.json();
+        const items = (data.items || []).map(it => ({ ...it, carton_count: 1 }));
+        setLabelItems(items);
+        const lRes = await fetch(`${API}/package-labels?supplier_delivery_id=${d.id}`, { headers });
+        const lData = await lRes.json();
+        setLabels(lData.labels || []);
+      });
+    } catch (e) { toast.error("Failed to load DO: " + e.message); }
   };
 
   // ── Label generation ──────────────────────────────────────
   const generateLabels = async () => {
     if (!selectedDO) return;
-    const headers = await authHeaders();
-    const payload = { supplier_delivery_id: selectedDO.id, items: labelItems.map(it => ({ product_code: it.item_code || it.product_code, product_name: it.item_name || it.product_name, so_number: it.so_number, carton_count: Number(it.carton_count) || 1, warehouse_id: labelWarehouse || null })) };
-    const res = await fetch(`${API}/packings/generate`, { method: "POST", headers, body: JSON.stringify(payload) });
-    const d = await res.json();
-    if (!res.ok) {
-      if (d.error?.includes("already generated")) { toast.warning("Labels already generated — reprinting"); if (labels.length > 0) printLabels(labels, selectedDO); }
-      else toast.error(d.error || "Failed");
+    const result = await withLoading("Generating labels…", async () => {
+      const headers = await authHeaders();
+      const payload = { supplier_delivery_id: selectedDO.id, items: labelItems.map(it => ({ product_code: it.item_code || it.product_code, product_name: it.item_name || it.product_name, so_number: it.so_number, carton_count: Number(it.carton_count) || 1, warehouse_id: labelWarehouse || null })) };
+      const res = await fetch(`${API}/packings/generate`, { method: "POST", headers, body: JSON.stringify(payload) });
+      const d = await res.json();
+      return { ok: res.ok, d };
+    });
+    if (!result.ok) {
+      if (result.d.error?.includes("already generated")) { toast.warning("Labels already generated — reprinting"); if (labels.length > 0) printLabels(labels, selectedDO); }
+      else toast.error(result.d.error || "Failed");
       return;
     }
-    printLabels(d.labels || [], selectedDO);
-    toast.success(`${d.count} labels generated`);
+    printLabels(result.d.labels || [], selectedDO);
+    toast.success(`${result.d.count} labels generated`);
     selectDO(selectedDO);
   };
 
@@ -254,17 +263,21 @@ export default function WarehousePage() {
   // ── Loading list loader ───────────────────────────────────
   const loadLoadingList = async () => {
     if (!companyId) return;
-    const headers = await authHeaders();
-    // Load teams for the date
-    const rRes = await fetch(`${API}/delivery-teams?company_id=${companyId}&date=${loadDate}`, { headers });
-    const rData = await rRes.json();
-    setRoutes(rData.teams || []);
-    // Load items
-    const params = new URLSearchParams({ date: loadDate });
-    if (loadRoute) params.set("team_id", loadRoute);
-    const res = await fetch(`${API}/unified-loading-list?${params}`, { headers });
-    const d = await res.json();
-    setLoadingItems(d.items || []);
+    setLoadListLoading(true);
+    try {
+      const headers = await authHeaders();
+      // Load teams for the date
+      const rRes = await fetch(`${API}/delivery-teams?company_id=${companyId}&date=${loadDate}`, { headers });
+      const rData = await rRes.json();
+      setRoutes(rData.teams || []);
+      // Load items
+      const params = new URLSearchParams({ date: loadDate });
+      if (loadRoute) params.set("team_id", loadRoute);
+      const res = await fetch(`${API}/unified-loading-list?${params}`, { headers });
+      const d = await res.json();
+      setLoadingItems(d.items || []);
+    } catch (e) { console.error(e); }
+    setLoadListLoading(false);
   };
 
   useEffect(() => { if (tab === 2) loadPickList(); }, [tab, pickDays]); // eslint-disable-line
@@ -473,8 +486,10 @@ export default function WarehousePage() {
               <option value="">All routes</option>
               {routes.map(r => <option key={r.id} value={r.id}>{r.delivery_vehicles?.vehicle_plate || r.driver_name || `Team ${String(r.id).slice(0,6)}`}</option>)}
             </select>
-            <button onClick={loadLoadingList} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
+            <button onClick={loadLoadingList} disabled={loadListLoading} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">{loadListLoading ? "Loading…" : "Refresh"}</button>
           </div>
+
+          {loadListLoading && <div className="text-center text-gray-400 py-8">Loading list…</div>}
 
           {/* Progress */}
           {loadingItems.length > 0 && (() => {
@@ -497,7 +512,7 @@ export default function WarehousePage() {
             {cameraUI}
           </div>
 
-          {loadingItems.length === 0 && <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">🚛</div><p>No items to load for this date/route</p></div>}
+          {!loadListLoading && loadingItems.length === 0 && <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">🚛</div><p>No items to load for this date/route</p></div>}
           {loadingItems.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
               {loadingItems.map(item => (

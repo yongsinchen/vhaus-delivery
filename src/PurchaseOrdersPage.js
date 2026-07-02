@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce } from "./UIComponents";
+import { useDebounce, useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -29,6 +29,8 @@ const STATUS_STYLE = {
 
 export default function PurchaseOrdersPage() {
   const { user, activeCompanyId } = useAuth();
+  const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
   const [orders, setOrders] = useState([]);
@@ -66,18 +68,26 @@ export default function PurchaseOrdersPage() {
   }, [companyId]);
 
   const openDetail = async (po) => {
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/purchase-orders/${po.id}`, { headers });
-    const d = await res.json();
-    setDetailOrder(d.order || po);
-    setDetailOpen(true);
+    try {
+      await withLoading("Fetching purchase order…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/purchase-orders/${po.id}`, { headers });
+        const d = await res.json();
+        setDetailOrder(d.order || po);
+        setDetailOpen(true);
+      });
+    } catch (e) { toast.error("Failed to load PO: " + e.message); }
   };
 
   const changeStatus = async (id, status) => {
-    const headers = await authHeaders();
-    await fetch(`${API}/purchase-orders/${id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
-    loadOrders();
-    if (detailOrder?.id === id) setDetailOrder(prev => prev ? { ...prev, status } : prev);
+    try {
+      await withLoading("Updating status…", async () => {
+        const headers = await authHeaders();
+        await fetch(`${API}/purchase-orders/${id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
+        loadOrders();
+        if (detailOrder?.id === id) setDetailOrder(prev => prev ? { ...prev, status } : prev);
+      });
+    } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
   const receiveItem = async (itemId, qty) => {
@@ -127,11 +137,15 @@ export default function PurchaseOrdersPage() {
 
   const deletePO = async (id) => {
     if (!window.confirm("Delete this draft PO?")) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/purchase-orders/${id}`, { method: "DELETE", headers });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed"); return; }
-    setDetailOpen(false);
-    loadOrders();
+    try {
+      await withLoading("Deleting PO…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/purchase-orders/${id}`, { method: "DELETE", headers });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+        setDetailOpen(false);
+        loadOrders();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   return (

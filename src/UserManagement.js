@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
+import { useLoading } from "./UIComponents";
 
 const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", is_active: true };
 
 export default function UserManagement() {
   const { user: currentUser, activeCompanyId } = useAuth();
+  const { withLoading } = useLoading();
   const isMaster = currentUser?.role === "master";
 
   const [users, setUsers] = useState([]);
@@ -87,41 +89,47 @@ export default function UserManagement() {
     if (!addAccess.company_id || !addAccess.role_id) return setAccessError("Select company and role");
     setAccessError("");
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${BACKEND}/user-roles`, {
-        method: "POST", headers,
-        body: JSON.stringify({ user_id: userId, company_id: addAccess.company_id, role_id: addAccess.role_id }),
+      await withLoading("Granting access…", async () => {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND}/user-roles`, {
+          method: "POST", headers,
+          body: JSON.stringify({ user_id: userId, company_id: addAccess.company_id, role_id: addAccess.role_id }),
+        });
+        const d = await res.json();
+        if (!res.ok) return setAccessError(d.error || "Failed to add access");
+        setAddAccess({ company_id: "", role_id: "" });
+        await loadAccess(userId);
       });
-      const d = await res.json();
-      if (!res.ok) return setAccessError(d.error || "Failed to add access");
-      setAddAccess({ company_id: "", role_id: "" });
-      await loadAccess(userId);
     } catch (e) { setAccessError(e.message); }
   };
 
   const handleUpdateAccessRole = async (accessId, userId, newRoleId) => {
     setAccessError("");
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
-        method: "PATCH", headers,
-        body: JSON.stringify({ role_id: newRoleId }),
+      await withLoading("Updating role…", async () => {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
+          method: "PATCH", headers,
+          body: JSON.stringify({ role_id: newRoleId }),
+        });
+        if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
+        await loadAccess(userId);
       });
-      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
-      await loadAccess(userId);
     } catch (e) { setAccessError(e.message); }
   };
 
   const handleToggleAccess = async (accessId, userId, currentActive) => {
     setAccessError("");
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
-        method: "PATCH", headers,
-        body: JSON.stringify({ is_active: !currentActive }),
+      await withLoading("Updating access…", async () => {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND}/user-roles/${accessId}`, {
+          method: "PATCH", headers,
+          body: JSON.stringify({ is_active: !currentActive }),
+        });
+        if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
+        await loadAccess(userId);
       });
-      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to update"); }
-      await loadAccess(userId);
     } catch (e) { setAccessError(e.message); }
   };
 
@@ -129,10 +137,12 @@ export default function UserManagement() {
     if (!window.confirm("Revoke this company access?")) return;
     setAccessError("");
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`${BACKEND}/user-roles/${accessId}`, { method: "DELETE", headers });
-      if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to revoke"); }
-      await loadAccess(userId);
+      await withLoading("Revoking access…", async () => {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND}/user-roles/${accessId}`, { method: "DELETE", headers });
+        if (!res.ok) { const d = await res.json(); return setAccessError(d.error || "Failed to revoke"); }
+        await loadAccess(userId);
+      });
     } catch (e) { setAccessError(e.message); }
   };
 

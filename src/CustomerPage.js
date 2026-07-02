@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast, useDebounce } from "./UIComponents";
+import { useToast, useDebounce, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -13,6 +13,7 @@ const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touc
 export default function CustomerPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0); // 0=customers, 1=aging
   const TABS = ["Customers", "Aging Report"];
@@ -79,12 +80,16 @@ export default function CustomerPage() {
   };
 
   const saveCustomer = async () => {
-    const url = editId ? `${API}/customers/${editId}` : `${API}/customers`;
-    const method = editId ? "PUT" : "POST";
-    const res = await af(url, { method, body: JSON.stringify(form) });
-    const d = await res.json();
-    if (d.customer) { toast.success(editId ? "Customer updated" : "Customer created"); setShowForm(false); setEditId(null); loadCustomers(); }
-    else toast.error(d.error || "Failed");
+    try {
+      await withLoading("Saving customer…", async () => {
+        const url = editId ? `${API}/customers/${editId}` : `${API}/customers`;
+        const method = editId ? "PUT" : "POST";
+        const res = await af(url, { method, body: JSON.stringify(form) });
+        const d = await res.json();
+        if (!d.customer) throw new Error(d.error || "Failed");
+        toast.success(editId ? "Customer updated" : "Customer created"); setShowForm(false); setEditId(null); loadCustomers();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const openEdit = (c) => {
@@ -120,10 +125,12 @@ export default function CustomerPage() {
     paySavingRef.current = true;
     setPaySaving(true);
     try {
-      const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
-      const d = await res.json();
-      if (d.payment) { toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer); }
-      else toast.error(d.error || "Failed");
+      await withLoading("Recording payment…", async () => {
+        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
+        const d = await res.json();
+        if (!d.payment) throw new Error(d.error || "Failed");
+        toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer);
+      });
     } catch (err) {
       toast.error(err.message || "Failed to record payment");
     } finally {

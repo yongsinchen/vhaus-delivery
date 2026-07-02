@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce, useToast } from "./UIComponents";
+import { useDebounce, useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 
@@ -303,6 +303,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
 export default function OrdersPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
   const [orders, setOrders] = useState([]);
@@ -329,6 +330,7 @@ export default function OrdersPage() {
   const [arrivalItems, setArrivalItems] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
   const [viewArrival, setViewArrival] = useState(null);
+  const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
   // Delivery Orders (Phase 2B) — shipments of the viewed sales order
   const [doData, setDoData] = useState(null);      // { delivery_orders, items } or null (no permission / not loaded)
@@ -532,14 +534,16 @@ export default function OrdersPage() {
   };
 
   // ── Order View (read-only detail) ──────────────────────────────
+  // Fetch the full order behind the overlay, then open the drawer once —
+  // avoids flashing partial list data and re-rendering when the rest arrives.
   const openView = async (o) => {
-    setViewingOrder(o); // show instantly with list data
-    setViewArrival(null);
     setDoData(null);
-    const { order: full, legacy_order } = await getFullOrder(o);
-    setViewingOrder(full);
-    setViewArrival(parseLegacyArrival(legacy_order));
-    loadDeliveryOrders(o.id);
+    try {
+      const { order: full, legacy_order } = await withLoading("Loading order…", () => getFullOrder(o));
+      setViewArrival(parseLegacyArrival(legacy_order));
+      setViewingOrder(full);
+      loadDeliveryOrders(o.id); // delivery-order section streams in after the drawer opens
+    } catch (e) { toast.error("Failed to load order: " + e.message); }
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
@@ -553,12 +557,12 @@ export default function OrdersPage() {
   };
 
   const openEdit = async (o) => {
+    // Load the full order behind the overlay so the drawer opens ready,
+    // instead of flashing stale/empty form fields.
+    const { order: fullOrder, legacy_order } = await withLoading("Loading order…", () => getFullOrder(o));
     setEditId(o.id);
-    setDrawerOpen(true);
-    setArrivalItems(null);
-    const { order: fullOrder, legacy_order } = await getFullOrder(o);
-    setEditingOrder(fullOrder);
     setArrivalItems(parseLegacyArrival(legacy_order));
+    setEditingOrder(fullOrder);
     const f = fullOrder;
     setForm({
       customer_name: f.customer_name || "",
@@ -636,15 +640,19 @@ export default function OrdersPage() {
 
   const uploadAttachment = async (idx, file) => {
     if (!file) return;
-    const token = await getToken();
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(`${API}/sales-orders/upload-attachment`, {
-      method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
-    });
-    const d = await res.json();
-    if (res.ok && d.url) updateItem(idx, "attachment_url", d.url);
-    else alert(d.error || "Upload failed");
+    try {
+      await withLoading("Uploading attachment…", async () => {
+        const token = await getToken();
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(`${API}/sales-orders/upload-attachment`, {
+          method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
+        });
+        const d = await res.json();
+        if (!res.ok || !d.url) throw new Error(d.error || "Upload failed");
+        updateItem(idx, "attachment_url", d.url);
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const subtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
@@ -763,7 +771,7 @@ export default function OrdersPage() {
     });
   };
 
-  const openSubmitPO = async (order) => {
+  const openSubmitPO = async (order) => await withLoading("Preparing purchase orders…", async () => {
     const { order: fullOrder } = await getFullOrder(order);
     const items = fullOrder.sales_order_items || fullOrder.items || [];
     // Fetch products and suppliers separately to avoid PostgREST join issues
@@ -801,7 +809,7 @@ export default function OrdersPage() {
     const allIds = new Set(Object.values(groups).flatMap(g => g.items.map(i => i.id)));
     setPOSelectedItems(allIds);
     setPOModal({ order, groups, noSupplier });
-  };
+  });
 
   const confirmSubmitPO = async () => {
     if (!poModal || poSelectedItems.size === 0) return;
@@ -819,30 +827,36 @@ export default function OrdersPage() {
   };
 
   const changeStatus = async (o, status) => {
+    let reason = null;
     if (status === "cancelled") {
-      const reason = window.prompt("Cancel reason (required):");
+      reason = window.prompt("Cancel reason (required):");
       if (!reason?.trim()) return;
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status, cancel_reason: reason.trim() }) });
-      const d = await res.json();
-      if (!res.ok) { alert(d.error || "Failed"); return; }
-    } else {
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status }) });
-      const d = await res.json();
-      if (!res.ok) { alert(d.error || "Failed"); return; }
     }
-    // Optimistic local update
-    setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
+    try {
+      await withLoading("Updating status…", async () => {
+        const headers = await authHeaders();
+        const body = reason ? { status, cancel_reason: reason.trim() } : { status };
+        const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "Failed");
+        // Optimistic local update
+        setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const deleteOrder = async (o) => {
     if (!window.confirm(`Delete order ${o.order_number}? This cannot be undone.`)) return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/sales-orders/${o.id}`, { method: "DELETE", headers });
-    if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to delete"); return; }
-    setOrders(prev => prev.filter(ord => ord.id !== o.id));
-    setViewingOrder(null);
+    try {
+      await withLoading("Deleting order…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/sales-orders/${o.id}`, { method: "DELETE", headers });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to delete"); }
+        setOrders(prev => prev.filter(ord => ord.id !== o.id));
+        setViewingOrder(null);
+      });
+      toast.success("Order deleted");
+    } catch (e) { toast.error(e.message); }
   };
 
   return (
@@ -902,7 +916,7 @@ export default function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await getFullOrder(o); setSignOrder(full); }}
+                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); setSignOrder(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
@@ -1069,12 +1083,15 @@ export default function OrdersPage() {
                               <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                               <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                             </div>
-                            <input type="date" value={it.arrivalDate || ""} onChange={async e => {
+                            <input type="date" value={it.arrivalDate || ""} disabled={arrivalSavingIdx !== null} onChange={async e => {
                               const val = e.target.value;
-                              const token = await getToken();
-                              await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                              setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
-                            }} className={`text-xs border rounded px-1.5 py-1 w-[115px] ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                              setArrivalSavingIdx(i);
+                              try {
+                                const token = await getToken();
+                                await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                                setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                              } finally { setArrivalSavingIdx(null); }
+                            }} className={`text-xs border rounded px-1.5 py-1 w-[115px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
                           </div>
                         ))}
                       </div>
@@ -1190,13 +1207,17 @@ export default function OrdersPage() {
                       const items = editingOrder.sales_order_items || [];
                       if (items.length === 0) { alert("No items"); return; }
                       if (!window.confirm(`Generate Delivery Order for ${items.length} items?`)) return;
-                      const headers = await authHeaders();
-                      const res = await fetch(`${API}/sales-orders/${editingOrder.id}/generate-do`, {
-                        method: "POST", headers, body: JSON.stringify({ item_ids: items.map(i => i.id) }),
-                      });
-                      const d = await res.json();
-                      if (!res.ok) { alert(d.error || "Failed"); return; }
-                      printDeliveryNote(d, editingOrder, companyInfo);
+                      try {
+                        await withLoading("Generating delivery order…", async () => {
+                          const headers = await authHeaders();
+                          const res = await fetch(`${API}/sales-orders/${editingOrder.id}/generate-do`, {
+                            method: "POST", headers, body: JSON.stringify({ item_ids: items.map(i => i.id) }),
+                          });
+                          const d = await res.json();
+                          if (!res.ok) throw new Error(d.error || "Failed");
+                          printDeliveryNote(d, editingOrder, companyInfo);
+                        });
+                      } catch (err) { toast.error(err.message); }
                     }} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">🚚 Generate DO</button>
                     <button onClick={() => setSignOrder({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
@@ -1468,12 +1489,16 @@ export default function OrdersPage() {
                   <span>+ Upload receipt</span>
                   <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async e => {
                     const file = e.target.files?.[0]; if (!file) return;
-                    const token = await getToken();
-                    const fd = new FormData(); fd.append("file", file);
-                    const res = await fetch(`${API}/sales-orders/upload-attachment`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
-                    const d = await res.json();
-                    if (d.url) setForm(f => ({ ...f, payment_proofs: [...(f.payment_proofs || []), d.url] }));
-                    else alert(d.error || "Upload failed");
+                    try {
+                      await withLoading("Uploading receipt…", async () => {
+                        const token = await getToken();
+                        const fd = new FormData(); fd.append("file", file);
+                        const res = await fetch(`${API}/sales-orders/upload-attachment`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+                        const d = await res.json();
+                        if (!d.url) throw new Error(d.error || "Upload failed");
+                        setForm(f => ({ ...f, payment_proofs: [...(f.payment_proofs || []), d.url] }));
+                      });
+                    } catch (err) { toast.error(err.message); }
                     e.target.value = "";
                   }} />
                 </label>
@@ -1508,12 +1533,15 @@ export default function OrdersPage() {
                         <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                         <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                       </div>
-                      <input type="date" value={it.arrivalDate || ""} onChange={async e => {
+                      <input type="date" value={it.arrivalDate || ""} disabled={arrivalSavingIdx !== null} onChange={async e => {
                         const val = e.target.value;
-                        const token = await getToken();
-                        await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                        setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
-                      }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                        setArrivalSavingIdx(i);
+                        try {
+                          const token = await getToken();
+                          await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                          setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                        } finally { setArrivalSavingIdx(null); }
+                      }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
                     </div>
                   ))}
                 </div>
@@ -1621,7 +1649,7 @@ export default function OrdersPage() {
       {signOrder && (
         <SignaturePad
           onDone={async (sig) => {
-            if (sig && signOrder.id) await saveSignature(signOrder.id, sig);
+            if (sig && signOrder.id) await withLoading("Saving signature…", () => saveSignature(signOrder.id, sig));
             printSalesOrder(signOrder, sig, companyInfo);
             setSignOrder(null);
             loadOrders();

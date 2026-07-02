@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://lrfyjcupucpdqmbqqbbk.supabase.co";
@@ -89,6 +89,9 @@ export function AuthProvider({ children }) {
   const [activeRoleKey, setActiveRoleKey] = useState(null);
   const [permissions, setPermissions] = useState({});
 
+  const userRef = useRef(null);
+  useEffect(() => { userRef.current = user; }, [user]);
+
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
     return data?.session?.access_token || "";
@@ -117,6 +120,10 @@ export function AuthProvider({ children }) {
 
   const loadUserProfile = async (authUser) => {
     if (!authUser) { setUser(null); setLoading(false); return; }
+    // First sign-in / initial boot: flip loading back on so the app shows the
+    // boot screen instead of a frozen login page. Skip on token refresh
+    // (user already loaded) to avoid flashing the loader mid-session.
+    if (!userRef.current) setLoading(true);
     try {
       const token = (await supabase.auth.getSession()).data?.session?.access_token || "";
       const headers = { Authorization: `Bearer ${token}` };

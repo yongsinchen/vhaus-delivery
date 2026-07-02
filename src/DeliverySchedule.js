@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./AuthContext";
+import { useLoading, useToast } from "./UIComponents";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -333,22 +334,36 @@ function TeamPrintView({ team, onClose }) {
 
 // -- Vehicle Modal (unchanged) -----------------------------------------
 function VehicleModal({ vehicles, onClose, onRefresh }) {
+  const { withLoading } = useLoading();
+  const toast = useToast();
   const [showAddVehicle, setShowAddVehicle] = useState(false);
   const [newVehicle, setNewVehicle] = useState({ ...EMPTY_VEHICLE });
   const [editVehicleId, setEditVehicleId] = useState(null);
   const [editVehicle, setEditVehicle] = useState({});
   const createVehicle = async () => {
     if (!newVehicle.driver_name && !newVehicle.vehicle_plate) return alert("Please enter driver name or vehicle plate.");
-    await af(`${API}/delivery/vehicles`, { method: "POST", body: JSON.stringify(newVehicle) });
-    setNewVehicle({ ...EMPTY_VEHICLE }); setShowAddVehicle(false); onRefresh();
+    try {
+      await withLoading("Saving vehicle…", async () => {
+        await af(`${API}/delivery/vehicles`, { method: "POST", body: JSON.stringify(newVehicle) });
+        setNewVehicle({ ...EMPTY_VEHICLE }); setShowAddVehicle(false); onRefresh();
+      });
+    } catch (e) { toast.error("Failed to save vehicle: " + e.message); }
   };
   const saveVehicle = async (id) => {
-    await af(`${API}/delivery/vehicles/${id}`, { method: "PATCH", body: JSON.stringify(editVehicle) });
-    setEditVehicleId(null); onRefresh();
+    try {
+      await withLoading("Updating vehicle…", async () => {
+        await af(`${API}/delivery/vehicles/${id}`, { method: "PATCH", body: JSON.stringify(editVehicle) });
+        setEditVehicleId(null); onRefresh();
+      });
+    } catch (e) { toast.error("Failed to update vehicle: " + e.message); }
   };
   const deleteVehicle = async (id) => {
     if (!window.confirm("Delete this vehicle?")) return;
-    await af(`${API}/delivery/vehicles/${id}`, { method: "DELETE" }); onRefresh();
+    try {
+      await withLoading("Deleting vehicle…", async () => {
+        await af(`${API}/delivery/vehicles/${id}`, { method: "DELETE" }); onRefresh();
+      });
+    } catch (e) { toast.error("Failed to delete vehicle: " + e.message); }
   };
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
@@ -662,6 +677,8 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
 
 // -- Main Component ----------------------------------------------------
 export default function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
+  const { withLoading } = useLoading();
+  const toast = useToast();
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
@@ -759,18 +776,26 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   const loadReadiness = async () => {
     if (!companyId) return;
-    const res = await af(`${API}/delivery-readiness?company_id=${companyId}&date=${date}&days=3`);
-    const d = await res.json();
-    setReadiness(d);
-    setShowReadiness(true);
+    try {
+      await withLoading("Checking delivery readiness…", async () => {
+        const res = await af(`${API}/delivery-readiness?company_id=${companyId}&date=${date}&days=3`);
+        const d = await res.json();
+        setReadiness(d);
+        setShowReadiness(true);
+      });
+    } catch (e) { toast.error("Failed to load readiness: " + e.message); }
   };
 
   const loadSuggestions = async () => {
     if (!companyId) return;
-    const res = await af(`${API}/scheduling-suggest?company_id=${companyId}&date=${date}`);
-    const d = await res.json();
-    setSuggestions(d);
-    setShowSuggest(true);
+    try {
+      await withLoading("Analyzing unassigned orders…", async () => {
+        const res = await af(`${API}/scheduling-suggest?company_id=${companyId}&date=${date}`);
+        const d = await res.json();
+        setSuggestions(d);
+        setShowSuggest(true);
+      });
+    } catch (e) { toast.error("Failed to load suggestions: " + e.message); }
   };
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
@@ -796,22 +821,28 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
 
   // -- CRUD: Teams ------------------------------------------------------
   const createTeam = async (payload) => {
-    const res = await af(`${API}/delivery-teams`, { method: "POST", body: JSON.stringify({ ...payload, team_date: date }) });
-    const data = await res.json();
-    if (res.status === 409 || data.error) return { error: data.error };
-    setShowAddTeam(false); loadData();
+    return await withLoading("Creating team…", async () => {
+      const res = await af(`${API}/delivery-teams`, { method: "POST", body: JSON.stringify({ ...payload, team_date: date }) });
+      const data = await res.json();
+      if (res.status === 409 || data.error) return { error: data.error };
+      setShowAddTeam(false); loadData();
+    });
   };
 
   const deleteTeam = async (id) => {
     if (!window.confirm("Delete this team and all its schedules?")) return;
-    const res = await af(`${API}/delivery-teams/${id}`, { method: "DELETE" });
-    const data = await res.json();
-    if (data.error) { alert(data.error); return; }
-    loadData();
+    try {
+      await withLoading("Deleting team…", async () => {
+        const res = await af(`${API}/delivery-teams/${id}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        loadData();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   // -- CRUD: Schedules (assign / unassign / reorder) --------------------
-  const assignItem = async (teamId, id, type, setDateOnAssign = false) => {
+  const assignItem = async (teamId, id, type, setDateOnAssign = false) => await withLoading("Assigning to route…", async () => {
     const team = teams.find(t => String(t.id) === String(teamId));
     const sortOrder = (team?.schedules?.length || 0) + 1;
 
@@ -846,13 +877,17 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
       if (data.error) { alert(data.error); return; }
     }
     loadData();
-  };
+  });
 
   const unassignOrder = async (scheduleId) => {
-    const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "DELETE" });
-    const data = await res.json();
-    if (data.error) { alert(data.error); return; }
-    loadData();
+    try {
+      await withLoading("Removing from route…", async () => {
+        const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        loadData();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   const updateScheduleStatus = async (scheduleId, status) => {
@@ -862,8 +897,12 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
   const updateAllSchedulesStatus = async (teamId, status) => {
     const team = teams.find(t => t.id === teamId);
     if (!team) return;
-    await Promise.all((team.schedules || []).map(s => updateScheduleStatus(s.id, status)));
-    await loadData();
+    try {
+      await withLoading("Updating route status…", async () => {
+        await Promise.all((team.schedules || []).map(s => updateScheduleStatus(s.id, status)));
+        await loadData();
+      });
+    } catch (e) { toast.error("Failed to update route: " + e.message); }
   };
 
   // Drag-drop reorder within a team
@@ -979,12 +1018,16 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
                       if (teams.length === 0) { alert("Create a team first"); return; }
                       const teamId = teams[0]?.id;
                       if (!teamId) return;
-                      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
-                      for (const o of sg.orders) {
-                        await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
-                      }
-                      loadData();
-                      loadSuggestions();
+                      try {
+                        await withLoading(`Assigning ${sg.orders.length} order(s)…`, async () => {
+                          const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
+                          for (const o of sg.orders) {
+                            await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
+                          }
+                          loadData();
+                        });
+                        loadSuggestions();
+                      } catch (e) { toast.error("Failed to assign: " + e.message); }
                     }} className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Assign All to First Team</button>
                   </div>
                   <div className="divide-y divide-gray-50">

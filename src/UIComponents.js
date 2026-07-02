@@ -129,6 +129,95 @@ function ConfirmModal({ modal, onClose }) {
 
 export function useModal() { return useContext(ModalContext); }
 
+// ─── Global Loading Overlay ──────────────────────────────────────
+// Full-screen loading for important blocking actions (login, save, company
+// switch). Use showLoading("Saving changes…") / hideLoading(), or wrap the
+// whole async call in withLoading("Saving changes…", fn) so the overlay is
+// always removed even when the call throws.
+const LoadingContext = createContext(null);
+
+// Safety net: never let the overlay get stuck forever
+const LOADING_TIMEOUT_MS = 30000;
+
+export function LoadingProvider({ children }) {
+  const [state, setState] = useState(null); // null | { message }
+  const timeoutRef = useRef(null);
+
+  const hideLoading = useCallback(() => {
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+    setState(null);
+  }, []);
+
+  const showLoading = useCallback((message = "Loading…") => {
+    setState({ message });
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setState(null), LOADING_TIMEOUT_MS);
+  }, []);
+
+  const setLoadingMessage = useCallback((message) => {
+    setState(prev => (prev ? { ...prev, message } : prev));
+  }, []);
+
+  // withLoading("Saving…", async () => { ... }) — overlay always cleared
+  const withLoading = useCallback(async (message, fn) => {
+    showLoading(message);
+    try { return await fn(); }
+    finally { hideLoading(); }
+  }, [showLoading, hideLoading]);
+
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
+
+  return (
+    <LoadingContext.Provider value={{ showLoading, hideLoading, setLoadingMessage, withLoading, isLoading: !!state }}>
+      {children}
+      {state && <LoadingOverlay message={state.message} />}
+    </LoadingContext.Provider>
+  );
+}
+
+export function useLoading() { return useContext(LoadingContext); }
+
+// Standalone full-screen overlay — also usable directly for boot screens
+export function LoadingOverlay({ message = "Loading…", subtext }) {
+  return (
+    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm animate-fadeIn">
+      <div className="flex flex-col items-center px-8 py-7 rounded-3xl bg-white/95 shadow-2xl mx-4 min-w-[220px]">
+        <PulseSpinner />
+        <p className="mt-4 text-sm font-semibold text-gray-800 text-center">{message}</p>
+        {subtext && <p className="mt-1 text-xs text-gray-400 text-center">{subtext}</p>}
+      </div>
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fadeIn { animation: fadeIn 0.15s ease-out; }
+      `}</style>
+    </div>
+  );
+}
+
+// PulseOS brand spinner — violet ring with pulsing ⚡ core
+export function PulseSpinner({ size = 48 }) {
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <div className="absolute inset-0 rounded-full border-4 border-violet-100" />
+      <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-violet-600 animate-spin" />
+      <span className="animate-pulse" style={{ fontSize: size * 0.4 }}>⚡</span>
+    </div>
+  );
+}
+
+// Full-page boot screen (pre-dashboard) — branded, not overlaying content
+export function FullPageLoader({ message = "Loading PulseOS…", subtext }) {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="flex justify-center mb-4"><PulseSpinner size={56} /></div>
+        <p className="text-gray-700 font-semibold">{message}</p>
+        {subtext && <p className="text-gray-400 text-sm mt-1">{subtext}</p>}
+      </div>
+    </div>
+  );
+}
+
 // ─── Loading Button ──────────────────────────────────────────────
 export function LoadingButton({ onClick, loading, disabled, children, className = "", ...props }) {
   return (

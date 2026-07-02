@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce } from "./UIComponents";
+import { useDebounce, useToast, useLoading } from "./UIComponents";
 
 const API = "https://vhaus-bot-production.up.railway.app";
 const af = async (url, opts = {}) => { const { data } = await supabase.auth.getSession(); const token = data?.session?.access_token; const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
@@ -16,10 +16,12 @@ const getToken = async () => {
 };
 const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveCompanyId"); return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) }; };
 
-const TABS = ["Stock Levels", "Movements", "Adjust", "Transfer", "Import"];
+const TABS = ["Stock Levels", "Movements", "Adjust", "Import"];
 
 export default function InventoryPage() {
   const { user, activeCompanyId } = useAuth();
+  const toast = useToast();
+  const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0);
 
@@ -33,20 +35,11 @@ export default function InventoryPage() {
   const [search, setSearch] = useState("");
 
   // Adjust form
-  const [adjWarehouse, setAdjWarehouse] = useState("");
   const [adjProduct, setAdjProduct] = useState("");
   const [adjQty, setAdjQty] = useState("");
   const [adjNotes, setAdjNotes] = useState("");
 
-  // Transfer form
-  const [txFrom, setTxFrom] = useState("");
-  const [txTo, setTxTo] = useState("");
-  const [txProduct, setTxProduct] = useState("");
-  const [txQty, setTxQty] = useState("");
-  const [txNotes, setTxNotes] = useState("");
-
   const [adjProductSearch, setAdjProductSearch] = useState("");
-  const [txProductSearch, setTxProductSearch] = useState("");
 
   const loadWarehouses = useCallback(async () => {
     if (!companyId) return;
@@ -59,13 +52,12 @@ export default function InventoryPage() {
     if (!companyId) return;
     setLoading(true);
     const params = new URLSearchParams({ company_id: companyId });
-    if (filterWarehouse) params.set("warehouse_id", filterWarehouse);
     if (filterLowStock) params.set("low_stock", "true");
     const res = await af(`${API}/inventory?${params}`);
     const d = await res.json();
     setInventory(d.inventory || []);
     setLoading(false);
-  }, [companyId, filterWarehouse, filterLowStock]);
+  }, [companyId, filterLowStock]);
 
   const loadMovements = useCallback(async () => {
     if (!companyId) return;
@@ -106,30 +98,20 @@ export default function InventoryPage() {
     : products.slice(0, 20), [products]);
 
   const doAdjust = async () => {
-    if (!adjWarehouse || !adjProduct || adjQty === "") return;
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/inventory/adjust`, {
-      method: "POST", headers, body: JSON.stringify({ warehouse_id: adjWarehouse, product_id: adjProduct, quantity: Number(adjQty), notes: adjNotes }),
-    });
-    const d = await res.json();
-    if (!res.ok) { alert(d.error || "Failed"); return; }
-    alert(`Stock adjusted to ${d.new_quantity}`);
-    setAdjQty(""); setAdjNotes("");
-    loadInventory();
-  };
-
-  const doTransfer = async () => {
-    if (!txFrom || !txTo || !txProduct || !txQty) return;
-    if (txFrom === txTo) { alert("From and To must be different"); return; }
-    const headers = await authHeaders();
-    const res = await fetch(`${API}/inventory/transfer`, {
-      method: "POST", headers, body: JSON.stringify({ from_warehouse_id: txFrom, to_warehouse_id: txTo, product_id: txProduct, quantity: Number(txQty), notes: txNotes }),
-    });
-    const d = await res.json();
-    if (!res.ok) { alert(d.error || "Failed"); return; }
-    alert("Transfer complete");
-    setTxQty(""); setTxNotes("");
-    loadInventory();
+    if (!adjProduct || adjQty === "") return;
+    try {
+      await withLoading("Adjusting stock…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/inventory/adjust`, {
+          method: "POST", headers, body: JSON.stringify({ product_id: adjProduct, quantity: Number(adjQty), notes: adjNotes }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "Failed");
+        toast.success(`Stock adjusted to ${d.new_quantity}`);
+        setAdjQty(""); setAdjNotes("");
+        loadInventory();
+      });
+    } catch (e) { toast.error(e.message); }
   };
 
   return (
@@ -151,11 +133,6 @@ export default function InventoryPage() {
           <div className="flex flex-wrap gap-2">
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search product…"
               className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-48 focus:outline-none focus:border-violet-400" />
-            <select value={filterWarehouse} onChange={e => setFilterWarehouse(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-              <option value="">All Locations</option>
-              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
-            </select>
             <label className="flex items-center gap-1 text-sm text-gray-600 cursor-pointer">
               <input type="checkbox" checked={filterLowStock} onChange={e => setFilterLowStock(e.target.checked)}
                 className="rounded border-gray-300 text-violet-600" />
@@ -167,22 +144,21 @@ export default function InventoryPage() {
               <thead>
                 <tr className="border-b border-gray-100 text-left text-xs text-gray-500 uppercase">
                   <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3">Location</th>
-                  <th className="px-4 py-3 text-right">Qty</th>
+                  <th className="px-4 py-3 text-right">On Hand</th>
                   <th className="px-4 py-3 text-right">Reserved</th>
                   <th className="px-4 py-3 text-right">Available</th>
                   <th className="px-4 py-3 text-center">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-16" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
-                {!loading && filteredInv.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No stock records</td></tr>}
+                {loading && [1,2,3,4,5].map(i=><tr key={i} className="animate-pulse"><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-32" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-200 rounded w-12" /></td><td className="px-4 py-3"><div className="h-3 bg-gray-100 rounded w-20" /></td></tr>)}
+                {!loading && filteredInv.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No stock records</td></tr>}
                 {!loading && filteredInv.map(i => {
                   const p = i.products || {};
-                  const avail = (i.quantity || 0) - (i.reserved_qty || 0);
+                  const avail = (i.on_hand || 0) - (i.reserved_qty || 0);
                   const reorder = p.reorder_point || 0;
-                  const isLow = i.quantity <= reorder && reorder > 0;
-                  const isOut = i.quantity <= 0;
+                  const isLow = i.on_hand <= reorder && reorder > 0;
+                  const isOut = i.on_hand <= 0;
                   return (
                     <tr key={i.id} className="border-b border-gray-50">
                       <td className="px-4 py-3">
@@ -191,8 +167,7 @@ export default function InventoryPage() {
                         {p.color && <span className="text-xs text-gray-400 ml-1">· {p.color}</span>}
                         {p.size && <span className="text-xs text-gray-400 ml-1">· {p.size}</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-500">{i.warehouses?.name || "—"}</td>
-                      <td className="px-4 py-3 text-right font-medium">{i.quantity}</td>
+                      <td className="px-4 py-3 text-right font-medium">{i.on_hand}</td>
                       <td className="px-4 py-3 text-right text-gray-400">{i.reserved_qty || 0}</td>
                       <td className="px-4 py-3 text-right font-medium">{avail}</td>
                       <td className="px-4 py-3 text-center">
@@ -257,15 +232,7 @@ export default function InventoryPage() {
       {/* Adjust */}
       {tab === 2 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-lg">
-          <p className="text-sm text-gray-500">Set the absolute stock count for a product at a location. Use for physical count corrections.</p>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Warehouse / Showroom</label>
-            <select value={adjWarehouse} onChange={e => setAdjWarehouse(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-              <option value="">Select location</option>
-              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
-            </select>
-          </div>
+          <p className="text-sm text-gray-500">Set the absolute stock count for a product. Use for physical count corrections.</p>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Product</label>
             <input value={adjProductSearch} onChange={e => setAdjProductSearch(e.target.value)} placeholder="Search product…"
@@ -297,67 +264,14 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Transfer */}
-      {tab === 3 && (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-lg">
-          <p className="text-sm text-gray-500">Move stock between locations.</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
-              <select value={txFrom} onChange={e => setTxFrom(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-                <option value="">Select</option>
-                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-              <select value={txTo} onChange={e => setTxTo(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-                <option value="">Select</option>
-                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Product</label>
-            <input value={txProductSearch} onChange={e => setTxProductSearch(e.target.value)} placeholder="Search product…"
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm mb-1" />
-            {txProductSearch && (
-              <div className="border border-gray-200 rounded-xl max-h-40 overflow-y-auto">
-                {getFilteredProducts(txProductSearch).map(p => (
-                  <button key={p.id} onClick={() => { setTxProduct(p.id); setTxProductSearch(`${p.code} ${p.name}`); }}
-                    className={`w-full text-left px-3 py-1.5 text-sm hover:bg-violet-50 ${txProduct === p.id ? "bg-violet-50 font-medium" : ""}`}>
-                    <span className="font-mono text-violet-700">{p.code}</span> {p.name} {p.size ? <span className="text-gray-400">· {p.size}</span> : ""} {p.color ? <span className="text-gray-400">· {p.color}</span> : ""}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Quantity</label>
-              <input type="number" value={txQty} onChange={e => setTxQty(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
-              <input value={txNotes} onChange={e => setTxNotes(e.target.value)} placeholder="Optional"
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" />
-            </div>
-          </div>
-          <button onClick={doTransfer} className="px-6 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Transfer</button>
-        </div>
-      )}
-
       {/* Import */}
-      {tab === 4 && (
+      {tab === 3 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-lg">
           <p className="text-sm text-gray-500">Upload an Excel/CSV with columns: <b>code</b> (product code), <b>quantity</b>. Products are matched by code against your master list.</p>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Destination Warehouse</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Received At (optional, for movement log)</label>
             <select id="import-wh" className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-              <option value="">Select location</option>
+              <option value="">Unspecified</option>
               {warehouses.map(w => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
             </select>
           </div>
@@ -365,11 +279,11 @@ export default function InventoryPage() {
             <input type="file" accept=".xlsx,.xls,.csv" id="import-file" className="hidden" onChange={async e => {
               const file = e.target.files?.[0];
               const wh = document.getElementById("import-wh").value;
-              if (!file || !wh) { alert("Select a warehouse and file"); return; }
+              if (!file) { alert("Select a file"); return; }
               const token = await getToken();
               const fd = new FormData();
               fd.append("file", file);
-              fd.append("warehouse_id", wh);
+              if (wh) fd.append("warehouse_id", wh);
               const btn = document.getElementById("import-btn");
               if (btn) btn.textContent = "Importing…";
               const res = await fetch(`${API}/inventory/import`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });

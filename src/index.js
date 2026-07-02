@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
 import { AuthProvider } from "./AuthContext";
-import { ToastProvider, ModalProvider } from "./UIComponents";
+import { ToastProvider, ModalProvider, LoadingProvider } from "./UIComponents";
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -36,7 +36,9 @@ root.render(
       <AuthProvider>
         <ToastProvider>
           <ModalProvider>
-            <App />
+            <LoadingProvider>
+              <App />
+            </LoadingProvider>
           </ModalProvider>
         </ToastProvider>
       </AuthProvider>
