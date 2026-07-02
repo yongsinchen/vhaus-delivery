@@ -22,6 +22,7 @@ const FinancePage = lazy(() => import("./FinancePage"));
 const CommissionPage = lazy(() => import("./CommissionPage"));
 const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
 const OutstandingBalancePage = lazy(() => import("./OutstandingBalancePage"));
+const SupplierDOPage = lazy(() => import("./SupplierDOPage"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = "https://vhaus-bot-production.up.railway.app";
@@ -82,6 +83,7 @@ const NAV = [
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
   { id: "products",   label: "Products",         icon: "📦", canKey: null, manageOnly: true },
   { id: "purchase",   label: "Purchase Orders",   icon: "📋", canKey: null, manageOnly: true },
+  { id: "supplier-dos", label: "Supplier DOs",     icon: "🚚", canKey: null, manageOnly: true },
   { id: "inventory",  label: "Inventory",          icon: "📊", canKey: null, manageOnly: true },
   { id: "warehouse",  label: "Warehouse",          icon: "🏭", canKey: null, manageOnly: true },
   { id: "driver",     label: "Driver",             icon: "🚛", canKey: null, manageOnly: false },
@@ -1311,8 +1313,9 @@ export default function App() {
                             so_not_found: "bg-amber-100 text-amber-700",
                             item_not_matched: "bg-yellow-100 text-yellow-700",
                             duplicate_arrival: "bg-violet-100 text-violet-700",
+                            matched: "bg-emerald-100 text-emerald-700",
                           };
-                          const isResolved = item.status === "Resolved" || item.status === "Dismissed";
+                          const isResolved = item.status === "Resolved" || item.status === "Dismissed" || item.status === "Matched";
                           return (
                             <tr key={item.id || idx} className={`border-t border-gray-50 ${isResolved ? "opacity-50" : ""}`}>
                               <td className="px-3 py-2">
@@ -1396,6 +1399,7 @@ export default function App() {
 
     // PURCHASE ORDERS
     if (page === "purchase") return <PurchaseOrdersPage />;
+    if (page === "supplier-dos") return <SupplierDOPage />;
 
     // INVENTORY
     if (page === "inventory") return <InventoryPage />;
