@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast } from "./UIComponents";
@@ -442,6 +442,8 @@ export default function App() {
   const [servicesLoading, setServicesLoading] = useState(false); // eslint-disable-line
   const [supplierDOs, setSupplierDOs] = useState([]);
   const [doWarehouses, setDoWarehouses] = useState([]);
+  const [opsCounts, setOpsCounts] = useState({ service_pending: 0, do_review: 0 });
+  const opsLoadedRef = useRef(false);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
   const [doUploading, setDoUploading] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState("");
@@ -495,14 +497,28 @@ export default function App() {
     try {
       const url = companyId ? `${BACKEND}/service-pending?company_id=${companyId}` : `${BACKEND}/service-pending`;
       const d = await authFetch(url).then(r => r.json());
-      setServicePending(Array.isArray(d) ? d : []);
+      const rows = Array.isArray(d) ? d : [];
+      setServicePending(rows);
+      setOpsCounts(p => ({ ...p, service_pending: rows.length }));
     } catch(e) {} setSpLoading(false);
   };
 
   const loadDoReview = async () => {
     setDoReviewLoading(true);
-    try { const d = await authFetch(`${BACKEND}/do-review`).then(r => r.json()); setDoReview(Array.isArray(d) ? d : []); }
-    catch(e) {} setDoReviewLoading(false);
+    try {
+      const d = await authFetch(`${BACKEND}/do-review`).then(r => r.json());
+      const rows = Array.isArray(d) ? d : [];
+      setDoReview(rows);
+      setOpsCounts(p => ({ ...p, do_review: rows.length }));
+    } catch(e) {} setDoReviewLoading(false);
+  };
+
+  // Sidebar badge counts only — the full row sets load when Operations opens
+  const loadOpsCounts = async () => {
+    try {
+      const d = await authFetch(`${BACKEND}/operations/pending-counts`).then(r => r.json());
+      setOpsCounts({ service_pending: Number(d?.service_pending) || 0, do_review: Number(d?.do_review) || 0 });
+    } catch (e) {}
   };
 
   const loadServices = async () => {
@@ -522,7 +538,8 @@ export default function App() {
     if (!isSalesman) return;
     try {
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-      const d = await authFetch(`${BACKEND}/commission-payout?payout_month=${month}`).then(r => r.json());
+      // Lightweight totals-only endpoint — the Commission page still uses /commission-payout
+      const d = await authFetch(`${BACKEND}/commission-summary?payout_month=${month}`).then(r => r.json());
       setEstCommission(Number(d?.total) || 0);
     } catch (e) { console.error(e); }
   };
@@ -541,16 +558,27 @@ export default function App() {
     setSupplierDOsLoading(false);
   };
 
-  // Load data once user is authenticated and profile is loaded
+  // Load data once user is authenticated and profile is loaded.
+  // Operations-page data (service-pending rows, do-review rows, warehouses)
+  // deliberately does NOT load here — only its badge counts do. The full
+  // rows load on first open of the Operations page (effect below).
   useEffect(() => {
     if (!user) return; // wait for auth
+    opsLoadedRef.current = false; // company/user switch: Operations must reload on next open
     loadOrders();
-    loadServicePending();
-    loadDoReview();
     loadServices();
     loadCommissionEstimate();
-    if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[]));
+    loadOpsCounts();
   }, [user?.id, companyId, user?.role]); // eslint-disable-line
+
+  // First open of the Operations page loads its data (startup used to do this)
+  useEffect(() => {
+    if (page !== "operations" || !user || opsLoadedRef.current) return;
+    opsLoadedRef.current = true;
+    loadServicePending();
+    loadDoReview();
+    if (companyId) authFetch(`${BACKEND}/warehouses?company_id=${companyId}`).then(r=>r.json()).then(d=>setDoWarehouses(d.warehouses||[])).catch(()=>{});
+  }, [page, user, companyId]); // eslint-disable-line
 
   // ── Derived data ────────────────────────────────────────────────
 
@@ -727,8 +755,8 @@ export default function App() {
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${page===n.id ? "bg-violet-600 text-white shadow-lg shadow-violet-900/50" : "text-purple-300 hover:bg-white/5 hover:text-white"}`}>
             <span className="text-base w-5 text-center">{n.icon}</span>
             <span>{n.id === "orders" && isSalesman ? "My Orders" : n.label}</span>
-            {n.id === "operations" && (servicePending.length + doReview.length) > 0 && (
-              <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{servicePending.length + doReview.length}</span>
+            {n.id === "operations" && (opsCounts.service_pending + opsCounts.do_review) > 0 && (
+              <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{opsCounts.service_pending + opsCounts.do_review}</span>
             )}
             {n.id === "ready" && readyOrders.length > 0 && (
               <span className="ml-auto bg-amber-400 text-gray-900 text-xs font-bold px-1.5 py-0.5 rounded-full">{readyOrders.length}</span>
@@ -1484,7 +1512,7 @@ export default function App() {
                 <span className="text-xl leading-none">{n.icon}</span>
                 <span className="text-xs font-medium leading-none">{n.label.split(" ")[0]}</span>
                 {page===n.id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-violet-600 rounded-full" />}
-                {n.id==="operations" && (servicePending.length+doReview.length)>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
+                {n.id==="operations" && (opsCounts.service_pending+opsCounts.do_review)>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
                 {n.id==="ready" && readyOrders.length>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-amber-400 rounded-full" />}
               </button>
             ))}
