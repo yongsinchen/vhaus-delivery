@@ -783,7 +783,9 @@ export default function DeliverySchedule({ readOnly = false, companyId = null, c
     ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service" && !activeDoSoNumbers.has(o.so_number)).map(o => ({ ...o, _type: "order" })),
     ...serviceOrders.map(o => ({ ...o, _type: "service" })),
     ...trips.map(t => ({ ...t, _type: "trip" })),
-    ...unassignedDos.map(d => ({ ...d, _type: "do" })),
+    // A DO with a target delivery_date only appears in the pool on that date's
+    // tab; undated drafts appear on every date (they still need a slot).
+    ...unassignedDos.filter(d => !d.delivery_date || d.delivery_date === date).map(d => ({ ...d, _type: "do" })),
   ].sort((a, b) => {
     const aTime = (a._type === "order" || a._type === "service") ? (a.time_slot || "") : (a.orders?.time_slot || "");
     const bTime = (b._type === "order" || b._type === "service") ? (b.time_slot || "") : (b.orders?.time_slot || "");
