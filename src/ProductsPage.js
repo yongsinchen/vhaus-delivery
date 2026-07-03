@@ -498,6 +498,7 @@ function ProductsPage() {
     setImportProgress(null);
     setImportStep("processing");
     const token = await getToken();
+    const cid = localStorage.getItem("pulseActiveCompanyId");
     const fd = new FormData();
     fd.append("file", importFile);
     if (importSupplier) fd.append("supplier_id", importSupplier);
@@ -506,7 +507,9 @@ function ProductsPage() {
     fd.append("cost_divisor", importCostMode === "derive" ? importCostDivisor : "");
     const res = await fetch(`${API}/catalogue-import/upload`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
+      // X-Company-ID must match the active company so the job is created under it
+      // (poll/commit look it up by active company — omitting it => "Job not found").
+      headers: { Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) },
       body: fd,
     });
     const d = await res.json();
