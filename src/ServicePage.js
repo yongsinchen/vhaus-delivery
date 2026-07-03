@@ -27,6 +27,7 @@ function ServicePage() {
   const [tab, setTab] = useState("cases"); // "cases" | "pending"
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState("");
+  const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -179,16 +180,28 @@ function ServicePage() {
     } catch (e) { toast.error(e.message); }
   };
 
+  const q = search.trim().toLowerCase();
+  const filteredServices = !q ? services : services.filter(svc => [
+    svc._order?.so_number, svc.orders?.so_number,
+    svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
+    svc.description, svc.customer_phone, svc._order?.contact,
+    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
+  ].filter(Boolean).join(" ").toLowerCase().includes(q));
+
   return (
     <div className="p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Services</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {tab === "cases" && (
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-              <option value="">All Status</option>
-              {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SO, customer, description..."
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-56 focus:outline-none focus:border-violet-400" />
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+                <option value="">All Status</option>
+                {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </>
           )}
           <button onClick={() => setShowCreate(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ New Service Case</button>
         </div>
@@ -197,7 +210,7 @@ function ServicePage() {
       {/* Tabs */}
       <div className="flex gap-2">
         <button onClick={() => setTab("cases")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "cases" ? "bg-violet-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-          Service Cases {services.length > 0 && <span className="ml-1 text-xs opacity-75">({services.length})</span>}
+          Service Cases {filteredServices.length > 0 && <span className="ml-1 text-xs opacity-75">({filteredServices.length})</span>}
         </button>
         <button onClick={() => setTab("pending")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "pending" ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-amber-300"}`}>
           Pending {pending.length > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pending.length}</span>}
@@ -238,15 +251,15 @@ function ServicePage() {
 
       {/* Service list */}
       {tab === "cases" && loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-      {tab === "cases" && !loading && services.length === 0 && (
+      {tab === "cases" && !loading && filteredServices.length === 0 && (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">🔧</div>
-          <p className="font-medium">No service cases</p>
-          <p className="text-xs mt-1">Create one from an order or click "+ New Service Case"</p>
+          <p className="font-medium">{q || filterStatus ? "No matching service cases" : "No service cases"}</p>
+          <p className="text-xs mt-1">{q || filterStatus ? "Try a different search or status" : 'Create one from an order or click "+ New Service Case"'}</p>
         </div>
       )}
       {tab === "cases" && <div className="space-y-2">
-        {services.map(svc => (
+        {filteredServices.map(svc => (
           <div key={svc.id} onClick={() => openDetail(svc)}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
             <div className="flex items-start justify-between gap-3">
