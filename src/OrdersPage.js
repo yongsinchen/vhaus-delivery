@@ -148,27 +148,27 @@ function printDeliveryNote(doData, order, co) {
   setTimeout(() => w.print(), 300);
 }
 
-function printSalesOrder(order, signatureDataUrl, co) {
+function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const COMPANY = co || DEFAULT_COMPANY;
   const items = order.items || order.sales_order_items || [];
   let gross = 0;
-  const MIN_ROWS = 8;
+  const MIN_ROWS = 6;
   const itemRows = items.map((it, i) => {
     const qty = Number(it.quantity) || 1;
     const price = Number(it.unit_price) || 0;
     const line = qty * price;
     gross += line;
-    const spec = [it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
+    const sub = [it.product_code, it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
     return `<tr>
       <td class="c">${i + 1}</td>
-      <td>${esc(it.product_name || it.product_code || "")}${spec ? `<div class="spec">${esc(spec)}</div>` : ""}${it.notes ? `<div class="spec">${esc(it.notes)}</div>` : ""}</td>
+      <td class="desc"><div class="pname">${esc(it.product_name || it.product_code || "")}</div>${sub ? `<div class="psub">${esc(sub)}</div>` : ""}${it.notes ? `<div class="psub">${esc(it.notes)}</div>` : ""}</td>
       <td class="c">${qty}</td>
       <td class="r">${it.unit_price === 0 || it.unit_price == null ? "" : money(price)}</td>
       <td class="r">${line ? money(line) : ""}</td>
     </tr>`;
   });
   for (let i = items.length; i < MIN_ROWS; i++) {
-    itemRows.push(`<tr><td class="c">${i + 1}</td><td></td><td></td><td></td><td></td></tr>`);
+    itemRows.push(`<tr><td class="c">${i + 1}</td><td></td><td class="c">&nbsp;</td><td></td><td></td></tr>`);
   }
 
   const discount = Number(order.discount) || 0;
@@ -182,115 +182,197 @@ function printSalesOrder(order, signatureDataUrl, co) {
   const dateStr = new Date((order.order_date || order.created_at || new Date().toISOString()) + (order.order_date ? "T00:00:00" : "")).toLocaleDateString("en-MY");
 
   const sig = signatureDataUrl || order.customer_signature || null;
+  const branchLine = esc((branchName || order.branch_name || order.sales_channel || "—").toString().toUpperCase());
+  const idLabel = order.customer_id_type === "passport" ? "Passport No" : "I/C No";
+  const payOptions = PAYMENT_METHODS
+    .map(m => `<span class="pay-opt"><span class="chk${order.payment_method === m ? " on" : ""}"></span>${esc(m)}</span>`)
+    .join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Order ${esc(order.order_number || "")}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    @page { size: A4; margin: 8mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 10px; }
-    .sheet { width: 100%; border: 1px solid #111; }
-    .pad { padding: 6px 10px; }
-    .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #111; }
-    .brand { display: flex; align-items: center; gap: 8px; }
-    .logo { width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 20px; }
-    .logoimg { height: 48px; max-width: 220px; object-fit: contain; }
-    .bname { font-size: 18px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
-    .bname small { display:block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color:#555; margin-top:2px; }
-    .co { font-size: 9px; text-align: right; line-height: 1.3; }
-    .co b { font-size: 10px; }
-    .branches { font-size: 8px; color:#333; margin-top:2px; }
-    .titlebar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #111; background:#f5f5f5; }
-    .title { font-size: 16px; font-weight: 900; letter-spacing: 1px; }
-    .sono { font-size: 12px; font-weight: 800; }
-    .sono b { color: #d6336c; font-size: 14px; }
-    .cust td { padding: 3px 10px; vertical-align: top; font-size: 10px; }
-    .cust .lbl { font-weight: 700; white-space: nowrap; width: 80px; }
-    .cust .val { border-bottom: 1px dotted #999; }
+    @page { size: A4; margin: 9mm; }
+    body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .doc { width: 100%; border: 1px solid #1f2937; }
+    .sec { border-bottom: 0.5px solid #1f2937; }
+    .sec:last-child { border-bottom: none; }
+    .pad { padding: 9px 14px; }
+
+    /* Branch bar */
+    .branchbar { background: #1f2937; color: #fff; padding: 6px 14px; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+    .branchbar .r { font-weight: 500; letter-spacing: 0.5px; opacity: .85; }
+
+    /* Letterhead */
+    .head { display: flex; justify-content: space-between; align-items: center; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .logo { width: 40px; height: 40px; border-radius: 9px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 22px; }
+    .logoimg { height: 50px; max-width: 230px; object-fit: contain; }
+    .bname { font-size: 19px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
+    .bname small { display: block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color: #6b7280; margin-top: 3px; }
+    .co { font-size: 9px; text-align: right; line-height: 1.55; color: #374151; }
+    .co b { font-size: 10.5px; color: #1f2937; }
+    .co .branches { font-size: 8px; color: #6b7280; margin-top: 3px; }
+
+    /* Title */
+    .titlebar { display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 8px 14px; }
+    .title { font-size: 27px; font-weight: 800; letter-spacing: 3px; color: #1f2937; }
+    .sono { text-align: right; font-size: 8px; letter-spacing: 1px; color: #6b7280; line-height: 1.6; text-transform: uppercase; }
+    .sono .no { font-size: 15px; font-weight: 800; color: #b42318; letter-spacing: 0.5px; text-transform: none; }
+    .sono .st { display: inline-block; margin-top: 3px; padding: 1px 7px; border: 0.5px solid #d1d5db; border-radius: 3px; font-size: 8px; color: #374151; }
+
+    /* Section title bar */
+    .sectitle { background: #f3f4f6; padding: 4px 14px; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; }
+
+    /* Customer info — two aligned columns */
+    .cust { display: flex; }
+    .cust .col { flex: 1; padding: 9px 14px; }
+    .cust .col + .col { border-left: 0.5px solid #1f2937; }
+    .frow { display: flex; font-size: 10px; padding: 2.5px 0; }
+    .frow .lbl { width: 96px; flex-shrink: 0; color: #6b7280; font-weight: 600; }
+    .frow .val { flex: 1; color: #1f2937; font-weight: 600; }
+    .frow .val.multi { line-height: 1.4; }
+
+    /* Items */
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { border-top: 1px solid #111; border-bottom: 1px solid #111; border-right: 1px solid #ccc; background:#f5f5f5; padding: 4px 6px; font-size: 9px; }
-    table.items td { border-right: 1px solid #ccc; border-bottom: 1px solid #eee; padding: 3px 6px; height: 18px; font-size: 10px; }
-    table.items td:last-child, table.items th:last-child { border-right: none; }
+    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 6px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
+    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 6px 8px; font-size: 10px; height: 24px; vertical-align: top; }
+    table.items th:last-child, table.items td:last-child { border-right: none; }
     .c { text-align: center; } .r { text-align: right; }
-    .spec { font-size: 8px; color: #555; }
-    .totbox { display: flex; border-top: 1px solid #111; }
-    .totbox .left { flex: 1; border-right: 1px solid #111; padding: 5px 10px; font-size: 9px; }
-    .totbox .right { width: 200px; }
-    .totbox .right .trow { display: flex; justify-content: space-between; padding: 3px 10px; border-bottom: 1px solid #eee; font-size: 10px; }
-    .totbox .right .trow.grand { font-weight: 900; font-size: 11px; background:#f5f5f5; }
-    .notes { font-size: 8px; line-height: 1.4; border-top: 1px solid #111; }
-    .notes h5 { margin: 0 0 2px; font-size: 9px; }
-    .terms { font-size: 7.5px; line-height: 1.3; color:#222; border-top: 1px solid #111; }
-    .terms ol { margin: 2px 0 0; padding-left: 14px; }
-    .terms li { margin-bottom: 1px; }
-    .ack { font-size: 8px; font-style: italic; margin-top: 3px; }
-    .foot { display: flex; border-top: 1px solid #111; }
-    .foot .col { flex: 1; padding: 5px 10px; display: flex; flex-direction: column; }
-    .foot .col + .col { border-left: 1px solid #111; }
-    .sigspace { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 50px; }
-    .sigspace img { height: 40px; }
-    .sigline { border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; margin-top: 4px; }
+    .desc .pname { font-weight: 600; }
+    .desc .psub { font-size: 8px; color: #6b7280; margin-top: 2px; }
+
+    /* Remarks + summary */
+    .midrow { display: flex; border-top: 0.5px solid #1f2937; }
+    .remarks { flex: 1.5; padding: 10px 14px; border-right: 0.5px solid #1f2937; }
+    .remarks .h, .blk .h { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; margin-bottom: 5px; }
+    .remarks .body { font-size: 10px; color: #1f2937; line-height: 1.5; min-height: 54px; }
+    .summary { flex: 1; }
+    .srow { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px; font-size: 10px; border-bottom: 0.5px solid #e5e7eb; }
+    .srow .lab { color: #6b7280; font-weight: 600; }
+    .srow .num { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .srow.dep { font-size: 9px; }
+    .srow.grand { background: #f3f4f6; font-weight: 800; font-size: 13px; color: #1f2937; }
+    .srow.grand .lab { color: #1f2937; }
+    .srow:last-child { border-bottom: none; }
+
+    /* Notes / terms / payment blocks */
+    .blk { padding: 9px 14px; }
+    .notes ul { list-style: none; }
+    .notes li { position: relative; padding-left: 13px; margin-bottom: 3px; font-size: 9px; line-height: 1.5; color: #374151; }
+    .notes li:before { content: "•"; position: absolute; left: 2px; color: #9ca3af; }
+    .terms ol { padding-left: 16px; font-size: 8px; line-height: 1.55; color: #374151; }
+    .terms li { margin-bottom: 2.5px; padding-left: 3px; }
+    .ack { margin-top: 6px; font-size: 8.5px; font-style: italic; color: #475467; }
+
+    /* Payment method */
+    .pay-grid { display: flex; flex-wrap: wrap; margin: 4px 0 8px; }
+    .pay-opt { display: flex; align-items: center; gap: 6px; width: 33.33%; font-size: 10px; padding: 3px 0; color: #1f2937; }
+    .chk { width: 11px; height: 11px; border: 1px solid #1f2937; border-radius: 2px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .chk.on { background: #1f2937; }
+    .chk.on:after { content: "✓"; color: #fff; font-size: 8px; font-weight: 800; line-height: 1; }
+    .pay-fields { display: flex; gap: 28px; margin-top: 2px; }
+    .pf { display: flex; align-items: flex-end; gap: 7px; font-size: 10px; }
+    .pf .lab { font-weight: 600; color: #6b7280; }
+    .pf .line { border-bottom: 0.5px solid #9ca3af; min-width: 150px; display: inline-block; padding: 0 4px; font-weight: 600; color: #1f2937; }
+
+    /* Signatures — centered */
+    .sign { display: flex; }
+    .sign .scol { flex: 1; padding: 10px 14px 9px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .sign .scol + .scol { border-left: 0.5px solid #1f2937; }
+    .sign .stitle { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; }
+    .sign .sname { font-size: 11px; font-weight: 700; color: #1f2937; padding-bottom: 2px; }
+    .sign .simg { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 46px; }
+    .sign .simg img { height: 44px; }
+    .sign .sline { border-top: 0.7px solid #1f2937; width: 78%; padding-top: 4px; margin-top: 4px; font-size: 9px; color: #374151; }
+
     @media print { body { margin: 0; } }
   </style></head><body>
-    <div class="sheet">
-      <div class="head pad">
+    <div class="doc">
+      <div class="branchbar sec">
+        <span>BRANCH : ${branchLine}</span>
+        <span class="r">DATE : ${dateStr}</span>
+      </div>
+      <div class="head pad sec">
         <div class="brand">
           ${COMPANY.logo
             ? `<img src="${esc(COMPANY.logo)}" class="logoimg" alt="logo">`
             : `<div class="logo">V</div><div class="bname">V-HAUS LIVING<small>WE HOUSE YOUR HOUSE</small></div>`}
         </div>
         <div class="co">
-          <b>${esc(COMPANY.name)}</b> ${esc(COMPANY.reg)}<br>
+          <b>${esc(COMPANY.name)}</b>${COMPANY.reg ? ` (${esc(COMPANY.reg)})` : ""}<br>
           ${esc(COMPANY.address)}<br>
           Hotline: ${esc(COMPANY.hotline)}
           <div class="branches">${esc(COMPANY.branches_display || "")}</div>
         </div>
       </div>
-      <div class="titlebar pad">
+      <div class="titlebar sec">
         <div class="title">SALES ORDER</div>
-        <div class="sono">NO: <b>${esc(order.order_number || "")}</b></div>
+        <div class="sono">Document No<br><span class="no">${esc(order.order_number || "")}</span>${order.status ? `<br><span class="st">${esc(order.status)}</span>` : ""}</div>
       </div>
-      <table class="cust" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
-        <tr><td class="lbl">NAME</td><td class="val">${esc(order.customer_name || "")}</td><td class="lbl">ORDER DATE</td><td class="val">${dateStr}</td></tr>
-        <tr><td class="lbl">ADDRESS</td><td class="val" rowspan="2">${esc(order.customer_address || "")}</td><td class="lbl">DELIVERY DATE</td><td class="val">${esc(order.delivery_date || "")} ${esc(order.delivery_time_slot || "")}</td></tr>
-        <tr><td class="lbl">SALES ASST</td><td class="val">${esc(order.salesman_name || "")}</td></tr>
-        <tr><td class="lbl">H/P NO</td><td class="val">${esc(order.customer_contact || "")}</td><td class="lbl">TYPE</td><td class="val">${esc(order.delivery_type || "")}</td></tr>
-        <tr><td class="lbl">${order.customer_id_type === "passport" ? "PASSPORT NO" : "I/C NO"}</td><td class="val">${esc(order.customer_id_no || "")}</td><td class="lbl">EMAIL</td><td class="val">${esc(order.customer_email || "")}</td></tr>
-      </table>
-      <table class="items">
-        <thead><tr><th style="width:28px">NO</th><th>DESCRIPTION</th><th style="width:36px">QTY</th><th style="width:70px">UNIT PRICE</th><th style="width:80px">AMOUNT (MYR)</th></tr></thead>
-        <tbody>${itemRows.join("")}</tbody>
-      </table>
-      <div class="totbox">
-        <div class="left"><b>REMARKS:</b><br>${esc(order.remark || order.notes || "")}</div>
-        <div class="right">
-          <div class="trow"><span>Subtotal</span><span>${money(subtotal)}</span></div>
-          ${discount ? `<div class="trow"><span>Discount</span><span>-${money(discount)}</span></div>` : ""}
-          ${orderGst ? `<div class="trow"><span>GST (${orderGstRate}%)</span><span>${money(orderGst)}</span></div>` : ""}
-          <div class="trow grand"><span>TOTAL${orderGst ? " (incl. GST)" : ""}</span><span>${money(total)}</span></div>
-          <div class="trow"><span>DEPOSIT</span><span>${money(deposit)}</span></div>
-          <div class="trow grand"><span>BALANCE</span><span>${money(balance)}</span></div>
+      <div class="sectitle sec">Customer Details</div>
+      <div class="cust sec">
+        <div class="col">
+          <div class="frow"><span class="lbl">Customer Name</span><span class="val">${esc(order.customer_name || "")}</span></div>
+          <div class="frow"><span class="lbl">Address</span><span class="val multi">${esc(order.customer_address || "")}</span></div>
+          <div class="frow"><span class="lbl">Sales Assistant</span><span class="val">${esc(order.salesman_name || "")}</span></div>
+          <div class="frow"><span class="lbl">Phone</span><span class="val">${esc(order.customer_contact || "")}</span></div>
+          <div class="frow"><span class="lbl">${idLabel}</span><span class="val">${esc(order.customer_id_no || "")}</span></div>
+        </div>
+        <div class="col">
+          <div class="frow"><span class="lbl">Order Date</span><span class="val">${dateStr}</span></div>
+          <div class="frow"><span class="lbl">Delivery Date</span><span class="val">${esc(order.delivery_date || "")}${order.delivery_time_slot ? ` (${esc(order.delivery_time_slot)})` : ""}</span></div>
+          <div class="frow"><span class="lbl">Order Type</span><span class="val">${esc(order.delivery_type || "")}</span></div>
+          <div class="frow"><span class="lbl">Email</span><span class="val">${esc(order.customer_email || "")}</span></div>
         </div>
       </div>
-      <div class="notes pad">
-        <h5>IMPORTANT NOTES</h5>
-        - Full payment shall be made prior to delivery.<br>
-        - Cheque: crossed "A/C Payee Only", payable to ${esc(COMPANY.name)}. Bank: ${esc(COMPANY.bank)}
+      <table class="items sec">
+        <thead><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
+        <tbody>${itemRows.join("")}</tbody>
+      </table>
+      <div class="midrow sec">
+        <div class="remarks">
+          <div class="h">Remarks</div>
+          <div class="body">${esc(order.remark || order.notes || "")}</div>
+        </div>
+        <div class="summary">
+          <div class="srow"><span class="lab">Subtotal</span><span class="num">${money(subtotal)}</span></div>
+          ${discount ? `<div class="srow"><span class="lab">Discount</span><span class="num">-${money(discount)}</span></div>` : ""}
+          ${orderGst ? `<div class="srow"><span class="lab">GST (${orderGstRate}%)</span><span class="num">${money(orderGst)}</span></div>` : ""}
+          <div class="srow grand"><span class="lab">TOTAL${orderGst ? " (incl. GST)" : ""}</span><span class="num">${money(total)}</span></div>
+          <div class="srow dep"><span class="lab">Deposit Paid</span><span class="num">${money(deposit)}</span></div>
+          <div class="srow grand"><span class="lab">BALANCE DUE</span><span class="num">${money(balance)}</span></div>
+        </div>
       </div>
-      <div class="terms pad">
-        <h5>TERMS &amp; CONDITIONS</h5>
+      <div class="sectitle sec">Payment Method</div>
+      <div class="blk sec">
+        <div class="pay-grid">${payOptions}</div>
+        <div class="pay-fields">
+          <div class="pf"><span class="lab">Reference :</span><span class="line">&nbsp;</span></div>
+          <div class="pf"><span class="lab">Paid Amount :</span><span class="line">RM ${money(deposit)}</span></div>
+        </div>
+      </div>
+      <div class="blk notes sec">
+        <div class="h">Important Notes</div>
+        <ul>
+          <li>Full payment shall be made prior to delivery.</li>
+          <li>Cheque to be crossed "A/C Payee Only", payable to ${esc(COMPANY.name)}.${COMPANY.bank ? ` Bank: ${esc(COMPANY.bank)}` : ""}</li>
+        </ul>
+      </div>
+      <div class="blk terms sec">
+        <div class="h">Terms &amp; Conditions</div>
         <ol>${TERMS.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
         <div class="ack">I acknowledge and agree to abide by the conditions of sale stated above.</div>
       </div>
-      <div class="foot">
-        <div class="col">
-          <b>PAYMENT METHOD:</b> ${esc(order.payment_method || "")}
-          <div class="sigspace">${sig ? `<img src="${sig}" />` : ""}</div>
-          <div class="sigline">Customer Signature</div>
+      <div class="sign sec">
+        <div class="scol">
+          <div class="stitle">Customer Signature</div>
+          <div class="simg">${sig ? `<img src="${sig}" />` : ""}</div>
+          <div class="sline">Signature &amp; Date</div>
         </div>
-        <div class="col">
-          <b>SALES ASSISTANT:</b> <i>${esc(order.salesman_name || "")}</i>
-          <div class="sigspace"></div>
-          <div class="sigline">Authorised Signature</div>
+        <div class="scol">
+          <div class="stitle">Sales Assistant</div>
+          <div class="simg"><span class="sname">${esc(order.salesman_name || "")}</span></div>
+          <div class="sline">Authorised Signature</div>
         </div>
       </div>
     </div>
@@ -1717,11 +1799,11 @@ function OrdersPage() {
         <SignaturePad
           onDone={async (sig) => {
             if (sig && signOrder.id) await withLoading("Saving signature…", () => saveSignature(signOrder.id, sig));
-            printSalesOrder(signOrder, sig, companyInfo);
+            printSalesOrder(signOrder, sig, companyInfo, branches.find(b => b.id === signOrder.branch_id)?.name);
             setSignOrder(null);
             loadOrders();
           }}
-          onCancel={() => { printSalesOrder(signOrder, null, companyInfo); setSignOrder(null); }}
+          onCancel={() => { printSalesOrder(signOrder, null, companyInfo, branches.find(b => b.id === signOrder.branch_id)?.name); setSignOrder(null); }}
         />
       )}
 
