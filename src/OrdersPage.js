@@ -152,7 +152,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const COMPANY = co || DEFAULT_COMPANY;
   const items = order.items || order.sales_order_items || [];
   let gross = 0;
-  const MIN_ROWS = 6;
+  const MIN_ROWS = 3;
   const itemRows = items.map((it, i) => {
     const qty = Number(it.quantity) || 1;
     const price = Number(it.unit_price) || 0;
@@ -191,82 +191,83 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Order ${esc(order.order_number || "")}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    @page { size: A4; margin: 9mm; }
-    body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { size: A4; margin: 8mm; }
+    body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { width: 725px; margin: 0 auto; }
     .doc { width: 100%; border: 1px solid #1f2937; }
     .sec { border-bottom: 0.5px solid #1f2937; }
     .sec:last-child { border-bottom: none; }
-    .pad { padding: 9px 14px; }
+    .pad { padding: 6px 13px; }
 
     /* Branch bar */
-    .branchbar { background: #1f2937; color: #fff; padding: 6px 14px; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+    .branchbar { background: #1f2937; color: #fff; padding: 5px 13px; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
     .branchbar .r { font-weight: 500; letter-spacing: 0.5px; opacity: .85; }
 
     /* Letterhead */
     .head { display: flex; justify-content: space-between; align-items: center; }
     .brand { display: flex; align-items: center; gap: 10px; }
-    .logo { width: 40px; height: 40px; border-radius: 9px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 22px; }
-    .logoimg { height: 50px; max-width: 230px; object-fit: contain; }
-    .bname { font-size: 19px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
-    .bname small { display: block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color: #6b7280; margin-top: 3px; }
-    .co { font-size: 9px; text-align: right; line-height: 1.55; color: #374151; }
+    .logo { width: 38px; height: 38px; border-radius: 9px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 21px; }
+    .logoimg { height: 44px; max-width: 220px; object-fit: contain; }
+    .bname { font-size: 18px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
+    .bname small { display: block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color: #6b7280; margin-top: 2px; }
+    .co { font-size: 9px; text-align: right; line-height: 1.45; color: #374151; }
     .co b { font-size: 10.5px; color: #1f2937; }
-    .co .branches { font-size: 8px; color: #6b7280; margin-top: 3px; }
+    .co .branches { font-size: 8px; color: #6b7280; margin-top: 2px; }
 
     /* Title */
-    .titlebar { display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 8px 14px; }
-    .title { font-size: 27px; font-weight: 800; letter-spacing: 3px; color: #1f2937; }
-    .sono { text-align: right; font-size: 8px; letter-spacing: 1px; color: #6b7280; line-height: 1.6; text-transform: uppercase; }
-    .sono .no { font-size: 15px; font-weight: 800; color: #b42318; letter-spacing: 0.5px; text-transform: none; }
-    .sono .st { display: inline-block; margin-top: 3px; padding: 1px 7px; border: 0.5px solid #d1d5db; border-radius: 3px; font-size: 8px; color: #374151; }
+    .titlebar { display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 6px 13px; }
+    .title { font-size: 23px; font-weight: 800; letter-spacing: 3px; color: #1f2937; }
+    .sono { text-align: right; font-size: 8px; letter-spacing: 1px; color: #6b7280; line-height: 1.5; text-transform: uppercase; }
+    .sono .no { font-size: 14px; font-weight: 800; color: #b42318; letter-spacing: 0.5px; text-transform: none; }
+    .sono .st { display: inline-block; margin-top: 2px; padding: 1px 6px; border: 0.5px solid #d1d5db; border-radius: 3px; font-size: 8px; color: #374151; }
 
     /* Section title bar */
-    .sectitle { background: #f3f4f6; padding: 4px 14px; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; }
+    .sectitle { background: #f3f4f6; padding: 3px 13px; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; }
 
     /* Customer info — two aligned columns */
     .cust { display: flex; }
-    .cust .col { flex: 1; padding: 9px 14px; }
+    .cust .col { flex: 1; padding: 6px 13px; }
     .cust .col + .col { border-left: 0.5px solid #1f2937; }
-    .frow { display: flex; font-size: 10px; padding: 2.5px 0; }
-    .frow .lbl { width: 96px; flex-shrink: 0; color: #6b7280; font-weight: 600; }
+    .frow { display: flex; font-size: 10px; padding: 1.5px 0; }
+    .frow .lbl { width: 94px; flex-shrink: 0; color: #6b7280; font-weight: 600; }
     .frow .val { flex: 1; color: #1f2937; font-weight: 600; }
-    .frow .val.multi { line-height: 1.4; }
+    .frow .val.multi { line-height: 1.35; }
 
     /* Items */
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 6px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
-    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 6px 8px; font-size: 10px; height: 24px; vertical-align: top; }
+    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
+    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 10px; height: 20px; vertical-align: top; }
     table.items th:last-child, table.items td:last-child { border-right: none; }
     .c { text-align: center; } .r { text-align: right; }
     .desc .pname { font-weight: 600; }
-    .desc .psub { font-size: 8px; color: #6b7280; margin-top: 2px; }
+    .desc .psub { font-size: 8px; color: #6b7280; margin-top: 1px; }
 
     /* Remarks + summary */
     .midrow { display: flex; border-top: 0.5px solid #1f2937; }
-    .remarks { flex: 1.5; padding: 10px 14px; border-right: 0.5px solid #1f2937; }
-    .remarks .h, .blk .h { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; margin-bottom: 5px; }
-    .remarks .body { font-size: 10px; color: #1f2937; line-height: 1.5; min-height: 54px; }
+    .remarks { flex: 1.5; padding: 7px 13px; border-right: 0.5px solid #1f2937; }
+    .remarks .h, .blk .h { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; margin-bottom: 4px; }
+    .remarks .body { font-size: 10px; color: #1f2937; line-height: 1.45; min-height: 36px; }
     .summary { flex: 1; }
-    .srow { display: flex; justify-content: space-between; align-items: center; padding: 5px 14px; font-size: 10px; border-bottom: 0.5px solid #e5e7eb; }
+    .srow { display: flex; justify-content: space-between; align-items: center; padding: 3.5px 13px; font-size: 10px; border-bottom: 0.5px solid #e5e7eb; }
     .srow .lab { color: #6b7280; font-weight: 600; }
     .srow .num { font-weight: 600; font-variant-numeric: tabular-nums; }
     .srow.dep { font-size: 9px; }
-    .srow.grand { background: #f3f4f6; font-weight: 800; font-size: 13px; color: #1f2937; }
+    .srow.grand { background: #f3f4f6; font-weight: 800; font-size: 12px; color: #1f2937; }
     .srow.grand .lab { color: #1f2937; }
     .srow:last-child { border-bottom: none; }
 
     /* Notes / terms / payment blocks */
-    .blk { padding: 9px 14px; }
+    .blk { padding: 7px 13px; }
     .notes ul { list-style: none; }
-    .notes li { position: relative; padding-left: 13px; margin-bottom: 3px; font-size: 9px; line-height: 1.5; color: #374151; }
+    .notes li { position: relative; padding-left: 12px; margin-bottom: 2px; font-size: 9px; line-height: 1.45; color: #374151; }
     .notes li:before { content: "•"; position: absolute; left: 2px; color: #9ca3af; }
-    .terms ol { padding-left: 16px; font-size: 8px; line-height: 1.55; color: #374151; }
-    .terms li { margin-bottom: 2.5px; padding-left: 3px; }
-    .ack { margin-top: 6px; font-size: 8.5px; font-style: italic; color: #475467; }
+    .terms ol { padding-left: 15px; font-size: 8px; line-height: 1.4; color: #374151; }
+    .terms li { margin-bottom: 1.5px; padding-left: 2px; }
+    .ack { margin-top: 4px; font-size: 8.5px; font-style: italic; color: #475467; }
 
     /* Payment method */
-    .pay-grid { display: flex; flex-wrap: wrap; margin: 4px 0 8px; }
-    .pay-opt { display: flex; align-items: center; gap: 6px; width: 33.33%; font-size: 10px; padding: 3px 0; color: #1f2937; }
+    .pay-grid { display: flex; flex-wrap: wrap; margin: 3px 0 6px; }
+    .pay-opt { display: flex; align-items: center; gap: 6px; width: 33.33%; font-size: 10px; padding: 2px 0; color: #1f2937; }
     .chk { width: 11px; height: 11px; border: 1px solid #1f2937; border-radius: 2px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .chk.on { background: #1f2937; }
     .chk.on:after { content: "✓"; color: #fff; font-size: 8px; font-weight: 800; line-height: 1; }
@@ -277,17 +278,17 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     /* Signatures — centered */
     .sign { display: flex; }
-    .sign .scol { flex: 1; padding: 10px 14px 9px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .sign .scol { flex: 1; padding: 7px 13px 6px; display: flex; flex-direction: column; align-items: center; text-align: center; }
     .sign .scol + .scol { border-left: 0.5px solid #1f2937; }
     .sign .stitle { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; }
     .sign .sname { font-size: 11px; font-weight: 700; color: #1f2937; padding-bottom: 2px; }
-    .sign .simg { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 46px; }
-    .sign .simg img { height: 44px; }
-    .sign .sline { border-top: 0.7px solid #1f2937; width: 78%; padding-top: 4px; margin-top: 4px; font-size: 9px; color: #374151; }
+    .sign .simg { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 38px; }
+    .sign .simg img { height: 38px; }
+    .sign .sline { border-top: 0.7px solid #1f2937; width: 78%; padding-top: 3px; margin-top: 3px; font-size: 9px; color: #374151; }
 
     @media print { body { margin: 0; } }
   </style></head><body>
-    <div class="doc">
+    <div class="page"><div class="doc">
       <div class="branchbar sec">
         <span>BRANCH : ${branchLine}</span>
         <span class="r">DATE : ${dateStr}</span>
@@ -375,7 +376,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           <div class="sline">Authorised Signature</div>
         </div>
       </div>
-    </div>
+    </div></div>
   </body></html>`;
 
   const w = window.open("", "_blank");
@@ -383,7 +384,27 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   w.document.write(html);
   w.document.close();
   w.focus();
-  setTimeout(() => { w.print(); }, 350);
+  // Auto-fit to a single A4 page: the .page wrapper is fixed at the A4 printable
+  // width (725px @96dpi), so its on-screen height matches the print layout. If the
+  // document is taller than the printable height (~1050px), scale it down to fit.
+  setTimeout(() => {
+    try {
+      const page = w.document.querySelector(".page");
+      const doc = w.document.querySelector(".doc");
+      if (page && doc) {
+        const maxH = 1050;
+        const h = doc.getBoundingClientRect().height;
+        if (h > maxH) {
+          const s = maxH / h;
+          doc.style.transformOrigin = "top left";
+          doc.style.transform = `scale(${s})`;
+          page.style.height = Math.ceil(h * s) + "px";
+          page.style.overflow = "hidden";
+        }
+      }
+    } catch (e) { /* fall back to unscaled print */ }
+    w.print();
+  }, 400);
 }
 
 function OrdersPage() {
