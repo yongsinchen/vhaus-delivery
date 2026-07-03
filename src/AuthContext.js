@@ -92,6 +92,11 @@ export function AuthProvider({ children }) {
   const userRef = useRef(null);
   useEffect(() => { userRef.current = user; }, [user]);
 
+  // Auth user id we last loaded a profile for. Used to ignore spurious
+  // onAuthStateChange re-fires (token refresh / tab focus) that would otherwise
+  // re-render the whole app and close any open native picker mid-interaction.
+  const loadedUserIdRef = useRef(null);
+
   const getToken = async () => {
     const { data } = await supabase.auth.getSession();
     return data?.session?.access_token || "";
@@ -119,6 +124,7 @@ export function AuthProvider({ children }) {
   };
 
   const loadUserProfile = async (authUser) => {
+    loadedUserIdRef.current = authUser?.id ?? null;
     if (!authUser) { setUser(null); setLoading(false); return; }
     // First sign-in / initial boot: flip loading back on so the app shows the
     // boot screen instead of a frozen login page. Skip on token refresh
@@ -192,6 +198,14 @@ export function AuthProvider({ children }) {
         return;
       }
       setSession(session);
+      // TOKEN_REFRESHED (auto token rotation) and SIGNED_IN re-fires on tab focus
+      // don't change who is logged in. Re-fetching the profile on them re-renders
+      // the whole app and closes any open native picker (e.g. the arrival-date
+      // calendar loses its selection). Only reload when the auth user actually changed.
+      const newUserId = session?.user?.id ?? null;
+      if ((event === "TOKEN_REFRESHED" || event === "SIGNED_IN") && newUserId && newUserId === loadedUserIdRef.current) {
+        return;
+      }
       loadUserProfile(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
