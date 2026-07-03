@@ -156,7 +156,7 @@ function CustomerPage() {
       {/* TAB 0: Customer List */}
       {tab === 0 && (
         <div className="space-y-3">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email..."
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, phone, email, I/C..."
             className="w-full sm:w-72 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
           {loading && <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">{[1,2,3,4,5,6].map(i=><div key={i} className="h-20 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
           {!loading && customers.length === 0 && <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-2">👥</div><p>No customers yet</p></div>}
@@ -170,6 +170,7 @@ function CustomerPage() {
                   <div className="min-w-0">
                     <p className="font-bold text-gray-900 text-sm truncate">{c.name}</p>
                     <p className="text-xs text-gray-500">{c.phone || ""} {c.email ? `· ${c.email}` : ""}</p>
+                    {c.ic_number && <p className="text-xs text-gray-500">🪪 {c.ic_number}</p>}
                     {c.company_name && <p className="text-xs text-violet-600">{c.company_name}</p>}
                   </div>
                 </div>
