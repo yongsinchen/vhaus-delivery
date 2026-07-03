@@ -197,15 +197,18 @@ export function AuthProvider({ children }) {
         window.location.href = "/reset-password";
         return;
       }
-      setSession(session);
       // TOKEN_REFRESHED (auto token rotation) and SIGNED_IN re-fires on tab focus
-      // don't change who is logged in. Re-fetching the profile on them re-renders
-      // the whole app and closes any open native picker (e.g. the arrival-date
-      // calendar loses its selection). Only reload when the auth user actually changed.
+      // don't change who is logged in, but the session object is a new reference
+      // each time. Calling setSession / reloading the profile on them re-renders the
+      // whole app and closes any open native picker (e.g. the arrival-date calendar
+      // commits today's date mid-selection). Bail out before touching any state.
+      // Components read the live token via supabase.auth.getSession(), not this
+      // context's `session`, so skipping the update here is safe.
       const newUserId = session?.user?.id ?? null;
       if ((event === "TOKEN_REFRESHED" || event === "SIGNED_IN") && newUserId && newUserId === loadedUserIdRef.current) {
         return;
       }
+      setSession(session);
       loadUserProfile(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
