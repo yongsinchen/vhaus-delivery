@@ -111,6 +111,18 @@ function ServicePage() {
     } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 
+  // Patch arbitrary service-case fields (creation date, schedule date, TBC, …)
+  const updateService = async (id, fields) => {
+    try {
+      await withLoading("Updating…", async () => {
+        const res = await af(`${API}/service-cases/${id}`, { method: "PATCH", body: JSON.stringify(fields) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Update failed"); }
+        if (detail?.service) openDetail(detail.service);
+        loadServices();
+      });
+    } catch (e) { toast.error("Failed to update: " + e.message); }
+  };
+
   const addClaim = async (serviceId) => {
     const partName = window.prompt("Part name / description:");
     if (!partName) return;
@@ -386,6 +398,28 @@ function ServicePage() {
                       className="ml-auto text-xs px-3 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Delete</button>
                   </div>
 
+                  {/* Dates: creation + schedule */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1">CREATION DATE</label>
+                      <input type="date" value={(detail.service?.service_date || "").slice(0, 10)}
+                        onChange={e => updateService(detail.service.id, { service_date: e.target.value || null })}
+                        className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1">SCHEDULE DATE</label>
+                      <input type="date" value={(detail.service?.due_date || "").slice(0, 10)}
+                        disabled={detail.service?.schedule_tbc}
+                        onChange={e => updateService(detail.service.id, { delivery_date: e.target.value || null, schedule_tbc: false })}
+                        className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200 disabled:bg-gray-100" />
+                      <label className="flex items-center gap-1.5 mt-1 text-xs text-gray-500">
+                        <input type="checkbox" checked={!!detail.service?.schedule_tbc}
+                          onChange={e => updateService(detail.service.id, { schedule_tbc: e.target.checked })} />
+                        To be confirmed (TBC)
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Description */}
                   {detail.service?.description && (
                     <div className="bg-gray-50 rounded-xl p-3">
@@ -417,23 +451,15 @@ function ServicePage() {
                             </div>
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${LEG_STATUS[leg.status] || "bg-gray-100"}`}>{leg.status}</span>
                           </div>
-                          {leg.scheduled_at && <p className="text-xs text-blue-600 mb-1">Scheduled: {new Date(leg.scheduled_at).toLocaleDateString("en-MY")}</p>}
                           {leg.notes && <p className="text-xs text-gray-400 mb-1">{leg.notes}</p>}
-                          <div className="flex gap-2 mt-1">
-                            {leg.status === "pending" && (
-                              <>
-                                <input type="date" onChange={e => updateLeg(leg.id, { scheduled_at: e.target.value, status: "scheduled" })}
-                                  className="text-xs px-2 py-1 rounded-lg border border-gray-200" />
-                              </>
-                            )}
-                            {leg.status === "scheduled" && (
-                              <button onClick={() => updateLeg(leg.id, { status: "in_progress" })}
-                                className="text-xs px-3 py-1 rounded-lg bg-amber-500 text-white">Start</button>
-                            )}
-                            {leg.status === "in_progress" && (
-                              <button onClick={() => updateLeg(leg.id, { status: "completed" })}
-                                className="text-xs px-3 py-1 rounded-lg bg-emerald-600 text-white">Complete</button>
-                            )}
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            <select value={leg.status} onChange={e => updateLeg(leg.id, { status: e.target.value })}
+                              className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
+                              {Object.keys(LEG_STATUS).map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <input type="date" value={(leg.scheduled_at || "").slice(0, 10)}
+                              onChange={e => updateLeg(leg.id, { scheduled_at: e.target.value || null })}
+                              className="text-xs px-2 py-1 rounded-lg border border-gray-200" />
                           </div>
                         </div>
                       ))}
