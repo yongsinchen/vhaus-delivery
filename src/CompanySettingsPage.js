@@ -42,6 +42,7 @@ function CompanySettingsPage() {
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
 
   // Branches
   const [branches, setBranches] = useState([]);
@@ -201,6 +202,21 @@ function CompanySettingsPage() {
     else { const d = await res.json(); setSettingsMsg(d.error || "Failed"); }
   };
 
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please choose an image file"); return; }
+    setLogoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await af(`${API}/company-settings/logo`, { method: "POST", body: fd });
+      const d = await res.json();
+      if (res.ok && d.url) { setSettings(s => ({ ...s, logo_url: d.url })); toast.success("Logo uploaded"); }
+      else toast.error(d.error || "Upload failed");
+    } catch (e) { toast.error("Upload failed"); }
+    finally { setLogoUploading(false); }
+  };
+
   // ── Branch CRUD ───────────────────────────────────────────────────
   const saveBranch = async () => {
     if (!branchForm.name.trim()) return;
@@ -271,6 +287,26 @@ function CompanySettingsPage() {
       {/* Tab: Company Info */}
       {tab === 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4 max-w-2xl">
+          {/* Company logo (printed on sales orders) */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Company Logo <span className="text-gray-400">(shown on printed sales orders)</span></label>
+            <div className="flex items-center gap-4">
+              <div className="w-28 h-16 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                {settings.logo_url
+                  ? <img src={settings.logo_url} alt="logo" className="max-h-full max-w-full object-contain" />
+                  : <span className="text-xs text-gray-400">No logo</span>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className={`px-4 py-2 rounded-xl text-sm font-medium cursor-pointer ${logoUploading ? "bg-gray-200 text-gray-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
+                  {logoUploading ? "Uploading…" : (settings.logo_url ? "Replace logo" : "Upload logo")}
+                  <input type="file" accept="image/*" className="hidden" disabled={logoUploading}
+                    onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; uploadLogo(f); }} />
+                </label>
+                {settings.logo_url && !logoUploading &&
+                  <button onClick={() => setSettings(s => ({ ...s, logo_url: null }))} className="text-xs text-red-500 hover:underline text-left">Remove (Save to apply)</button>}
+              </div>
+            </div>
+          </div>
           <Field label="Company Name" value={settings.company_name || ""} onChange={v => setSettings(s => ({ ...s, company_name: v }))} />
           <Field label="Registration No" value={settings.registration_no || ""} onChange={v => setSettings(s => ({ ...s, registration_no: v }))} placeholder="e.g. 202301043392 (1537308-U)" />
           <Field label="Address" value={settings.address || ""} onChange={v => setSettings(s => ({ ...s, address: v }))} />

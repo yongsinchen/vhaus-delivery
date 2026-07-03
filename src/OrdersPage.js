@@ -53,6 +53,7 @@ const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"
 
 const EMPTY_ORDER = {
   order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
+  customer_id_type: "ic", customer_id_no: "", customer_email: "",
   status: "draft", notes: "", items: [],
   order_date: "",
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
@@ -63,7 +64,7 @@ const EMPTY_ORDER = {
 
 // Company details for the printed sales order
 const DEFAULT_COMPANY = {
-  name: "", reg: "", address: "", hotline: "", bank: "", branches_display: "",
+  name: "", reg: "", address: "", hotline: "", bank: "", branches_display: "", logo: "",
 };
 
 const TERMS = [
@@ -192,6 +193,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
     .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #111; }
     .brand { display: flex; align-items: center; gap: 8px; }
     .logo { width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg,#7C3AED,#a855f7,#f59e0b); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 20px; }
+    .logoimg { height: 48px; max-width: 220px; object-fit: contain; }
     .bname { font-size: 18px; font-weight: 900; letter-spacing: 1px; line-height: 1; }
     .bname small { display:block; font-size: 8px; font-weight: 600; letter-spacing: 2px; color:#555; margin-top:2px; }
     .co { font-size: 9px; text-align: right; line-height: 1.3; }
@@ -232,8 +234,9 @@ function printSalesOrder(order, signatureDataUrl, co) {
     <div class="sheet">
       <div class="head pad">
         <div class="brand">
-          <div class="logo">V</div>
-          <div class="bname">V-HAUS LIVING<small>WE HOUSE YOUR HOUSE</small></div>
+          ${COMPANY.logo
+            ? `<img src="${esc(COMPANY.logo)}" class="logoimg" alt="logo">`
+            : `<div class="logo">V</div><div class="bname">V-HAUS LIVING<small>WE HOUSE YOUR HOUSE</small></div>`}
         </div>
         <div class="co">
           <b>${esc(COMPANY.name)}</b> ${esc(COMPANY.reg)}<br>
@@ -251,6 +254,7 @@ function printSalesOrder(order, signatureDataUrl, co) {
         <tr><td class="lbl">ADDRESS</td><td class="val" rowspan="2">${esc(order.customer_address || "")}</td><td class="lbl">DELIVERY DATE</td><td class="val">${esc(order.delivery_date || "")} ${esc(order.delivery_time_slot || "")}</td></tr>
         <tr><td class="lbl">SALES ASST</td><td class="val">${esc(order.salesman_name || "")}</td></tr>
         <tr><td class="lbl">H/P NO</td><td class="val">${esc(order.customer_contact || "")}</td><td class="lbl">TYPE</td><td class="val">${esc(order.delivery_type || "")}</td></tr>
+        <tr><td class="lbl">${order.customer_id_type === "passport" ? "PASSPORT NO" : "I/C NO"}</td><td class="val">${esc(order.customer_id_no || "")}</td><td class="lbl">EMAIL</td><td class="val">${esc(order.customer_email || "")}</td></tr>
       </table>
       <table class="items">
         <thead><tr><th style="width:28px">NO</th><th>DESCRIPTION</th><th style="width:36px">QTY</th><th style="width:70px">UNIT PRICE</th><th style="width:80px">AMOUNT (MYR)</th></tr></thead>
@@ -411,6 +415,7 @@ function OrdersPage() {
           hotline: d.settings.hotline || DEFAULT_COMPANY.hotline,
           bank: d.settings.bank_account || DEFAULT_COMPANY.bank,
           branches_display: d.settings.branches_display || DEFAULT_COMPANY.branches_display,
+          logo: d.settings.logo_url || DEFAULT_COMPANY.logo,
         });
       }
       try {
@@ -587,6 +592,9 @@ function OrdersPage() {
       customer_name: f.customer_name || "",
       customer_contact: f.customer_contact || "",
       customer_address: f.customer_address || "",
+      customer_id_type: f.customer_id_type || "ic",
+      customer_id_no: f.customer_id_no || "",
+      customer_email: f.customer_email || "",
       status: f.status || "draft", sales_channel: f.sales_channel || "branch",
       notes: f.notes || "",
       order_date: f.order_date || "",
@@ -705,11 +713,14 @@ function OrdersPage() {
       if (!form.payment_method) missing.push("Payment method");
       if (!(Number(form.deposit) > 0)) missing.push("Deposit amount (must be > 0)");
       if ((form.payment_proofs || []).length === 0) missing.push("Payment proof (upload receipt/transfer screenshot)");
-      if (!form.customer_contact?.trim()) missing.push("Customer contact number");
-      if (!form.customer_address?.trim()) missing.push("Delivery address");
+      if (!form.customer_contact?.trim()) missing.push("Phone number");
+      if (!form.customer_address?.trim()) missing.push("Full address");
+      if (!form.customer_id_no?.trim()) missing.push(`${form.customer_id_type === "passport" ? "Passport" : "I/C"} number`);
+      if (!form.customer_email?.trim()) missing.push("Email address");
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer_email.trim())) missing.push("A valid email address");
       if (!form.salesman_names?.trim()) missing.push("Salesman");
       if (missing.length > 0) {
-        setFormError("Cannot confirm order. Missing:\n• " + missing.join("\n• "));
+        setFormError("Cannot confirm order. Missing (required for e-invoicing):\n• " + missing.join("\n• "));
         return;
       }
     }
@@ -725,7 +736,10 @@ function OrdersPage() {
       order_number: form.order_number?.trim() || undefined,
       sales_channel: form.sales_channel || "branch",
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
-      customer_address: form.customer_address || null, status: form.status, notes: form.notes || null,
+      customer_address: form.customer_address || null,
+      customer_id_type: form.customer_id_type || null, customer_id_no: form.customer_id_no?.trim() || null,
+      customer_email: form.customer_email?.trim() || null,
+      status: form.status, notes: form.notes || null,
       order_date: form.order_date || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
       delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
@@ -1006,6 +1020,8 @@ function OrdersPage() {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Contact</p><p className="font-medium text-gray-800">{o.customer_contact || "-"}</p></div>
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Salesman</p><p className="font-medium text-gray-800">{o.salesman_name || "-"}</p></div>
+                    {o.customer_id_no && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">{o.customer_id_type === "passport" ? "Passport No" : "I/C No"}</p><p className="font-medium text-gray-800">{o.customer_id_no}</p></div>}
+                    {o.customer_email && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Email</p><p className="font-medium text-gray-800 break-all">{o.customer_email}</p></div>}
                   </div>
                   {o.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">Address</p><p className="font-medium text-gray-800">{o.customer_address}</p></div>}
 
@@ -1323,13 +1339,30 @@ function OrdersPage() {
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
               </div>
 
-              {/* Customer info */}
+              {/* Customer info — all fields mandatory to confirm (e-invoicing) */}
+              <p className="text-[11px] text-amber-600">All customer fields below are required to confirm the order (for e-invoicing). Enter the name exactly as on I/C / passport.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Customer Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
-                <Field label="Contact" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
+                <Field label="Full Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
+                <Field label="Phone Number *" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
+              </div>
+              {/* Customer identity for e-invoicing */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">ID Type *</label>
+                  <select value={form.customer_id_type} onChange={e => setForm(f => ({ ...f, customer_id_type: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="ic">I/C (NRIC / MyKad)</option>
+                    <option value="passport">Passport</option>
+                  </select>
+                </div>
+                <Field label={form.customer_id_type === "passport" ? "Passport Number *" : "I/C Number *"}
+                  value={form.customer_id_no} onChange={v => setForm(f => ({ ...f, customer_id_no: v }))} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Address" value={form.customer_address} onChange={v => {
+                <Field label="Email Address *" type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Full Address *" value={form.customer_address} onChange={v => {
                   setForm(f => {
                     const updated = { ...f, customer_address: v };
                     if (v.length > 3) {
@@ -1818,11 +1851,11 @@ function SignaturePad({ onDone, onCancel }) {
   );
 }
 
-function Field({ label, value, onChange, placeholder, small }) {
+function Field({ label, value, onChange, placeholder, small, type }) {
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      <input type={type || "text"} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className={`w-full px-3 ${small ? "py-1.5 text-xs" : "py-2 text-sm"} rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400`} />
     </div>
   );
