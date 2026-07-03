@@ -676,10 +676,12 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
 }
 
 // -- Main Component ----------------------------------------------------
-function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null }) {
+function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
+  // Open on the date passed in (e.g. clicked from the overview calendar).
+  useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
   const [trips, setTrips] = useState([]);

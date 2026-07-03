@@ -406,6 +406,7 @@ export default function App() {
 
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
+  const [scheduleDate, setScheduleDate] = useState(null); // date to open the delivery schedule on (from calendar click)
   const [orders, setOrders] = useState([]);
   const [allCompanyOrders, setAllCompanyOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -799,7 +800,7 @@ export default function App() {
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {visibleNav.map(n => (
-          <button key={n.id} onClick={() => { setPage(n.id); if(mobile) setSidebarOpen(false); }}
+          <button key={n.id} onClick={() => { setScheduleDate(null); setPage(n.id); if(mobile) setSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${page===n.id ? "bg-violet-600 text-white shadow-lg shadow-violet-900/50" : "text-purple-300 hover:bg-white/5 hover:text-white"}`}>
             <span className="text-base w-5 text-center">{n.icon}</span>
             <span>{n.id === "orders" && isSalesman ? "My Orders" : n.label}</span>
@@ -991,7 +992,7 @@ export default function App() {
                       const allDelivered = deliveries.length > 0 && deliveries.every(o => o.status === "Delivered");
                       return (
                         <div key={di} className={`min-h-20 p-1.5 border-r border-gray-50 last:border-r-0 cursor-pointer transition-colors hover:bg-violet-50 ${!day ? "bg-gray-50/50" : isToday ? "bg-violet-50" : isWeekend ? "bg-gray-50/30" : ""}`}
-                          onClick={() => { if (ds) { setPage("orders"); } }}>
+                          onClick={() => { if (ds) { setScheduleDate(ds); setPage(isSalesman ? "company-deliveries" : "deliveries"); } }}>
                           {day && (
                             <>
                               <div className="flex items-center justify-between mb-1">
@@ -1089,7 +1090,7 @@ export default function App() {
     if (page === "deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Deliveries</h1>
-        <DeliverySchedule readOnly={!can("editSchedule")} companyId={companyId} isMaster={isMaster} currentUser={user} />
+        <DeliverySchedule readOnly={!can("editSchedule")} companyId={companyId} isMaster={isMaster} currentUser={user} initialDate={scheduleDate} />
       </div>
     );
 
@@ -1097,7 +1098,7 @@ export default function App() {
     if (page === "company-deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Company Deliveries</h1>
-        <DeliverySchedule readOnly={true} companyId={companyId} isMaster={false} currentUser={user} />
+        <DeliverySchedule readOnly={true} companyId={companyId} isMaster={false} currentUser={user} initialDate={scheduleDate} />
       </div>
     );
 
