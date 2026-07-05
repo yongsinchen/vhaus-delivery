@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast } from "./UIComponents";
@@ -25,7 +25,7 @@ const OutstandingBalancePage = lazy(() => import("./OutstandingBalancePage"));
 const SupplierDOPage = lazy(() => import("./SupplierDOPage"));
 
 // ── Constants ─────────────────────────────────────────────────────
-const BACKEND = "https://vhaus-bot-production.up.railway.app";
+const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const authFetch = async (url, opts = {}) => {
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
@@ -96,6 +96,267 @@ const NAV = [
   { id: "permissions",label: "Permissions",      icon: "🔐", canKey: "manageCompanies" },
   { id: "settings",   label: "Settings",         icon: "⚙",  canKey: null, manageOnly: true },
 ];
+
+// ── Overview page ─────────────────────────────────────────────────
+// Extracted from App() and memoized: App.js holds ~50 modal/form/loading
+// state values, and every one of them used to re-render this (heaviest)
+// JSX tree. As a memo child with stable props it only re-renders when the
+// dashboard data itself changes.
+const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman }) {
+  return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, {user?.name?.split(" ")[0]} 👋</h1>
+          <p className="text-gray-400 text-sm mt-1">{new Date().toLocaleDateString("en-MY", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</p>
+        </div>
+        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-3`}>
+          <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage(isSalesman ? "company-deliveries" : "deliveries")} />
+          <StatCard label="Ready to Deliver" value={readyOrders.filter(o=>!o.deliveryDate).length} sub="items arrived, no date" onClick={() => setPage("ready")} />
+          <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={isSalesman ? () => setPage("balance") : undefined} />
+          {isSalesman ? (
+            <StatCard label="Pending Service Cases" value={services.filter(s => s.status !== "Serviced").length} sub="open cases" onClick={() => setPage("services")} />
+          ) : (
+            <StatCard label="Flagged Orders" value={flaggedOrders.length} sub="need attention" onClick={() => setPage("orders")} />
+          )}
+          {isSalesman && (
+            <StatCard label="Est. Commission This Month" value={estCommission === null ? "…" : `RM ${estCommission.toLocaleString()}`} sub="eligible + pending" onClick={() => setPage("commission")} />
+          )}
+        </div>
+
+        {/* Today's orders */}
+        {todayOrders.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-bold text-gray-800">Today's Deliveries</h2>
+              <Badge color="violet">{todayStr}</Badge>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {todayOrders.map(o => (
+                <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors" onClick={() => handleView(o)}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
+                        {o.type === "Service" && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Service</span>}
+                      </div>
+                      <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{(o.address || "").replace(/ADDRESS \d+:\s*/gi, "").trim()}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
+                      {o.timeSlot && <Badge color="violet">⏰ {o.timeSlot}</Badge>}
+                      {parseFloat(o.balance) > 0 && <span className="text-xs font-bold text-red-600">RM {o.balance}</span>}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {o.items?.filter(i=>i.itemName).map((item,i) => (
+                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                        {item.arrivalDate ? "✓" : "·"} {item.itemName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Next 3 days */}
+        <div>
+          <h2 className="font-bold text-gray-800 mb-3">Next 3 Days</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[1,2,3].map(offset => {
+              const d = new Date(now); d.setDate(d.getDate()+offset);
+              const ds = d.toISOString().split("T")[0];
+              const dayOrders = orders.filter(o => o.deliveryDate === ds);
+                  const someNotArrived = dayOrders.some(o => o.items?.some(i => !i.arrivalDate));
+              return (
+                <div key={ds} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="font-bold text-gray-800 text-sm">{d.toLocaleDateString("en-MY",{weekday:"long"})}</p>
+                      <p className="text-xs text-gray-400">{fmt(ds)}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${dayOrders.length > 0 ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"}`}>{dayOrders.length} orders</span>
+                  </div>
+                  {dayOrders.length > 0 && (
+                    <div className="mt-2">
+                      {someNotArrived
+                        ? <p className="text-xs text-amber-600 font-medium">⚠️ Some items not arrived</p>
+                        : <p className="text-xs text-emerald-600 font-medium">✅ All items ready</p>}
+                      <div className="mt-1.5 space-y-1">
+                        {dayOrders.map(o => (
+                          <button key={o.id} onClick={() => handleView(o)} className="w-full text-left text-xs bg-gray-50 rounded-lg px-2 py-1.5 hover:bg-violet-50">
+                            <span className="font-semibold text-violet-700">{o.soNumber}</span> — {o.customerName}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {dayOrders.length === 0 && <p className="text-xs text-gray-300 mt-1">No deliveries scheduled</p>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Monthly Calendar */}
+        {(() => {
+          const [calYear, calMonth] = calMonthStr.split("-").map(Number);
+          const firstDow = (new Date(calYear, calMonth - 1, 1).getDay() + 6) % 7;
+          const lastDay = new Date(calYear, calMonth, 0).getDate();
+          const cells = [];
+          for (let i = 0; i < firstDow; i++) cells.push(null);
+          for (let d = 1; d <= lastDay; d++) cells.push(d);
+          while (cells.length % 7 !== 0) cells.push(null);
+          const weeks = [];
+          for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+          const getDs = d => d ? `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
+          const calOrders = isSalesman ? allCompanyOrders : orders;
+          const calSalesmen = [...new Set(calOrders.map(o => o.salesman).filter(Boolean))].sort();
+          // Pre-build date→orders map (O(n) instead of O(n*days))
+          const ordersByDate = {};
+          calOrders.forEach(o => { if (o.deliveryDate) { if (!ordersByDate[o.deliveryDate]) ordersByDate[o.deliveryDate] = []; ordersByDate[o.deliveryDate].push(o); } });
+          const ordersOnDay = d => ordersByDate[getDs(d)] || [];
+          const isMyOrder = o => {
+            if (!calSalesman) return false;
+            return (o.salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(calSalesman.toLowerCase());
+          };
+          return (
+            <div>
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h2 className="font-bold text-gray-800">Monthly Overview</h2>
+                  {!isSalesman && (
+                    <select value={calSalesman} onChange={e => setCalSalesman(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
+                      <option value="">All salesmen</option>
+                      {calSalesmen.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  )}
+                  {calSalesman && <span className="text-xs text-violet-600 font-medium">Highlighting: {calSalesman}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const pm = m===1?12:m-1; const py = m===1?y-1:y; setCalMonthStr(`${py}-${String(pm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">‹</button>
+                  <span className="text-sm font-semibold text-gray-700 min-w-32 text-center">{new Date(calYear, calMonth-1, 1).toLocaleString("en-MY",{month:"long",year:"numeric"})}</span>
+                  <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const nm = m===12?1:m+1; const ny = m===12?y+1:y; setCalMonthStr(`${ny}-${String(nm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">›</button>
+                  <button onClick={() => setCalMonthStr(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`)} className="text-xs text-violet-600 hover:underline px-2">Today</button>
+                </div>
+              </div>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Day headers */}
+                <div className="grid grid-cols-7 border-b border-gray-100">
+                  {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => (
+                    <div key={d} className={`py-2 text-center text-xs font-bold ${d==="Sat"||d==="Sun" ? "text-violet-400" : "text-gray-400"}`}>{d}</div>
+                  ))}
+                </div>
+                {/* Weeks */}
+                {weeks.map((week, wi) => (
+                  <div key={wi} className="grid grid-cols-7 border-b border-gray-50 last:border-0">
+                    {week.map((day, di) => {
+                      const ds = getDs(day);
+                      const dayOrders = day ? ordersOnDay(day) : [];
+                      const deliveries = dayOrders.filter(o => o.type === "Delivery");
+                      const services = dayOrders.filter(o => o.type === "Service");
+                      const isToday = ds === todayStr;
+                      const isEmpty = day && dayOrders.length === 0;
+                      const isWeekend = di >= 5;
+                      const hasUnconfirmed = deliveries.some(o => o.status === "Pending");
+                      const allDelivered = deliveries.length > 0 && deliveries.every(o => o.status === "Delivered");
+                      return (
+                        <div key={di} className={`min-h-20 p-1.5 border-r border-gray-50 last:border-r-0 cursor-pointer transition-colors hover:bg-violet-50 ${!day ? "bg-gray-50/50" : isToday ? "bg-violet-50" : isWeekend ? "bg-gray-50/30" : ""}`}
+                          onClick={() => { if (ds) { setScheduleDate(ds); setPage(isSalesman ? "company-deliveries" : "deliveries"); } }}>
+                          {day && (
+                            <>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? "bg-violet-600 text-white" : isWeekend ? "text-violet-400" : "text-gray-500"}`}>{day}</span>
+                                {dayOrders.length > 0 && (
+                                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${allDelivered ? "bg-emerald-100 text-emerald-700" : hasUnconfirmed ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{dayOrders.length}</span>
+                                )}
+                              </div>
+                              {isEmpty && <div className="mt-1 text-center"><span className="text-xs text-gray-200">—</span></div>}
+                              {deliveries.length > 0 && (
+                                <div className="space-y-0.5">
+                                  {deliveries.slice(0,3).map(o => {
+                                    const mine = isMyOrder(o);
+                                    const highlight = calSalesman ? mine : true;
+                                    return (
+                                      <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}}
+                                        className={`text-xs px-1 py-0.5 rounded font-medium truncate leading-tight transition-opacity hover:opacity-80 ${
+                                          o.status==="Delivered" ? (highlight?"bg-emerald-100 text-emerald-700":"bg-emerald-50 text-emerald-300")
+                                          : o.status==="Flagged" ? (highlight?"bg-red-100 text-red-600":"bg-red-50 text-red-300")
+                                          : highlight ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"
+                                        } ${!highlight?"opacity-50":""}`}>
+                                        {mine && calSalesman && <span className="mr-0.5">★</span>}{o.soNumber}
+                                      </div>
+                                    );
+                                  })}
+                                  {deliveries.length > 3 && <div className="text-xs text-gray-400 px-1">+{deliveries.length - 3} more</div>}
+                                </div>
+                              )}
+                              {services.length > 0 && (
+                                <div className="mt-0.5">
+                                  {services.slice(0,1).map(o => (
+                                    <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}} className="text-xs px-1 py-0.5 rounded font-medium truncate leading-tight bg-indigo-100 text-indigo-700 hover:opacity-80">
+                                      🔧 {o.soNumber}
+                                    </div>
+                                  ))}
+                                  {services.length > 1 && <div className="text-xs text-gray-400 px-1">+{services.length-1} svc</div>}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              {/* Legend */}
+              <div className="flex items-center gap-4 mt-2 flex-wrap">
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-violet-100"></div><span className="text-xs text-gray-400">Pending delivery</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-100"></div><span className="text-xs text-gray-400">Delivered</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-indigo-100"></div><span className="text-xs text-gray-400">Service</span></div>
+                {calSalesman && <div className="flex items-center gap-1.5"><span className="text-xs text-violet-600">★</span><span className="text-xs text-gray-400">{calSalesman}'s orders · others dimmed</span></div>}
+                <span className="text-xs text-gray-300">· Click any date to see orders</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Outstanding balances */}
+        {balanceOrders.length > 0 && (
+          <div>
+            <h2 className="font-bold text-gray-800 mb-3">Outstanding Balances</h2>
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="bg-gray-50 border-b border-gray-100">{["SO","Customer","Salesman","Amount","Balance","Delivery","Aging"].map(h=><th key={h} className="px-4 py-2.5 text-left font-semibold text-gray-500">{h}</th>)}</tr></thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {balanceOrders.map((o,i) => {
+                      const aging = o.deliveryDate ? Math.floor((now-new Date(o.deliveryDate))/(86400000)) : null;
+                      return (
+                        <tr key={i} className="hover:bg-violet-50 cursor-pointer" onClick={() => handleView(o)}>
+                          <td className="px-4 py-3 font-bold text-violet-700">{o.soNumber}</td>
+                          <td className="px-4 py-3 font-medium text-gray-800">{o.customerName}</td>
+                          <td className="px-4 py-3 text-gray-500">{o.salesman||"-"}</td>
+                          <td className="px-4 py-3 text-gray-600">RM {o.orderAmount}</td>
+                          <td className="px-4 py-3 font-bold text-red-600">RM {o.balance}</td>
+                          <td className="px-4 py-3 text-gray-500">{o.deliveryDate ? fmt(o.deliveryDate) : <span className="italic text-gray-300">TBC</span>}</td>
+                          <td className={`px-4 py-3 font-semibold ${aging>30?"text-red-600":aging>14?"text-amber-600":"text-gray-500"}`}>{aging!==null?`${aging}d`:"-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+  );
+});
+
+
 
 // ── Stat Card ─────────────────────────────────────────────────────
 function StatCard({ label, value, sub, accent = false, onClick }) {
@@ -560,36 +821,28 @@ export default function App() {
     } catch(e) {} setDoReviewLoading(false);
   };
 
-  // Sidebar badge counts only — the full row sets load when Operations opens
-  const loadOpsCounts = async () => {
-    try {
-      const d = await authFetch(`${BACKEND}/operations/pending-counts`).then(r => r.json());
-      setOpsCounts({ service_pending: Number(d?.service_pending) || 0, do_review: Number(d?.do_review) || 0 });
-    } catch (e) {}
-  };
-
-  const loadServices = async () => {
+  // One round-trip for all backend dashboard data (services + badge counts +
+  // commission summary). Replaces the separate loadServices /
+  // loadCommissionEstimate / loadOpsCounts startup calls — those individual
+  // loaders still exist for page-level refreshes.
+  const loadBootstrap = async () => {
     setServicesLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (companyId) params.set("company_id", companyId);
-      if (isSalesman && user?.salesman_name) params.set("salesman", user.salesman_name);
-      const d = await authFetch(`${BACKEND}/services?${params}`).then(r => r.json());
-      setServices(Array.isArray(d) ? d.map(fromDb) : []);
-    } catch(e) { console.error(e); }
+      const d = await authFetch(`${BACKEND}/dashboard/bootstrap`).then(r => r.json());
+      let svc = Array.isArray(d?.services) ? d.services.map(fromDb) : [];
+      // Same salesman scoping /services?salesman= applied server-side
+      if (isSalesman && user?.salesman_name) {
+        const name = user.salesman_name.toLowerCase().trim();
+        svc = svc.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name));
+      }
+      setServices(svc);
+      if (d?.pending_counts) setOpsCounts({ service_pending: Number(d.pending_counts.service_pending) || 0, do_review: Number(d.pending_counts.do_review) || 0 });
+      if (isSalesman) setEstCommission(Number(d?.commission_summary?.total) || 0);
+    } catch (e) { console.error(e); }
     setServicesLoading(false);
   };
 
   const [estCommission, setEstCommission] = useState(null);
-  const loadCommissionEstimate = async () => {
-    if (!isSalesman) return;
-    try {
-      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-      // Lightweight totals-only endpoint — the Commission page still uses /commission-payout
-      const d = await authFetch(`${BACKEND}/commission-summary?payout_month=${month}`).then(r => r.json());
-      setEstCommission(Number(d?.total) || 0);
-    } catch (e) { console.error(e); }
-  };
 
   const loadSupplierDOs = async () => {
     setSupplierDOsLoading(true);
@@ -613,9 +866,7 @@ export default function App() {
     if (!user) return; // wait for auth
     opsLoadedRef.current = false; // company/user switch: Operations must reload on next open
     loadOrders();
-    loadServices();
-    loadCommissionEstimate();
-    loadOpsCounts();
+    loadBootstrap();
   }, [user?.id, companyId, user?.role]); // eslint-disable-line
 
   // First open of the Operations page loads its data (startup used to do this)
@@ -642,7 +893,7 @@ export default function App() {
   const flaggedOrders = useMemo(() => orders.filter(o => o.status === "Flagged"), [orders]);
 
   // ── Actions ─────────────────────────────────────────────────────
-  const handleView = o => setViewOrder(o);
+  const handleView = useCallback(o => setViewOrder(o), []);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
   const handleDelete = async id => {
     try {
@@ -831,257 +1082,7 @@ export default function App() {
 
   const renderPage = () => {
     // OVERVIEW
-    if (page === "overview") return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, {user?.name?.split(" ")[0]} 👋</h1>
-          <p className="text-gray-400 text-sm mt-1">{new Date().toLocaleDateString("en-MY", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</p>
-        </div>
-        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-3`}>
-          <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage(isSalesman ? "company-deliveries" : "deliveries")} />
-          <StatCard label="Ready to Deliver" value={readyOrders.filter(o=>!o.deliveryDate).length} sub="items arrived, no date" onClick={() => setPage("ready")} />
-          <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={isSalesman ? () => setPage("balance") : undefined} />
-          {isSalesman ? (
-            <StatCard label="Pending Service Cases" value={services.filter(s => s.status !== "Serviced").length} sub="open cases" onClick={() => setPage("services")} />
-          ) : (
-            <StatCard label="Flagged Orders" value={flaggedOrders.length} sub="need attention" onClick={() => setPage("orders")} />
-          )}
-          {isSalesman && (
-            <StatCard label="Est. Commission This Month" value={estCommission === null ? "…" : `RM ${estCommission.toLocaleString()}`} sub="eligible + pending" onClick={() => setPage("commission")} />
-          )}
-        </div>
-
-        {/* Today's orders */}
-        {todayOrders.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-bold text-gray-800">Today's Deliveries</h2>
-              <Badge color="violet">{todayStr}</Badge>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {todayOrders.map(o => (
-                <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors" onClick={() => handleView(o)}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
-                        {o.type === "Service" && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Service</span>}
-                      </div>
-                      <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{(o.address || "").replace(/ADDRESS \d+:\s*/gi, "").trim()}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${statusColor(o.status)}`}>{o.status}</span>
-                      {o.timeSlot && <Badge color="violet">⏰ {o.timeSlot}</Badge>}
-                      {parseFloat(o.balance) > 0 && <span className="text-xs font-bold text-red-600">RM {o.balance}</span>}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {o.items?.filter(i=>i.itemName).map((item,i) => (
-                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
-                        {item.arrivalDate ? "✓" : "·"} {item.itemName}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Next 3 days */}
-        <div>
-          <h2 className="font-bold text-gray-800 mb-3">Next 3 Days</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[1,2,3].map(offset => {
-              const d = new Date(now); d.setDate(d.getDate()+offset);
-              const ds = d.toISOString().split("T")[0];
-              const dayOrders = orders.filter(o => o.deliveryDate === ds);
-                  const someNotArrived = dayOrders.some(o => o.items?.some(i => !i.arrivalDate));
-              return (
-                <div key={ds} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="font-bold text-gray-800 text-sm">{d.toLocaleDateString("en-MY",{weekday:"long"})}</p>
-                      <p className="text-xs text-gray-400">{fmt(ds)}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${dayOrders.length > 0 ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"}`}>{dayOrders.length} orders</span>
-                  </div>
-                  {dayOrders.length > 0 && (
-                    <div className="mt-2">
-                      {someNotArrived
-                        ? <p className="text-xs text-amber-600 font-medium">⚠️ Some items not arrived</p>
-                        : <p className="text-xs text-emerald-600 font-medium">✅ All items ready</p>}
-                      <div className="mt-1.5 space-y-1">
-                        {dayOrders.map(o => (
-                          <button key={o.id} onClick={() => handleView(o)} className="w-full text-left text-xs bg-gray-50 rounded-lg px-2 py-1.5 hover:bg-violet-50">
-                            <span className="font-semibold text-violet-700">{o.soNumber}</span> — {o.customerName}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {dayOrders.length === 0 && <p className="text-xs text-gray-300 mt-1">No deliveries scheduled</p>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Monthly Calendar */}
-        {(() => {
-          const [calYear, calMonth] = calMonthStr.split("-").map(Number);
-          const firstDow = (new Date(calYear, calMonth - 1, 1).getDay() + 6) % 7;
-          const lastDay = new Date(calYear, calMonth, 0).getDate();
-          const cells = [];
-          for (let i = 0; i < firstDow; i++) cells.push(null);
-          for (let d = 1; d <= lastDay; d++) cells.push(d);
-          while (cells.length % 7 !== 0) cells.push(null);
-          const weeks = [];
-          for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-          const getDs = d => d ? `${calYear}-${String(calMonth).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
-          const calOrders = isSalesman ? allCompanyOrders : orders;
-          const calSalesmen = [...new Set(calOrders.map(o => o.salesman).filter(Boolean))].sort();
-          // Pre-build date→orders map (O(n) instead of O(n*days))
-          const ordersByDate = {};
-          calOrders.forEach(o => { if (o.deliveryDate) { if (!ordersByDate[o.deliveryDate]) ordersByDate[o.deliveryDate] = []; ordersByDate[o.deliveryDate].push(o); } });
-          const ordersOnDay = d => ordersByDate[getDs(d)] || [];
-          const isMyOrder = o => {
-            if (!calSalesman) return false;
-            return (o.salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(calSalesman.toLowerCase());
-          };
-          return (
-            <div>
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h2 className="font-bold text-gray-800">Monthly Overview</h2>
-                  {!isSalesman && (
-                    <select value={calSalesman} onChange={e => setCalSalesman(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                      <option value="">All salesmen</option>
-                      {calSalesmen.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  )}
-                  {calSalesman && <span className="text-xs text-violet-600 font-medium">Highlighting: {calSalesman}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const pm = m===1?12:m-1; const py = m===1?y-1:y; setCalMonthStr(`${py}-${String(pm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">‹</button>
-                  <span className="text-sm font-semibold text-gray-700 min-w-32 text-center">{new Date(calYear, calMonth-1, 1).toLocaleString("en-MY",{month:"long",year:"numeric"})}</span>
-                  <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const nm = m===12?1:m+1; const ny = m===12?y+1:y; setCalMonthStr(`${ny}-${String(nm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">›</button>
-                  <button onClick={() => setCalMonthStr(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`)} className="text-xs text-violet-600 hover:underline px-2">Today</button>
-                </div>
-              </div>
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                {/* Day headers */}
-                <div className="grid grid-cols-7 border-b border-gray-100">
-                  {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => (
-                    <div key={d} className={`py-2 text-center text-xs font-bold ${d==="Sat"||d==="Sun" ? "text-violet-400" : "text-gray-400"}`}>{d}</div>
-                  ))}
-                </div>
-                {/* Weeks */}
-                {weeks.map((week, wi) => (
-                  <div key={wi} className="grid grid-cols-7 border-b border-gray-50 last:border-0">
-                    {week.map((day, di) => {
-                      const ds = getDs(day);
-                      const dayOrders = day ? ordersOnDay(day) : [];
-                      const deliveries = dayOrders.filter(o => o.type === "Delivery");
-                      const services = dayOrders.filter(o => o.type === "Service");
-                      const isToday = ds === todayStr;
-                      const isEmpty = day && dayOrders.length === 0;
-                      const isWeekend = di >= 5;
-                      const hasUnconfirmed = deliveries.some(o => o.status === "Pending");
-                      const allDelivered = deliveries.length > 0 && deliveries.every(o => o.status === "Delivered");
-                      return (
-                        <div key={di} className={`min-h-20 p-1.5 border-r border-gray-50 last:border-r-0 cursor-pointer transition-colors hover:bg-violet-50 ${!day ? "bg-gray-50/50" : isToday ? "bg-violet-50" : isWeekend ? "bg-gray-50/30" : ""}`}
-                          onClick={() => { if (ds) { setScheduleDate(ds); setPage(isSalesman ? "company-deliveries" : "deliveries"); } }}>
-                          {day && (
-                            <>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? "bg-violet-600 text-white" : isWeekend ? "text-violet-400" : "text-gray-500"}`}>{day}</span>
-                                {dayOrders.length > 0 && (
-                                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${allDelivered ? "bg-emerald-100 text-emerald-700" : hasUnconfirmed ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{dayOrders.length}</span>
-                                )}
-                              </div>
-                              {isEmpty && <div className="mt-1 text-center"><span className="text-xs text-gray-200">—</span></div>}
-                              {deliveries.length > 0 && (
-                                <div className="space-y-0.5">
-                                  {deliveries.slice(0,3).map(o => {
-                                    const mine = isMyOrder(o);
-                                    const highlight = calSalesman ? mine : true;
-                                    return (
-                                      <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}}
-                                        className={`text-xs px-1 py-0.5 rounded font-medium truncate leading-tight transition-opacity hover:opacity-80 ${
-                                          o.status==="Delivered" ? (highlight?"bg-emerald-100 text-emerald-700":"bg-emerald-50 text-emerald-300")
-                                          : o.status==="Flagged" ? (highlight?"bg-red-100 text-red-600":"bg-red-50 text-red-300")
-                                          : highlight ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"
-                                        } ${!highlight?"opacity-50":""}`}>
-                                        {mine && calSalesman && <span className="mr-0.5">★</span>}{o.soNumber}
-                                      </div>
-                                    );
-                                  })}
-                                  {deliveries.length > 3 && <div className="text-xs text-gray-400 px-1">+{deliveries.length - 3} more</div>}
-                                </div>
-                              )}
-                              {services.length > 0 && (
-                                <div className="mt-0.5">
-                                  {services.slice(0,1).map(o => (
-                                    <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}} className="text-xs px-1 py-0.5 rounded font-medium truncate leading-tight bg-indigo-100 text-indigo-700 hover:opacity-80">
-                                      🔧 {o.soNumber}
-                                    </div>
-                                  ))}
-                                  {services.length > 1 && <div className="text-xs text-gray-400 px-1">+{services.length-1} svc</div>}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-2 flex-wrap">
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-violet-100"></div><span className="text-xs text-gray-400">Pending delivery</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-100"></div><span className="text-xs text-gray-400">Delivered</span></div>
-                <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-indigo-100"></div><span className="text-xs text-gray-400">Service</span></div>
-                {calSalesman && <div className="flex items-center gap-1.5"><span className="text-xs text-violet-600">★</span><span className="text-xs text-gray-400">{calSalesman}'s orders · others dimmed</span></div>}
-                <span className="text-xs text-gray-300">· Click any date to see orders</span>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Outstanding balances */}
-        {balanceOrders.length > 0 && (
-          <div>
-            <h2 className="font-bold text-gray-800 mb-3">Outstanding Balances</h2>
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead><tr className="bg-gray-50 border-b border-gray-100">{["SO","Customer","Salesman","Amount","Balance","Delivery","Aging"].map(h=><th key={h} className="px-4 py-2.5 text-left font-semibold text-gray-500">{h}</th>)}</tr></thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {balanceOrders.map((o,i) => {
-                      const aging = o.deliveryDate ? Math.floor((now-new Date(o.deliveryDate))/(86400000)) : null;
-                      return (
-                        <tr key={i} className="hover:bg-violet-50 cursor-pointer" onClick={() => handleView(o)}>
-                          <td className="px-4 py-3 font-bold text-violet-700">{o.soNumber}</td>
-                          <td className="px-4 py-3 font-medium text-gray-800">{o.customerName}</td>
-                          <td className="px-4 py-3 text-gray-500">{o.salesman||"-"}</td>
-                          <td className="px-4 py-3 text-gray-600">RM {o.orderAmount}</td>
-                          <td className="px-4 py-3 font-bold text-red-600">RM {o.balance}</td>
-                          <td className="px-4 py-3 text-gray-500">{o.deliveryDate ? fmt(o.deliveryDate) : <span className="italic text-gray-300">TBC</span>}</td>
-                          <td className={`px-4 py-3 font-semibold ${aging>30?"text-red-600":aging>14?"text-amber-600":"text-gray-500"}`}>{aging!==null?`${aging}d`:"-"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
+    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={orders} allCompanyOrders={allCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} />;
 
     // ORDERS (unified — reads from sales_orders)
     if (page === "orders") return <OrdersPage />;
