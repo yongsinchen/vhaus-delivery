@@ -715,6 +715,8 @@ function OrdersPage() {
       items: (f.sales_order_items || []).map(it => ({
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
+        linked_custom_item: it.linked_custom_item || false,
+        linked_product: it.products || null, // joined master info — display only
         custom_dimensions: it.custom_dimensions || "",
         custom_specs: (it.custom_dimensions || "").includes(": ") ? (it.custom_dimensions || "").split(" | ").map(s => { const [l, ...v] = s.split(": "); return { label: l || "", value: v.join(": ") || "" }; }) : (it.custom_dimensions ? [{ label: "Specs", value: it.custom_dimensions }] : []),
         quantity: it.quantity ?? 1,
@@ -889,6 +891,7 @@ function OrdersPage() {
           ...it,
           custom_dimensions: customDim,
           custom_specs: undefined,
+          linked_product: undefined,
           quantity: Number(it.quantity) || 1,
           unit_price: it.unit_price === "" ? null : Number(it.unit_price),
           unit_cost: it.unit_cost === "" ? null : Number(it.unit_cost),
@@ -1172,8 +1175,12 @@ function OrdersPage() {
                             <div className="flex items-center gap-1.5">
                               {it.product_code && <span className="text-xs font-mono text-violet-600">{it.product_code}</span>}
                               <span className="text-sm font-medium text-gray-900 truncate">{it.product_name || "-"}</span>
+                              {it.linked_custom_item && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium shrink-0">Linked</span>}
                             </div>
                             <p className="text-xs text-gray-400">{[it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ")}</p>
+                            {it.linked_custom_item && it.products && (
+                              <p className="text-xs text-emerald-600">→ {it.products.code} {it.products.name}</p>
+                            )}
                           </div>
                           <div className="text-right flex-shrink-0 ml-3">
                             <p className="text-sm font-bold text-gray-900">{money(it.unit_price)} × {it.quantity || 1}</p>
@@ -1586,8 +1593,12 @@ function OrdersPage() {
                             <span className="font-mono text-violet-700">{it.product_code}</span> {it.product_name}
                           </p>
                           <p className="text-xs text-gray-400">{[it.size, it.color].filter(Boolean).join(" · ")}</p>
+                          {it.linked_custom_item && it.linked_product && (
+                            <p className="text-xs text-emerald-600">→ linked to {it.linked_product.code} {it.linked_product.name}</p>
+                          )}
                         </div>
                         {it.is_custom && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 shrink-0">Custom</span>}
+                        {it.linked_custom_item && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 shrink-0">Linked</span>}
                         <button onClick={() => removeItem(i)} className="text-gray-300 hover:text-red-500 text-sm shrink-0">✕</button>
                       </div>
 
@@ -1602,8 +1613,10 @@ function OrdersPage() {
                         </div>
                       </div>
 
-                      {/* Customizable extras */}
-                      {it.is_custom && (
+                      {/* Customizable extras — shown for custom items AND items
+                          that carry specs (e.g. custom items later linked to a
+                          product master: linking must not hide ordered options) */}
+                      {(it.is_custom || (it.custom_specs || []).length > 0) && (
                         <div className="space-y-2 pt-1">
                           <label className="block text-xs font-medium text-gray-500">Customization Specs</label>
                           {(it.custom_specs || []).map((spec, si) => {
