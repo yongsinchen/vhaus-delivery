@@ -33,6 +33,27 @@ const parseItems = items => {
   catch { return []; }
 };
 
+// ── Item arrival status (drives the per-row chip and per-stop readiness) ──
+// Derived from the three legacy date fields the warehouse Excel sheet used:
+// arrival > supplier sent > ordered > nothing.
+const itemStatus = (item) => {
+  if (item._do) return { label: "✓ Allocated", cls: "bg-emerald-100 text-emerald-700", arrived: true };
+  if (item.arrivalDate) return { label: "✓ Arrived", cls: "bg-emerald-100 text-emerald-700", arrived: true };
+  if (item.supplierSentDate) return { label: "Sent", cls: "bg-orange-100 text-orange-700", arrived: false };
+  if (item.itemOrderDate) return { label: "Ordered", cls: "bg-gray-200 text-gray-600", arrived: false };
+  return { label: "Not Ordered", cls: "bg-red-100 text-red-600", arrived: false };
+};
+
+// Stop-level readiness from its items: all arrived → Ready, some → Partial,
+// none → Waiting. Stops without item data stay neutral.
+const stopReadiness = (items) => {
+  if (!items || items.length === 0) return { label: "No items", dot: "bg-gray-300", cls: "bg-gray-100 text-gray-500" };
+  const arrived = items.filter(i => itemStatus(i).arrived).length;
+  if (arrived === items.length) return { label: "Ready", dot: "bg-emerald-500", cls: "bg-emerald-100 text-emerald-700" };
+  if (arrived > 0) return { label: `Partial ${arrived}/${items.length}`, dot: "bg-amber-400", cls: "bg-amber-100 text-amber-700" };
+  return { label: "Waiting", dot: "bg-red-500", cls: "bg-red-100 text-red-600" };
+};
+
 const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", status: "Active" };
 
 /** Derive a team-level status from its schedules */
@@ -96,24 +117,31 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
   );
 }
 
-// -- Assigned Order Card -----------------------------------------------
-function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDragOver, onDrop, onSaved, isTrip }) {
+// -- Stop Row (assigned order inside a vehicle card) --------------------
+// Logistics-sheet layout: compact customer block (~30%) on the left, dense
+// per-item table (~70%) on the right, remark strip below. Items are always
+// visible — no "View Items" toggle. Memoized: parent drag state changes must
+// not re-render every stop on the page.
+const ITEM_COLS = ["#", "Code", "Item", "Qty", "Supplier", "Ordered", "Sent", "Arrival"];
+
+const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
-  const [showItems, setShowItems] = useState(false);
   const [saving, setSaving] = useState(false);
-  if (!o || !o.so_number) return null;
+  const isTrip = !!tripInfo;
 
-  // Phase 2B: a DO schedule shows ONLY that shipment's items (mapped to the
-  // legacy {itemName, unit} shape the card already renders).
+  // Phase 2B: a DO schedule shows ONLY that shipment's items. DO items were
+  // arrival-checked at DO creation, so they count as allocated/ready.
   const dord = schedule.delivery_orders || null;
   const items = dord
-    ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)) }))
+    ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)), _do: true }))
     : parseItems(o.items);
+  const readiness = stopReadiness(items);
   const preferredTime = o.time_slot || "";
-  const tripInfo = isTrip ? schedule : null;
   const isLegacy = String(schedule.id).startsWith("legacy-");
+
+  if (!o || !o.so_number) return null;
 
   const saveNotes = async (val) => {
     setNotes(val);
@@ -135,90 +163,110 @@ function AssignedOrderCard({ schedule, teamId, index, isLocked, onUnassign, onDr
 
   return (
     <div
-      className={`rounded-lg p-2 border ${isTrip ? "bg-purple-50 border-purple-200" : "bg-gray-50 border-gray-200"} ${isLocked ? "opacity-80" : "cursor-grab"}`}
+      className={`border-b border-gray-100 last:border-b-0 py-1.5 px-1 ${isTrip ? "bg-purple-50/40" : ""} ${isLocked ? "opacity-80" : "cursor-grab hover:bg-blue-50/30"}`}
       draggable={!isLocked}
-      onDragStart={() => !isLocked && onDragStart(index)}
-      onDragOver={e => { e.preventDefault(); !isLocked && onDragOver(index); }}
-      onDrop={() => !isLocked && onDrop(index)}
+      onDragStart={() => !isLocked && onDragStart(teamId, index)}
+      onDragOver={e => { if (!isLocked) e.preventDefault(); }}
+      onDrop={() => !isLocked && onDrop(teamId, index)}
     >
-      {/* Row 1 */}
-      <div className="flex items-center gap-1.5 mb-1.5">
-        {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab">&#8942;&#8942;</span>}
-        <span className="text-xs text-gray-400 font-medium flex-shrink-0">#{index + 1}</span>
-        <span className={`font-bold text-xs flex-shrink-0 ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
-        {dord && (
-          <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded flex-shrink-0" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>
-        )}
-        {isTrip && tripInfo && (
-          <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0 ${tripStatusColor(tripInfo.trip_status)}`}>
-            Trip {tripInfo.trip_no}/{tripInfo.total_trips}
-          </span>
-        )}
-        <span className="text-xs font-medium text-gray-700 truncate flex-1">{o.customer_name}</span>
-        {parseFloat(o.balance) > 0 && <span className="text-red-500 text-xs font-medium flex-shrink-0">RM {o.balance}</span>}
-        {!isLocked && (
-          <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs flex-shrink-0" title="Unassign">x</button>
-        )}
-      </div>
-
-      {/* Commission badge */}
-      {isTrip && tripInfo && (
-        <p className={`text-xs font-medium mb-1 ${tripInfo.trip_no === 1 ? "text-green-600" : "text-gray-400"}`}>
-          {tripInfo.trip_no === 1 ? "Commission trip" : `No commission (trip ${tripInfo.trip_no})`}
-        </p>
-      )}
-
-      <div className="space-y-1.5 mb-1.5">
-        <p className="text-xs text-gray-400 truncate">{o.address}</p>
-        <p className="text-xs text-gray-500"><span className="text-gray-400">Order Date:</span> {o.order_date || "-"}</p>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-400 flex-shrink-0">Preferred:</span>
-          {preferredTime
-            ? <span className="text-xs font-medium text-purple-600 bg-purple-50 rounded px-1.5 py-0.5">{preferredTime}</span>
-            : <span className="text-xs text-gray-300">-</span>}
+      <div className="flex gap-2">
+        {/* Customer block (~30%) */}
+        <div className="w-48 sm:w-56 flex-shrink-0 min-w-0">
+          <div className="flex items-center gap-1 flex-wrap">
+            {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab leading-none">&#8942;&#8942;</span>}
+            <span className="text-[11px] text-gray-400 font-medium">#{index + 1}</span>
+            <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
+            {dord && <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1 py-0.5 rounded" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>}
+            {!isLocked && (
+              <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs ml-auto" title="Unassign">×</button>
+            )}
+          </div>
+          <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${readiness.cls}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${readiness.dot}`} />{readiness.label}
+            </span>
+            {isTrip && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${tripStatusColor(tripInfo.trip_status)}`} title={tripInfo.trip_no === 1 ? "Commission trip" : "No commission"}>
+                Trip {tripInfo.trip_no}/{tripInfo.total_trips}{tripInfo.trip_no === 1 ? " · comm" : ""}
+              </span>
+            )}
+            {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {o.balance}</span>}
+          </div>
+          <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
+          {o.contact && <p className="text-[11px] text-gray-500 leading-tight">{o.contact}</p>}
+          <p className="text-[11px] text-gray-400 leading-tight break-words">{o.address}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[11px]">
+            <span className="text-gray-400">Ord: {o.order_date || "-"}</span>
+            {preferredTime && <span className="font-medium text-purple-600 bg-purple-50 rounded px-1">{preferredTime}</span>}
+          </div>
+          {!isLocked ? (
+            <div className="flex items-center gap-1 mt-0.5">
+              <input value={slotVal} onChange={e => setSlotVal(e.target.value)} onBlur={() => saveSlot(slotVal)} placeholder="Slot e.g. 10-12"
+                onKeyDown={e => e.key === "Enter" && saveSlot(slotVal)}
+                className={`text-[11px] border rounded px-1 py-0.5 w-24 ${saving ? "opacity-50" : ""}`} />
+              {preferredTime && !slotVal && <button onClick={() => { setSlotVal(preferredTime); saveSlot(preferredTime); }} className="text-[10px] text-purple-600 hover:underline whitespace-nowrap">use pref.</button>}
+            </div>
+          ) : (
+            schedule.slot && <span className="text-[11px] text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1 py-0.5 inline-block mt-0.5">Slot: {schedule.slot}</span>
+          )}
         </div>
-        {!isLocked && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-gray-400 flex-shrink-0">Slot:</span>
-            <input value={slotVal} onChange={e => setSlotVal(e.target.value)} onBlur={() => saveSlot(slotVal)} placeholder="e.g. 10am-12pm"
-              onKeyDown={e => e.key === "Enter" && saveSlot(slotVal)}
-              className={`text-xs border rounded px-1.5 py-0.5 w-28 ${saving ? "opacity-50" : ""}`} />
-            {preferredTime && !slotVal && <button onClick={() => { setSlotVal(preferredTime); saveSlot(preferredTime); }} className="text-xs text-purple-600 hover:underline">Use preferred</button>}
-          </div>
-        )}
-        {isLocked && schedule.slot && <span className="text-xs text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 inline-block">Slot: {schedule.slot}</span>}
-        {schedule.is_ready && <span className="text-xs text-green-700 font-medium bg-green-50 border border-green-200 rounded px-1.5 py-0.5 inline-block ml-1">Ready</span>}
-        {o.remark && <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded p-2 text-xs"><span className="font-semibold">Remark: </span>{o.remark}</div>}
+
+        {/* Item table (~70%) — one product per row, Excel-sheet columns */}
+        <div className="flex-1 min-w-0 overflow-x-auto">
+          {items.length === 0 ? (
+            <p className="text-[11px] text-gray-400 pt-1">No item data.</p>
+          ) : (
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr className="bg-emerald-50 text-gray-600 text-left">
+                  {ITEM_COLS.map(h => (
+                    <th key={h} className={`font-semibold px-1.5 py-0.5 border border-emerald-100 whitespace-nowrap ${h === "#" || h === "Qty" ? "text-center w-7" : ""}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, i) => {
+                  const st = itemStatus(item);
+                  return (
+                    <tr key={i} className="align-top">
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-center text-gray-400">{i + 1}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 font-mono text-gray-500 whitespace-nowrap">{item.itemCode || ""}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-gray-800 font-medium break-words">{item.itemName || "-"}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-center text-gray-700">{item.unit || 1}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-gray-600 whitespace-nowrap">{item.supplier || ""}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-gray-500 whitespace-nowrap">{item.itemOrderDate || ""}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 text-gray-500 whitespace-nowrap">{item.supplierSentDate || ""}</td>
+                      <td className="px-1.5 py-0.5 border border-gray-100 whitespace-nowrap">
+                        <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${st.cls}`}>{st.label}</span>
+                        {item.arrivalDate && <span className="text-gray-500 ml-1">{item.arrivalDate}</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-1">
-        <button onClick={() => setShowItems(p => !p)} className="text-xs text-gray-400 hover:text-blue-600 flex items-center gap-1">
-          <span>{showItems ? "Hide Items" : "View Items"}</span>
-        </button>
-        {showItems && (
-          <div className="bg-white border border-gray-100 rounded-lg p-2 space-y-1.5">
-            {items.length === 0 ? <p className="text-xs text-gray-400">No items found.</p>
-              : items.map((item, i) => (
-                <div key={i} className="text-xs border-b border-gray-50 pb-1.5 last:border-0 last:pb-0">
-                  <p className="font-medium text-gray-700">{i+1}. {item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName || "-"} <span className="text-gray-400">x{item.unit || 1}</span></p>
-                  {item.supplier && <p className="text-gray-400 ml-3">Supplier: {item.supplier}</p>}
-                  <p className="ml-3"><span className="text-gray-400">Arrival: </span>{item.arrivalDate ? <span className="text-gray-600">{item.arrivalDate}</span> : <span className="text-red-600 font-semibold">No arrival date</span>}</p>
-                </div>
-              ))}
-          </div>
-        )}
-        {!isLocked && (
-          <input value={notes} onChange={e => setNotes(e.target.value)}
-            onBlur={e => saveNotes(e.target.value)}
-            placeholder="Note (optional)"
-            className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
-          />
-        )}
-        {isLocked && notes && <p className="text-xs text-gray-400 italic">{notes}</p>}
-      </div>
+      {/* Remark strip + dispatcher note — full width, below the table */}
+      {o.remark && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded px-2 py-1 text-[11px] mt-1">
+          <span className="font-semibold">Remark: </span>{o.remark}
+        </div>
+      )}
+      {!isLocked ? (
+        <input value={notes} onChange={e => setNotes(e.target.value)}
+          onBlur={e => saveNotes(e.target.value)}
+          placeholder="Dispatcher note (optional)"
+          className="w-full text-[11px] border border-gray-200 rounded px-2 py-0.5 mt-1 focus:outline-none focus:ring-1 focus:ring-blue-300 text-gray-500"
+        />
+      ) : (
+        notes && <p className="text-[11px] text-gray-400 italic mt-1">{notes}</p>
+      )}
     </div>
   );
-}
+});
 
 // -- Print CSS ---------------------------------------------------------
 const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .print-area, .print-area * { visibility: visible !important; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } .order-block { page-break-inside: avoid; } .no-print { display: none !important; } }`;
@@ -885,7 +933,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     loadData();
   });
 
-  const unassignOrder = async (scheduleId) => {
+  const unassignOrder = useCallback(async (scheduleId) => {
     try {
       await withLoading("Removing from route…", async () => {
         const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "DELETE" });
@@ -894,7 +942,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         loadData();
       });
     } catch (e) { toast.error(e.message); }
-  };
+  }, [withLoading, toast, loadData]);
 
   const updateScheduleStatus = async (scheduleId, status) => {
     await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ status }) });
@@ -911,9 +959,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } catch (e) { toast.error("Failed to update route: " + e.message); }
   };
 
-  // Drag-drop reorder within a team
-  const handleAssignedDragStart = (teamId, fromIndex) => setDraggingAssigned({ teamId, fromIndex });
-  const handleAssignedDrop = async (teamId, toIndex) => {
+  // Drag-drop reorder within a team — useCallback so memoized StopRows only
+  // re-render when the drag state or data actually changes.
+  const handleAssignedDragStart = useCallback((teamId, fromIndex) => setDraggingAssigned({ teamId, fromIndex }), []);
+  const handleAssignedDrop = useCallback(async (teamId, toIndex) => {
     if (!draggingAssigned || draggingAssigned.teamId !== teamId) return;
     const { fromIndex } = draggingAssigned;
     if (fromIndex === toIndex) { setDraggingAssigned(null); return; }
@@ -930,7 +979,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       af(`${API}/delivery-schedules/${s.id}`, { method: "PATCH", body: JSON.stringify({ sort_order: i + 1 }) })
     ));
     loadData();
-  };
+  }, [draggingAssigned, teams, loadData]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 relative">
@@ -1229,7 +1278,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               <p className="text-xs mt-1">Click "+ Add Team" to get started.</p>
             </div>
           )}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Full-width stacked vehicle cards — each stop hosts a logistics
+              item table, which needs the horizontal room a 2-col grid denies */}
+          <div className="space-y-3">
             {teams.map(team => {
               const teamStatus = deriveTeamStatus(team.schedules);
               const isLocked = readOnly || teamStatus === "Out for Delivery" || teamStatus === "Delivered";
@@ -1285,8 +1336,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                     </div>
                   </div>
 
-                  {/* Assigned Schedules */}
-                  <div className="p-3 space-y-2 min-h-16">
+                  {/* Assigned Schedules — one dense StopRow per stop, thin dividers */}
+                  <div className="px-2 py-1 min-h-12">
                     {(!team.schedules || team.schedules.length === 0) && (
                       <p className="text-xs text-gray-300 text-center py-3">
                         {isLocked ? "No orders in this team." : isConfirmed ? "Team confirmed — unlock to Pending to edit." : "Drop orders or trips here"}
@@ -1295,17 +1346,16 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                     {team.schedules?.map((sc, index) => {
                       const linkedTrip = trips.find(t => t.so_number === sc.orders?.so_number);
                       return (
-                        <AssignedOrderCard
+                        <StopRow
                           key={sc.id}
-                          schedule={linkedTrip ? { ...sc, trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : sc}
+                          schedule={sc}
                           teamId={team.id}
                           index={index}
                           isLocked={isLocked}
-                          isTrip={!!linkedTrip}
+                          tripInfo={linkedTrip ? { trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : null}
                           onUnassign={unassignOrder}
-                          onDragStart={(fromIndex) => handleAssignedDragStart(team.id, fromIndex)}
-                          onDragOver={() => {}}
-                          onDrop={(toIndex) => handleAssignedDrop(team.id, toIndex)}
+                          onDragStart={handleAssignedDragStart}
+                          onDrop={handleAssignedDrop}
                           onSaved={loadData}
                         />
                       );
