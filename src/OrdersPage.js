@@ -824,12 +824,21 @@ function OrdersPage() {
       if (!form.customer_contact?.trim()) missing.push("Phone number");
       if (!form.customer_address?.trim()) missing.push("Billing address");
       if (deliverElsewhere && !form.delivery_address?.trim()) missing.push("Delivery address (or untick 'Deliver to a different address')");
-      if (!form.customer_id_no?.trim()) missing.push(`${form.customer_id_type === "passport" ? "Passport" : "I/C"} number`);
-      if (!form.customer_email?.trim()) missing.push("Email address");
-      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer_email.trim())) missing.push("A valid email address");
+      if (form.customer_email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer_email.trim())) missing.push("A valid email address");
       if (!form.salesman_names?.trim()) missing.push("Salesman");
-      if (missing.length > 0) {
-        setFormError("Cannot confirm order. Missing (required for e-invoicing):\n• " + missing.join("\n• "));
+      // E-invoice details are mandatory only above RM10,000 — the amount alone
+      // decides; manual/legacy SO numbers get no special treatment. Backend
+      // enforces the same rule as the source of truth.
+      const einvMissing = [];
+      if (totalAfterDiscount > 10000) {
+        if (!form.customer_id_no?.trim()) einvMissing.push(`${form.customer_id_type === "passport" ? "Passport" : "I/C"} number`);
+        if (!form.customer_email?.trim()) einvMissing.push("Email address");
+      }
+      if (missing.length > 0 || einvMissing.length > 0) {
+        const parts = [];
+        if (missing.length > 0) parts.push("Cannot confirm order. Missing:\n• " + missing.join("\n• "));
+        if (einvMissing.length > 0) parts.push("E-invoice details are required for orders above RM10,000.\n• " + einvMissing.join("\n• "));
+        setFormError(parts.join("\n\n"));
         return;
       }
     }
@@ -1467,11 +1476,12 @@ function OrdersPage() {
                     <option value="passport">Passport</option>
                   </select>
                 </div>
-                <Field label={form.customer_id_type === "passport" ? "Passport Number *" : "I/C Number *"}
+                <Field label={`${form.customer_id_type === "passport" ? "Passport Number" : "I/C Number"}${totalAfterDiscount > 10000 ? " *" : ""}`}
                   value={form.customer_id_no} onChange={v => setForm(f => ({ ...f, customer_id_no: v }))} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Email Address *" type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
+                <Field label={`Email Address${totalAfterDiscount > 10000 ? " *" : ""}`} type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
+                {totalAfterDiscount > 10000 && <p className="text-xs text-amber-600 self-end pb-2">E-invoice details required (order above RM10,000)</p>}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Billing Address *" value={form.customer_address} onChange={v => {
