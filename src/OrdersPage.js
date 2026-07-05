@@ -56,7 +56,7 @@ const EMPTY_ORDER = {
   customer_id_type: "ic", customer_id_no: "", customer_email: "",
   status: "draft", notes: "", items: [],
   order_date: "",
-  delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", remark: "",
+  delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", delivery_address: "", remark: "",
   discount: "", deposit: "", payment_method: "", payment_proofs: [],
   branch_id: "", salesman_names: "",
   country: "", gst_rate: 0, gst_waived: false,
@@ -125,7 +125,7 @@ function printDeliveryNote(doData, order, co) {
     <div class="title">DELIVERY ORDER</div>
     <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
       <tr><td class="lbl">Customer</td><td>${esc(order.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(order.order_number || "")}</td></tr>
-      <tr><td class="lbl">Address</td><td>${esc(order.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(order.delivery_date || new Date().toISOString().slice(0, 10))}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(doData.delivery_address || order.delivery_address || order.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(order.delivery_date || new Date().toISOString().slice(0, 10))}</td></tr>
       <tr><td class="lbl">Contact</td><td>${esc(order.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(order.salesman_name || "")}</td></tr>
     </table>
     <table class="items">
@@ -314,7 +314,8 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
       <div class="cust sec">
         <div class="col">
           <div class="frow"><span class="lbl">Customer Name</span><span class="val">${esc(order.customer_name || "")}</span></div>
-          <div class="frow"><span class="lbl">Address</span><span class="val multi">${esc(order.customer_address || "")}</span></div>
+          <div class="frow"><span class="lbl">${order.delivery_address ? "Billing Address" : "Address"}</span><span class="val multi">${esc(order.customer_address || "")}</span></div>
+          ${order.delivery_address ? `<div class="frow"><span class="lbl">Delivery Address</span><span class="val multi">${esc(order.delivery_address)}</span></div>` : ""}
           <div class="frow"><span class="lbl">Sales Assistant</span><span class="val">${esc(order.salesman_name || "")}</span></div>
           <div class="frow"><span class="lbl">Phone</span><span class="val">${esc(order.customer_contact || "")}</span></div>
           <div class="frow"><span class="lbl">${idLabel}</span><span class="val">${esc(order.customer_id_no || "")}</span></div>
@@ -449,6 +450,7 @@ function OrdersPage() {
   const [doOverride, setDoOverride] = useState(false);
   const [doSaving, setDoSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_ORDER);
+  const [deliverElsewhere, setDeliverElsewhere] = useState(false); // "deliver to a different address" toggle
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -679,6 +681,7 @@ function OrdersPage() {
     setEditingOrder(null);
     setArrivalItems(null);
     setForm({ ...EMPTY_ORDER, order_date: todayMY(), salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
+    setDeliverElsewhere(false);
     setFormError("");
     setDrawerOpen(true);
   };
@@ -704,6 +707,7 @@ function OrdersPage() {
       delivery_type: f.delivery_type || "Delivery",
       delivery_date: f.delivery_date || "",
       delivery_time_slot: f.delivery_time_slot || "",
+      delivery_address: f.delivery_address || "",
       remark: f.remark || "",
       discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
@@ -718,6 +722,7 @@ function OrdersPage() {
         attachment_url: it.attachment_url || "", notes: it.notes || "",
       })),
     });
+    setDeliverElsewhere(!!f.delivery_address);
     setFormError("");
     setDrawerOpen(true);
   };
@@ -817,7 +822,8 @@ function OrdersPage() {
       if (!(Number(form.deposit) > 0)) missing.push("Deposit amount (must be > 0)");
       if ((form.payment_proofs || []).length === 0) missing.push("Payment proof (upload receipt/transfer screenshot)");
       if (!form.customer_contact?.trim()) missing.push("Phone number");
-      if (!form.customer_address?.trim()) missing.push("Full address");
+      if (!form.customer_address?.trim()) missing.push("Billing address");
+      if (deliverElsewhere && !form.delivery_address?.trim()) missing.push("Delivery address (or untick 'Deliver to a different address')");
       if (!form.customer_id_no?.trim()) missing.push(`${form.customer_id_type === "passport" ? "Passport" : "I/C"} number`);
       if (!form.customer_email?.trim()) missing.push("Email address");
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customer_email.trim())) missing.push("A valid email address");
@@ -845,7 +851,9 @@ function OrdersPage() {
       status: form.status, notes: form.notes || null,
       order_date: form.order_date || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
-      delivery_time_slot: form.delivery_time_slot || null, remark: form.remark || null,
+      delivery_time_slot: form.delivery_time_slot || null,
+      delivery_address: (deliverElsewhere && form.delivery_address?.trim()) || null,
+      remark: form.remark || null,
       discount: form.discount === "" ? 0 : Number(form.discount),
       deposit: form.deposit === "" ? 0 : Number(form.deposit),
       payment_method: form.payment_method || null, payment_proofs: JSON.stringify(form.payment_proofs || []),
@@ -1126,7 +1134,8 @@ function OrdersPage() {
                     {o.customer_id_no && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">{o.customer_id_type === "passport" ? "Passport No" : "I/C No"}</p><p className="font-medium text-gray-800">{o.customer_id_no}</p></div>}
                     {o.customer_email && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Email</p><p className="font-medium text-gray-800 break-all">{o.customer_email}</p></div>}
                   </div>
-                  {o.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">Address</p><p className="font-medium text-gray-800">{o.customer_address}</p></div>}
+                  {o.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">{o.delivery_address ? "Billing Address" : "Address"}</p><p className="font-medium text-gray-800">{o.customer_address}</p></div>}
+                  {o.delivery_address && <div className="bg-violet-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-violet-400">Delivery Address</p><p className="font-medium text-gray-800">{o.delivery_address}</p></div>}
 
                   {/* Key numbers */}
                   <div className="grid grid-cols-4 gap-2">
@@ -1465,7 +1474,7 @@ function OrdersPage() {
                 <Field label="Email Address *" type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Full Address *" value={form.customer_address} onChange={v => {
+                <Field label="Billing Address *" value={form.customer_address} onChange={v => {
                   setForm(f => {
                     const updated = { ...f, customer_address: v };
                     if (v.length > 3) {
@@ -1526,6 +1535,26 @@ function OrdersPage() {
                   </div>
                 </div>
                 <Field label="Time Slot" value={form.delivery_time_slot} onChange={v => setForm(f => ({ ...f, delivery_time_slot: v }))} placeholder="e.g. 2-5pm" />
+              </div>
+
+              {/* Deliver to a different address */}
+              <div>
+                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                  <input type="checkbox" checked={deliverElsewhere}
+                    onChange={e => {
+                      setDeliverElsewhere(e.target.checked);
+                      if (!e.target.checked) setForm(f => ({ ...f, delivery_address: "" }));
+                    }}
+                    className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-400" />
+                  Deliver to a different address
+                </label>
+                {deliverElsewhere && (
+                  <div className="mt-2">
+                    <Field label="Delivery Address *" value={form.delivery_address}
+                      onChange={v => setForm(f => ({ ...f, delivery_address: v }))}
+                      placeholder="Where the goods should be delivered (billing address stays on the invoice)" />
+                  </div>
+                )}
               </div>
 
               {/* Line items */}
