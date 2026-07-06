@@ -23,6 +23,7 @@ const CommissionPage = lazy(() => import("./CommissionPage"));
 const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
 const OutstandingBalancePage = lazy(() => import("./OutstandingBalancePage"));
 const SupplierDOPage = lazy(() => import("./SupplierDOPage"));
+const AssistantChat = lazy(() => import("./AssistantChat"));
 
 // ── Constants ─────────────────────────────────────────────────────
 const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -1552,6 +1553,11 @@ export default function App() {
             <Suspense fallback={<div className="flex flex-col items-center justify-center py-16"><div className="w-8 h-8 border-3 border-violet-200 border-t-violet-600 rounded-full animate-spin mb-3" /><p className="text-xs text-gray-400">Loading page…</p></div>}>{renderPage()}</Suspense>
           </div>
         </div>
+
+        {/* Delivery assistant chat — same roles the backend accepts (ORDER_ROLES) */}
+        {["master", "manager", "company_admin", "salesman"].includes(user?.role) && (
+          <Suspense fallback={null}><AssistantChat /></Suspense>
+        )}
 
         {/* Mobile bottom nav */}
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 shadow-lg z-40 safe-area-bottom">
