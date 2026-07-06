@@ -174,10 +174,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const discount = Number(order.discount) || 0;
   const deposit = Number(order.deposit) || 0;
   const subtotal = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : gross;
-  const afterDisc = subtotal - discount;
   const orderGstRate = order.gst_waived ? 0 : (Number(order.gst_rate) || 0);
-  const orderGst = order.gst_waived ? 0 : (order.gst_amount != null ? Number(order.gst_amount) : Math.round(afterDisc * orderGstRate) / 100);
-  const total = afterDisc + orderGst;
+  // Stored gst_amount wins (old orders keep the GST they were sold at);
+  // fallback computes on the full subtotal — discount comes off after tax.
+  const orderGst = order.gst_waived ? 0 : (order.gst_amount != null ? Number(order.gst_amount) : Math.round(subtotal * orderGstRate) / 100);
+  const total = subtotal + orderGst - discount;
   const balance = total - deposit;
   const dateStr = new Date((order.order_date || order.created_at || new Date().toISOString()) + (order.order_date ? "T00:00:00" : "")).toLocaleDateString("en-MY");
 
@@ -338,8 +339,8 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
         </div>
         <div class="summary">
           <div class="srow"><span class="lab">Subtotal</span><span class="num">${money(subtotal)}</span></div>
-          ${discount ? `<div class="srow"><span class="lab">Discount</span><span class="num">-${money(discount)}</span></div>` : ""}
           ${orderGst ? `<div class="srow"><span class="lab">GST (${orderGstRate}%)</span><span class="num">${money(orderGst)}</span></div>` : ""}
+          ${discount ? `<div class="srow"><span class="lab">Discount</span><span class="num">-${money(discount)}</span></div>` : ""}
           <div class="srow grand"><span class="lab">TOTAL${orderGst ? " (incl. GST)" : ""}</span><span class="num">${money(total)}</span></div>
           <div class="srow dep"><span class="lab">Deposit Paid</span><span class="num">${money(deposit)}</span></div>
           <div class="srow grand"><span class="lab">BALANCE DUE</span><span class="num">${money(balance)}</span></div>
@@ -796,9 +797,10 @@ function OrdersPage() {
   const discountVal = Number(form.discount) || 0;
   const depositVal = Number(form.deposit) || 0;
   const gstRate = form.gst_waived ? 0 : (Number(form.gst_rate) || 0);
-  const afterDiscount = subtotal - discountVal;
-  const gstAmount = Math.round(afterDiscount * gstRate) / 100;
-  const totalAfterDiscount = afterDiscount + gstAmount;
+  // GST is charged on the full subtotal; the discount comes off AFTER tax
+  // (business rule since Jul 2026 — previously GST was on subtotal − discount).
+  const gstAmount = Math.round(subtotal * gstRate) / 100;
+  const totalAfterDiscount = subtotal + gstAmount - discountVal;
   const balanceVal = totalAfterDiscount - depositVal;
 
   const saveOrder = async () => {
@@ -1152,8 +1154,8 @@ function OrdersPage() {
                   {/* Key numbers */}
                   <div className="grid grid-cols-4 gap-2">
                     <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Subtotal</p><p className="text-sm font-bold text-gray-800">{money(sub)}</p></div>
-                    {disc > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Discount</p><p className="text-sm font-bold text-red-600">-{money(disc)}</p></div>}
                     {gst > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">GST</p><p className="text-sm font-bold text-gray-600">{money(gst)}</p></div>}
+                    {disc > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Discount</p><p className="text-sm font-bold text-red-600">-{money(disc)}</p></div>}
                     <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Deposit</p><p className="text-sm font-bold text-emerald-600">{money(dep)}</p></div>
                     <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-red-50" : "bg-emerald-50"}`}><p className="text-xs text-gray-400">Balance</p><p className={`text-sm font-bold ${bal > 0 ? "text-red-600" : "text-emerald-600"}`}>{money(bal)}</p></div>
                   </div>
@@ -1667,16 +1669,16 @@ function OrdersPage() {
                   <span className="text-gray-500">Subtotal</span>
                   <span className="font-medium text-gray-900">RM {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
-                  <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
-                </div>
                 {gstRate > 0 && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">GST ({gstRate}%)</span>
                     <span className="text-gray-700">{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
+                <div className="grid grid-cols-2 gap-3">
+                  <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
+                  <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
+                </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
                   <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
