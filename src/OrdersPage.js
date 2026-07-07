@@ -1469,8 +1469,9 @@ function OrdersPage() {
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
               </div>
 
-              {/* Customer info — all fields mandatory to confirm (e-invoicing) */}
-              <p className="text-[11px] text-amber-600">All customer fields below are required to confirm the order (for e-invoicing). Enter the name exactly as on I/C / passport.</p>
+              {/* Customer info — name/phone/address required to confirm; I/C + email
+                  only required for e-invoicing when the order is above RM10,000. */}
+              <p className="text-[11px] text-amber-600">Name, phone and address are required to confirm. For orders above RM10,000, I/C number and email are also required (e-invoicing) — enter the name exactly as on I/C / passport.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Full Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
                 <Field label="Phone Number *" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
@@ -1478,7 +1479,7 @@ function OrdersPage() {
               {/* Customer identity for e-invoicing */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">ID Type *</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">ID Type</label>
                   <select value={form.customer_id_type} onChange={e => setForm(f => ({ ...f, customer_id_type: e.target.value }))}
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                     <option value="ic">I/C (NRIC / MyKad)</option>
