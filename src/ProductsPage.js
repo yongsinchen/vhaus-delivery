@@ -59,6 +59,7 @@ function ProductsPage() {
   const [linkSearch, setLinkSearch] = useState({});
   const [linkResults, setLinkResults] = useState({});
   const [pendingProducts, setPendingProducts] = useState([]);
+  const [pendingCost, setPendingCost] = useState({}); // productId -> cost input for approval
 
   // Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -191,14 +192,23 @@ function ProductsPage() {
     setReviewLoading(false);
   };
 
-  const approvePending = async (productId) => {
+  const approvePending = async (pp) => {
+    const raw = (pendingCost[pp.id] ?? "").trim();
+    const cost = raw === "" ? null : Number(raw);
+    if (raw !== "" && (isNaN(cost) || cost < 0)) { toast.error("Enter a valid cost"); return; }
+    // Nudge (don't block) on approving without a cost — margin/commission
+    // can't be computed until a cost exists.
+    if (cost === null && !window.confirm(`Approve "${pp.name}" without a cost? Margin and commission can't be computed for this item until a cost is set.`)) return;
     try {
       await withLoading("Approving…", async () => {
         const headers = await authHeaders();
-        const res = await fetch(`${API}/product-review-queue/approve-pending`, { method: "POST", headers, body: JSON.stringify({ product_id: productId }) });
+        const body = { product_id: pp.id };
+        if (cost !== null) body.unit_cost = cost;
+        const res = await fetch(`${API}/product-review-queue/approve-pending`, { method: "POST", headers, body: JSON.stringify(body) });
         const d = await res.json();
         if (!res.ok || !d.ok) throw new Error(d.error || "Failed to approve");
         toast.success("Product approved");
+        setPendingCost(c => { const n = { ...c }; delete n[pp.id]; return n; });
         loadReviewQueue(); loadProducts(1);
       });
     } catch (e) { toast.error("Failed to approve: " + e.message); }
@@ -683,6 +693,7 @@ function ProductsPage() {
                     <th className="px-3 py-2">Size</th>
                     <th className="px-3 py-2">Color</th>
                     <th className="px-3 py-2 text-right">Price</th>
+                    <th className="px-3 py-2 text-right">Cost</th>
                     <th className="px-3 py-2">Created By</th>
                     <th className="px-3 py-2">Created</th>
                     <th className="px-3 py-2"></th>
@@ -696,10 +707,15 @@ function ProductsPage() {
                       <td className="px-3 py-2 text-gray-500">{pp.size || "—"}</td>
                       <td className="px-3 py-2 text-gray-500">{pp.color || "—"}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{pp.unit_price != null ? Number(pp.unit_price).toFixed(2) : "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input type="number" step="0.01" min="0" value={pendingCost[pp.id] ?? ""}
+                          onChange={e => setPendingCost(c => ({ ...c, [pp.id]: e.target.value }))}
+                          placeholder="—" className="w-20 px-2 py-1 text-xs text-right border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                      </td>
                       <td className="px-3 py-2 text-gray-500">{pp.created_by_name || "—"}</td>
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{pp.created_at ? new Date(pp.created_at).toLocaleDateString() : "—"}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        <button onClick={() => approvePending(pp.id)} className="text-xs px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mr-1">Approve</button>
+                        <button onClick={() => approvePending(pp)} className="text-xs px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mr-1">Approve</button>
                         <button onClick={() => rejectPending(pp.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Reject</button>
                       </td>
                     </tr>
