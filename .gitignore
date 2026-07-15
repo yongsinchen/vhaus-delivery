@@ -25,3 +25,7 @@ yarn-error.log*
 .env
 .env.local
 .env.production
+
+# Claude Code — personal/machine-specific, not shared
+.claude/settings.local.json
+.claude/worktrees/
