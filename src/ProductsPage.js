@@ -58,6 +58,7 @@ function ProductsPage() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [linkSearch, setLinkSearch] = useState({});
   const [linkResults, setLinkResults] = useState({});
+  const [pendingProducts, setPendingProducts] = useState([]);
 
   // Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -186,7 +187,34 @@ function ProductsPage() {
     const d = await res.json();
     setReviewQueue(d.queue || []);
     setReviewTotal(d.total_items || 0);
+    setPendingProducts(d.pending_products || []);
     setReviewLoading(false);
+  };
+
+  const approvePending = async (productId) => {
+    try {
+      await withLoading("Approving…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/product-review-queue/approve-pending`, { method: "POST", headers, body: JSON.stringify({ product_id: productId }) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) throw new Error(d.error || "Failed to approve");
+        toast.success("Product approved");
+        loadReviewQueue(); loadProducts(1);
+      });
+    } catch (e) { toast.error("Failed to approve: " + e.message); }
+  };
+
+  const rejectPending = async (productId) => {
+    try {
+      await withLoading("Rejecting…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/product-review-queue/reject-pending`, { method: "POST", headers, body: JSON.stringify({ product_id: productId }) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) throw new Error(d.error || "Failed to reject");
+        toast.success("Product rejected");
+        loadReviewQueue();
+      });
+    } catch (e) { toast.error("Failed to reject: " + e.message); }
   };
 
   const linkToProduct = async (itemIds, productId) => {
@@ -331,6 +359,11 @@ function ProductsPage() {
   };
 
   const toggleActive = async (p) => {
+    // Guard against silently un-rejecting a product that was rejected in the
+    // reusable-items review — reactivating makes it pickable in orders again.
+    if (!p.is_active && p.review_status === "rejected") {
+      if (!window.confirm(`"${p.name}" was rejected from the reusable-items review. Re-activating makes it pickable in orders again. Continue?`)) return;
+    }
     try {
       await withLoading("Updating product…", async () => {
         const headers = await authHeaders();
@@ -612,7 +645,7 @@ function ProductsPage() {
         <div className="flex gap-2">
           <button onClick={() => { setShowReview(!showReview); if (!showReview) loadReviewQueue(); }}
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${showReview ? "bg-amber-600 text-white" : "bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100"}`}>
-            📋 Review Queue {reviewTotal > 0 ? `(${reviewTotal})` : ""}
+            📋 Review Queue {(reviewTotal + pendingProducts.length) > 0 ? `(${reviewTotal + pendingProducts.length})` : ""}
           </button>
           <button onClick={openImport} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
             📄 Import Catalogue
@@ -634,7 +667,49 @@ function ProductsPage() {
             <button onClick={() => setShowReview(false)} className="text-xs text-amber-600 hover:underline">Close</button>
           </div>
           {reviewLoading && <div className="py-4 text-center text-amber-600 text-xs">Loading...</div>}
-          {!reviewLoading && reviewQueue.length === 0 && <p className="text-center text-amber-600 text-xs py-4">All products reviewed!</p>}
+
+          {/* Pending reusable items — created inline from custom order items, awaiting curation */}
+          {!reviewLoading && pendingProducts.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+              <div className="px-3 pt-3">
+                <h4 className="text-sm font-bold text-amber-800">Pending Reusable Items</h4>
+                <p className="text-xs text-gray-500 mb-2">Custom items saved from orders, awaiting curation before they appear in the product picker.</p>
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 text-left text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Size</th>
+                    <th className="px-3 py-2">Color</th>
+                    <th className="px-3 py-2 text-right">Price</th>
+                    <th className="px-3 py-2">Created By</th>
+                    <th className="px-3 py-2">Created</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingProducts.map(pp => (
+                    <tr key={pp.id} className="border-b border-gray-50 last:border-0">
+                      <td className="px-3 py-2 font-mono text-violet-700">{pp.code || "—"}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">{pp.name}</td>
+                      <td className="px-3 py-2 text-gray-500">{pp.size || "—"}</td>
+                      <td className="px-3 py-2 text-gray-500">{pp.color || "—"}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{pp.unit_price != null ? Number(pp.unit_price).toFixed(2) : "—"}</td>
+                      <td className="px-3 py-2 text-gray-500">{pp.created_by_name || "—"}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{pp.created_at ? new Date(pp.created_at).toLocaleDateString() : "—"}</td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => approvePending(pp.id)} className="text-xs px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mr-1">Approve</button>
+                        <button onClick={() => rejectPending(pp.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Reject</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!reviewLoading && reviewQueue.length === 0 && pendingProducts.length === 0 && <p className="text-center text-amber-600 text-xs py-4">All products reviewed!</p>}
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {reviewQueue.map((g, gi) => {
               const key = `${g.product_code}|${g.product_name}`;
@@ -783,6 +858,8 @@ function ProductsPage() {
                   <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${p.is_active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
                     {p.is_active ? "Active" : "Inactive"}
                   </span>
+                  {p.review_status === "rejected" && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Rejected</span>}
+                  {p.review_status === "pending" && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pending review</span>}
                   {p.is_customizable && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Custom</span>}
                 </td>
                 <td className="px-4 py-3 hidden lg:table-cell" onClick={e => e.stopPropagation()}>

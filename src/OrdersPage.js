@@ -459,7 +459,7 @@ function OrdersPage() {
   // Product picker
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customItemMode, setCustomItemMode] = useState(false);
-  const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1 });
+  const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
   const [signOrder, setSignOrder] = useState(null);
 
   // Submit PO
@@ -808,12 +808,13 @@ function OrdersPage() {
         unit_price: customItem.unit_price || "",
         unit_cost: "", attachment_url: "", notes: "",
         requires_product_review: true,
+        save_as_reusable: customItem.save_as_reusable === true,
       }],
     }));
     setPickerOpen(false);
     setProductSearch("");
     setCustomItemMode(false);
-    setCustomItem({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1 });
+    setCustomItem({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
   };
 
   const updateItem = (idx, field, value) =>
@@ -1932,6 +1933,17 @@ function OrdersPage() {
                         placeholder="Optional" className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
                     </div>
                   </div>
+                  <label className="flex items-start gap-2 px-0.5 cursor-pointer">
+                    <input type="checkbox" checked={customItem.save_as_reusable === true}
+                      onChange={e => setCustomItem(c => ({ ...c, save_as_reusable: e.target.checked }))}
+                      className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 text-amber-600 focus:ring-amber-400" />
+                    <span className="text-xs text-gray-600">
+                      Save as reusable item
+                      <span className="block text-[11px] text-gray-400 font-normal">
+                        Adds this item to the catalogue so it can be reused on future orders (pending admin review).
+                      </span>
+                    </span>
+                  </label>
                   <button onClick={addCustomLineItem} disabled={!customItem.product_name.trim()}
                     className="w-full py-2 text-sm font-medium bg-amber-500 text-white rounded-xl hover:bg-amber-600 disabled:opacity-40">
                     Add Custom Item
