@@ -425,6 +425,7 @@ function OrdersPage() {
   const [specOptionsMap, setSpecOptionsMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
+  const [sortKey, setSortKey] = useState("created_at:desc"); // "column:order" passed to /sales-orders
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -479,6 +480,8 @@ function OrdersPage() {
     const params = new URLSearchParams({ page: p, limit: perPage });
     if (filterStatus) params.set("status", filterStatus);
     if (debouncedSearch) params.set("search", debouncedSearch);
+    const [sBy, sOrd] = sortKey.split(":");
+    params.set("sort_by", sBy); params.set("sort_order", sOrd || "desc");
     const res = await fetch(`${API}/sales-orders?${params}`, { headers });
     const d = await res.json();
     setOrders(d.data || []);
@@ -487,7 +490,7 @@ function OrdersPage() {
     setPage(d.page || 1);
     setLoading(false);
     setRefreshing(false);
-  }, [companyId, filterStatus, debouncedSearch, perPage]); // eslint-disable-line
+  }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters change
   useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, debouncedSearch, perPage]); // eslint-disable-line
@@ -496,8 +499,16 @@ function OrdersPage() {
     if (!companyId) return;
     authHeaders().then(h => fetch(`${API}/branches?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => setBranches(d.branches || []));
     authHeaders().then(h => fetch(`${API}/salesman-names?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
-      const names = (d.salesmen || []).map(s => s.salesman_name).filter(Boolean);
-      setSalesmen([...new Set(names)].sort());
+      const seen = new Set();
+      const list = [];
+      (d.salesmen || []).forEach(s => {
+        const name = (s.salesman_name || "").trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        list.push({ name, branch: s.branch_name || "" });
+      });
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      setSalesmen(list);
     });
     authHeaders().then(h => fetch(`${API}/spec-options?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       const map = {};
@@ -677,12 +688,47 @@ function OrdersPage() {
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
+  // ── New-order draft autosave ──────────────────────────────────────
+  // A salesman who taps outside the drawer (or navigates away) shouldn't
+  // come back to an empty form. We persist the in-progress NEW order to
+  // localStorage on every change, keyed per company + user, and restore it
+  // when they reopen. Cleared on successful save or explicit discard.
+  // Edits of existing orders are never drafted.
+  const draftKey = companyId ? `pulse_order_draft_${companyId}_${user?.id || user?.email || "anon"}` : null;
+  const draftHasContent = (f) => !!(f && (
+    f.customer_name?.trim() || f.customer_contact?.trim() || f.customer_address?.trim() ||
+    f.notes?.trim() || f.remark?.trim() || (f.items && f.items.length)
+  ));
+
+  useEffect(() => {
+    if (!drawerOpen || editId || !draftKey) return;
+    try {
+      if (draftHasContent(form)) {
+        localStorage.setItem(draftKey, JSON.stringify({ form, deliverElsewhere, savedAt: Date.now() }));
+      }
+    } catch {}
+  }, [form, deliverElsewhere, drawerOpen, editId, draftKey]); // eslint-disable-line
+
+  const freshForm = () => ({ ...EMPTY_ORDER, order_date: todayMY(), salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
+
+  const clearDraft = () => { if (draftKey) { try { localStorage.removeItem(draftKey); } catch {} } };
+
   const openNew = () => {
     setEditId(null);
     setEditingOrder(null);
     setArrivalItems(null);
-    setForm({ ...EMPTY_ORDER, order_date: todayMY(), salesman_names: user?.salesman_name || "", branch_id: user?.branch_id || "" });
-    setDeliverElsewhere(false);
+    let restored = null;
+    if (draftKey) {
+      try { const raw = localStorage.getItem(draftKey); if (raw) restored = JSON.parse(raw); } catch {}
+    }
+    if (restored?.form && draftHasContent(restored.form)) {
+      setForm(restored.form);
+      setDeliverElsewhere(!!restored.deliverElsewhere);
+      toast.success("Draft restored");
+    } else {
+      setForm(freshForm());
+      setDeliverElsewhere(false);
+    }
     setFormError("");
     setDrawerOpen(true);
   };
@@ -910,6 +956,7 @@ function OrdersPage() {
       alert("Order amended. Status changed to 'Amended' — manager approval required to re-confirm.");
     }
     setDrawerOpen(false);
+    if (!editId) clearDraft(); // new order saved — drop the autosaved draft
     // Local update instead of full refetch for edits
     if (editId && d.order) {
       setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length } : o));
@@ -1046,6 +1093,14 @@ function OrdersPage() {
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="">All Status</option>
           {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+        </select>
+        <select value={sortKey} onChange={e => setSortKey(e.target.value)}
+          className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+          <option value="created_at:desc">Newest first</option>
+          <option value="delivery_date:asc">Delivery Date ↑</option>
+          <option value="delivery_date:desc">Delivery Date ↓</option>
+          <option value="order_date:asc">Close Deal Date ↑</option>
+          <option value="order_date:desc">Close Deal Date ↓</option>
         </select>
       </div>
 
@@ -1403,6 +1458,14 @@ function OrdersPage() {
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   </>
                 )}
+                {!editId && draftHasContent(form) && (
+                  <button type="button" onClick={() => {
+                    if (!window.confirm("Discard this draft? Your key-in will be cleared.")) return;
+                    clearDraft();
+                    setForm(freshForm());
+                    setDeliverElsewhere(false);
+                  }} className="text-xs px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600">Discard draft</button>
+                )}
                 <button onClick={() => !saving && setDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
             </div>
@@ -1442,7 +1505,16 @@ function OrdersPage() {
                     }
                   }} className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-xs bg-white focus:outline-none focus:border-violet-400">
                     <option value="">+ Add salesman</option>
-                    {salesmen.map(s => <option key={s} value={s}>{s}</option>)}
+                    {(() => {
+                      const groups = {};
+                      salesmen.forEach(s => { const k = s.branch || "Other"; (groups[k] = groups[k] || []).push(s.name); });
+                      const keys = Object.keys(groups).sort((a, b) => (a === "Other") - (b === "Other") || a.localeCompare(b));
+                      return keys.map(k => (
+                        <optgroup key={k} label={k}>
+                          {groups[k].map(n => <option key={n} value={n}>{n}</option>)}
+                        </optgroup>
+                      ));
+                    })()}
                   </select>
                 </div>
               </div>
