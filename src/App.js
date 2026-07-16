@@ -42,6 +42,22 @@ const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
 const now = new Date();
 const todayStr = now.toISOString().split("T")[0];
 
+// Relative-time label for the Recent Delivery Updates panel ("2h ago"),
+// falling back to a short date once it's more than a week old.
+const timeAgo = (iso) => {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "-";
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString("en-MY", { day: "numeric", month: "short" });
+};
+
 // toDb removed — dashboard writes now go through backend API
 const fromDb = o => ({
   id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
@@ -53,6 +69,28 @@ const fromDb = o => ({
   photoUrl: o.photo_url || null,
   linkedSo: o.linked_so || null,
 });
+
+// ── Recent Delivery Updates (delivery activity feed) ────────────────
+// source ∈ bot | web | driver | do — badge color + friendly label per source.
+const ACTIVITY_SOURCE = {
+  bot: { label: "🤖 Bot", color: "blue" },
+  web: { label: "🌐 Web", color: "violet" },
+  driver: { label: "🚚 Driver", color: "emerald" },
+  do: { label: "📦 DO", color: "indigo" },
+};
+// action is either a legacy order-level action (arranged/rescheduled/
+// set_tbc/cancelled) or a Delivery Order event type — one map covers both
+// since the backend feed merges the two sources into a single timeline.
+const ACTIVITY_ACTION_LABELS = {
+  arranged: "Arranged", rescheduled: "Rescheduled", set_tbc: "Set to TBC", cancelled: "Cancelled",
+  created: "DO created", scheduled: "Scheduled", delivered: "Delivered", out_for_delivery: "Out for delivery",
+  arrived: "Arrived", unscheduled: "Unscheduled", blocked_date_override: "Blocked-date override", failed: "Delivery failed",
+};
+const activityDateChange = (a) => {
+  if (a.action === "set_tbc") return "TBC";
+  if (a.from_date && a.to_date) return `${fmt(a.from_date)} → ${fmt(a.to_date)}`;
+  return fmt(a.to_date || a.from_date || null);
+};
 
 // Fix #5: a legacy order's own delivery_date only ever reflects the
 // whole-order date. Once it ships as split Delivery Orders each DO can carry
@@ -158,7 +196,7 @@ const NAV = [
 // state values, and every one of them used to re-render this (heaviest)
 // JSX tree. As a memo child with stable props it only re-renders when the
 // dashboard data itself changes.
-const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates }) {
+const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity }) {
   return (
       <div className="space-y-6">
         <div>
@@ -404,6 +442,11 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
           );
         })()}
 
+        {/* Recent Delivery Updates — admin-gated (manage roles only, hidden
+            for salesmen). Backend enforces DELIVERY_ORDER_VIEW server-side;
+            this gate just keeps it off a salesman's dashboard. */}
+        {canViewDeliveryActivity && <DeliveryActivityPanel />}
+
         {/* Outstanding balances */}
         {balanceOrders.length > 0 && (
           <div>
@@ -454,6 +497,95 @@ function StatCard({ label, value, sub, accent = false, onClick }) {
 function Badge({ children, color = "gray" }) {
   const c = { gray:"bg-gray-100 text-gray-600", violet:"bg-violet-100 text-violet-700", amber:"bg-amber-100 text-amber-700", emerald:"bg-emerald-100 text-emerald-700", red:"bg-red-100 text-red-700", blue:"bg-blue-100 text-blue-700", indigo:"bg-indigo-100 text-indigo-700" }[color] || "bg-gray-100 text-gray-600";
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${c}`}>{children}</span>;
+}
+
+// ── Recent Delivery Updates panel (admin-gated, Overview page) ────────
+// Self-contained: manages its own fetch/loading/error/filter state so
+// OverviewPage's already-heavy prop surface doesn't grow. Reuses the
+// module-level authFetch/BACKEND (same fetch/auth as the rest of App.js)
+// and the shared Badge component — no new visual system.
+function DeliveryActivityPanel() {
+  const toast = useToast();
+  const [activity, setActivity] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showFilter, setShowFilter] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+      const res = await authFetch(`${BACKEND}/delivery-activity?${params.toString()}`);
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const d = await res.json();
+      setActivity(Array.isArray(d?.activity) ? d.activity : []);
+    } catch (e) {
+      setError(e.message || "Failed to load delivery activity");
+    }
+    setLoading(false);
+  }, [fromDate, toDate]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const clearFilter = () => { setFromDate(""); setToDate(""); };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+        <h2 className="font-bold text-gray-800">Recent Delivery Updates</h2>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setShowFilter(p => !p)} className="text-xs text-violet-600 hover:underline">{showFilter ? "Hide date filter" : "Filter by date"}</button>
+          <button onClick={load} disabled={loading} className="text-xs bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 font-medium text-gray-600">{loading ? "Refreshing…" : "↻ Refresh"}</button>
+        </div>
+      </div>
+      {showFilter && (
+        <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-wrap">
+          <label className="text-xs text-gray-500">From</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300" />
+          <label className="text-xs text-gray-500">To</label>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300" />
+          {(fromDate || toDate) && <button onClick={clearFilter} className="text-xs text-gray-400 hover:text-gray-600">Clear</button>}
+        </div>
+      )}
+      {loading ? (
+        <div className="p-4 space-y-2">{[1,2,3,4].map(i => <div key={i} className="h-10 bg-gray-100 rounded-xl animate-pulse" />)}</div>
+      ) : error ? (
+        <div className="text-center py-10 text-gray-400">
+          <p className="text-sm text-red-500 mb-2">{error}</p>
+          <button onClick={() => { load(); toast.error(error); }} className="text-xs bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700">Retry</button>
+        </div>
+      ) : activity.length === 0 ? (
+        <div className="text-center py-10 text-gray-400">
+          <div className="text-3xl mb-2">🕘</div>
+          <p className="text-sm font-medium">No recent delivery updates</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto">
+          {activity.map(a => {
+            const src = ACTIVITY_SOURCE[a.source] || ACTIVITY_SOURCE.web;
+            return (
+              <div key={a.id} className="px-4 py-2.5 flex items-center gap-3 flex-wrap hover:bg-gray-50 transition-colors">
+                <Badge color={src.color}>{src.label}</Badge>
+                <span className="text-xs font-semibold text-gray-700 w-36 flex-shrink-0">{ACTIVITY_ACTION_LABELS[a.action] || a.action || "-"}</span>
+                <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold text-violet-700 text-xs">{a.so_number || "-"}</span>
+                  {a.customer_name && <span className="text-xs text-gray-500 truncate">{a.customer_name}</span>}
+                  {a.trip_no && <span className="text-xs text-gray-400">Trip {a.trip_no}</span>}
+                </div>
+                <span className="text-xs text-gray-600 whitespace-nowrap">{activityDateChange(a)}</span>
+                <span className="text-xs text-gray-400 w-24 flex-shrink-0 truncate" title={a.actor_name || ""}>{a.actor_name || "—"}</span>
+                <span className="text-xs text-gray-300 whitespace-nowrap flex-shrink-0" title={a.created_at ? new Date(a.created_at).toLocaleString("en-MY") : ""}>{timeAgo(a.created_at)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Order Card (mobile-first) ─────────────────────────────────────
@@ -1044,6 +1176,11 @@ export default function App() {
   const calendarAllCompanyOrders = useMemo(() => mergeWithDoOrders(allCompanyOrders, doOrders), [allCompanyOrders, doOrders]);
   const todayOrders = useMemo(() => calendarOrders.filter(o => o.deliveryDate === todayStr), [calendarOrders]);
 
+  // Recent Delivery Updates panel: manage roles only (mirrors the existing
+  // "deliveries" nav gate — the closest frontend proxy for the backend's
+  // DELIVERY_ORDER_VIEW permission), hidden for salesmen.
+  const canViewDeliveryActivity = !isSalesman && (can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole));
+
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = useCallback(o => setViewOrder(o), []);
   const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
@@ -1234,7 +1371,7 @@ export default function App() {
 
   const renderPage = () => {
     // OVERVIEW
-    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} />;
+    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
     if (page === "orders") return <OrdersPage />;
