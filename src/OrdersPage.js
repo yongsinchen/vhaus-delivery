@@ -409,6 +409,36 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   }, 400);
 }
 
+// Fix #9: arrival-date entry via a bare native <input type="date"> forced
+// warehouse staff to click month-by-month for common backdated entries.
+// Quick-pick buttons cover the common cases; direct typing into the native
+// input still works unchanged.
+function ArrivalDateInput({ value, disabled, onChange, className }) {
+  const isoOffset = (days) => {
+    const d = new Date(`${todayMY()}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split("T")[0];
+  };
+  const presets = [
+    { label: "Today", days: 0 },
+    { label: "-1d", days: -1 },
+    { label: "-1wk", days: -7 },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      <input type="date" value={value || ""} disabled={disabled} onChange={e => onChange(e.target.value)} className={className} />
+      <div className="flex gap-0.5">
+        {presets.map(p => (
+          <button key={p.label} type="button" disabled={disabled} onClick={() => onChange(isoOffset(p.days))}
+            className="text-[10px] px-1 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 disabled:opacity-40 whitespace-nowrap">
+            {p.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function OrdersPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
@@ -462,6 +492,12 @@ function OrdersPage() {
   const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
   const [signOrder, setSignOrder] = useState(null);
 
+  // Bundle picker (Phase C) — "add bundle" path parallel to normal + custom items.
+  // Filtering reuses the picker's existing productSearch input (see render).
+  const [bundleMode, setBundleMode] = useState(false);
+  const [bundles, setBundles] = useState([]);
+  const [bundleQty, setBundleQty] = useState({}); // bundle_id -> qty string, for the inline stepper
+
   // Submit PO
   const [poModal, setPOModal] = useState(null); // { order, groups: { supplierId: { name, items } } }
   const [poSubmitting, setPOSubmitting] = useState(false);
@@ -498,6 +534,7 @@ function OrdersPage() {
   useEffect(() => {
     if (!companyId) return;
     authHeaders().then(h => fetch(`${API}/branches?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => setBranches(d.branches || []));
+    authHeaders().then(h => fetch(`${API}/product-bundles?active_only=true`, { headers: h })).then(r => r.json()).then(d => setBundles(d.bundles || [])).catch(() => {});
     authHeaders().then(h => fetch(`${API}/salesman-names?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
       const seen = new Set();
       const list = [];
@@ -594,7 +631,10 @@ function OrdersPage() {
       const res = await fetch(`${API}/sales-orders/${orderId}/delivery-orders`, { headers });
       if (!res.ok) { setDoData(null); return; }
       const d = await res.json();
-      setDoData({ delivery_orders: d.delivery_orders || [], items: d.items || [] });
+      // Fix #2: can_override_arrival gates the override checkbox in the
+      // Create Delivery Order modal — most managers/admins will see it
+      // enabled server-side, but salesmen etc. won't.
+      setDoData({ delivery_orders: d.delivery_orders || [], items: d.items || [], can_override_arrival: !!d.can_override_arrival });
     } catch { setDoData(null); }
   };
 
@@ -633,11 +673,17 @@ function OrdersPage() {
     setDoSaving(true);
     try {
       const headers = await authHeaders();
-      const res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-orders`, {
-        method: "POST", headers,
-        body: JSON.stringify({ items, delivery_date: doDate || null, remark: doRemark || null, override_arrival: doOverride }),
-      });
-      const d = await res.json();
+      const payload = { items, delivery_date: doDate || null, remark: doRemark || null, override_arrival: doOverride };
+      let res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-orders`, { method: "POST", headers, body: JSON.stringify(payload) });
+      let d = await res.json();
+      // Fix #7: soft-blocked date — retry once with a dispatcher-entered
+      // override reason instead of just failing.
+      if (!res.ok && d.blocked_date) {
+        const reason = window.prompt(`${d.error}\n\nEnter a reason to schedule anyway, or leave blank to cancel:`, "");
+        if (!reason || !reason.trim()) { setDoSaving(false); return; }
+        res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-orders`, { method: "POST", headers, body: JSON.stringify({ ...payload, override_reason: reason.trim() }) });
+        d = await res.json();
+      }
       if (!res.ok) { toast.error(d.error || "Failed to create Delivery Order"); setDoSaving(false); return; }
       toast.success(`${d.delivery_order.do_number} created`);
       setDoModalOpen(false);
@@ -769,6 +815,20 @@ function OrdersPage() {
         quantity: it.quantity ?? 1,
         unit_price: it.unit_price ?? "", unit_cost: it.unit_cost ?? "",
         attachment_url: it.attachment_url || "", notes: it.notes || "",
+        is_clearance: it.is_clearance || false,
+        // Bundle linkage for a line that came from exploding a bundle —
+        // stored under `_`-prefixed keys here (not the real `bundle_id` /
+        // `bundle_instance_id` / `bundle_component_price` names) purely so
+        // this mapping step can't be confused with the "fresh bundle
+        // placeholder" shape used by addBundleLineItem. The submit payload
+        // builder below re-attaches these under their real names (alongside
+        // the still-present `product_id`) so the backend recognises them as
+        // an already-exploded line to PRESERVE, not re-explode — see
+        // expandBundleItems in vhaus-bot: it only explodes items that carry
+        // `bundle_id` and NO `product_id`.
+        _bundle_id: it.bundle_id || null,
+        _bundle_instance_id: it.bundle_instance_id || null,
+        _bundle_component_price: it.bundle_component_price ?? null,
       })),
     });
     setDeliverElsewhere(!!f.delivery_address);
@@ -815,6 +875,34 @@ function OrdersPage() {
     setProductSearch("");
     setCustomItemMode(false);
     setCustomItem({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
+  };
+
+  // Add a bundle as a single order line: { bundle_id, quantity } — the
+  // backend explodes it into its component sales_order_items rows (see
+  // expandBundleItems in vhaus-bot/server.js). unit_price is set here only
+  // so the running subtotal shown in this drawer looks right before save;
+  // the backend ignores it and prices components from the bundle's own
+  // package_price/incentive at write time.
+  const addBundleLineItem = (bundle, qty) => {
+    const quantity = Number(qty) || 1;
+    if (quantity <= 0) return;
+    setForm(f => ({
+      ...f,
+      items: [...f.items, {
+        bundle_id: bundle.id, product_id: null,
+        product_code: bundle.code, product_name: bundle.name,
+        size: "", color: "", is_custom: false,
+        custom_specs: [], custom_dimensions: "",
+        quantity, unit_price: bundle.package_price ?? "", unit_cost: "",
+        attachment_url: "", notes: "",
+        is_bundle: true, is_clearance: !!bundle.is_clearance,
+        _bundle_component_count: (bundle.product_bundle_items || []).length,
+      }],
+    }));
+    setPickerOpen(false);
+    setProductSearch("");
+    setCustomItemMode(false);
+    setBundleMode(false);
   };
 
   const updateItem = (idx, field, value) =>
@@ -944,6 +1032,21 @@ function OrdersPage() {
           quantity: Number(it.quantity) || 1,
           unit_price: it.unit_price === "" ? null : Number(it.unit_price),
           unit_cost: it.unit_cost === "" ? null : Number(it.unit_cost),
+          // Re-attach bundle linkage under its real field names so the
+          // backend keeps it:
+          //  - a fresh "Add bundle" placeholder already carries a real
+          //    `bundle_id` (+ quantity, no product_id) from addBundleLineItem
+          //    — `it.bundle_id` wins below and it still explodes as before.
+          //  - an already-exploded line (has product_id) only carries the
+          //    `_`-prefixed markers from openEdit — falls back to those, so
+          //    bundle_id/instance_id/component_price round-trip unchanged
+          //    instead of being dropped (which would silently delink it).
+          bundle_id: it.bundle_id ?? it._bundle_id ?? null,
+          bundle_instance_id: it.bundle_instance_id ?? it._bundle_instance_id ?? null,
+          bundle_component_price: it.bundle_component_price ?? it._bundle_component_price ?? null,
+          _bundle_id: undefined,
+          _bundle_instance_id: undefined,
+          _bundle_component_price: undefined,
         };
       }),
     };
@@ -1234,6 +1337,8 @@ function OrdersPage() {
                               {it.product_code && <span className="text-xs font-mono text-violet-600">{it.product_code}</span>}
                               <span className="text-sm font-medium text-gray-900 truncate">{it.product_name || "-"}</span>
                               {it.linked_custom_item && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium shrink-0">Linked</span>}
+                              {it.bundle_id && <span title="Part of a bundle sold on this order" className="text-xs px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium shrink-0">📦 {bundles.find(b => b.id === it.bundle_id)?.name || "Bundle"}</span>}
+                              {it.is_clearance && <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium shrink-0">Clearance</span>}
                             </div>
                             <p className="text-xs text-gray-400">{[it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ")}</p>
                             {it.linked_custom_item && it.products && (
@@ -1304,15 +1409,16 @@ function OrdersPage() {
                               <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                               <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                             </div>
-                            <input type="date" value={it.arrivalDate || ""} disabled={arrivalSavingIdx !== null} onChange={async e => {
-                              const val = e.target.value;
-                              setArrivalSavingIdx(i);
-                              try {
-                                const token = await getToken();
-                                await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                                setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
-                              } finally { setArrivalSavingIdx(null); }
-                            }} className={`text-xs border rounded px-1.5 py-1 w-[115px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                            <ArrivalDateInput value={it.arrivalDate} disabled={arrivalSavingIdx !== null}
+                              className={`text-xs border rounded px-1.5 py-1 w-[105px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`}
+                              onChange={async val => {
+                                setArrivalSavingIdx(i);
+                                try {
+                                  const token = await getToken();
+                                  await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                                  setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                                } finally { setArrivalSavingIdx(null); }
+                              }} />
                           </div>
                         ))}
                       </div>
@@ -1399,9 +1505,11 @@ function OrdersPage() {
                 );
               })}
               {doData.items.some(i => i.remaining_qty > 0 && !i.arrived) && (
-                <label className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 rounded-xl p-2.5 cursor-pointer">
-                  <input type="checkbox" checked={doOverride} onChange={e => setDoOverride(e.target.checked)} />
-                  Override arrival check — schedule items that have not arrived yet (requires permission)
+                <label className={`flex items-center gap-2 text-xs rounded-xl p-2.5 ${doData.can_override_arrival ? "text-amber-700 bg-amber-50 cursor-pointer" : "text-gray-400 bg-gray-50 cursor-not-allowed"}`}>
+                  <input type="checkbox" checked={doOverride} disabled={!doData.can_override_arrival} onChange={e => setDoOverride(e.target.checked)} />
+                  {doData.can_override_arrival
+                    ? "Override arrival check — schedule items that have not arrived yet"
+                    : "Overriding arrival requires Manager approval."}
                 </label>
               )}
               <div className="grid grid-cols-2 gap-2">
@@ -1654,7 +1762,7 @@ function OrdersPage() {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm font-medium text-gray-700">Items</label>
-                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); searchProducts(""); }}
+                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
                     className="text-xs px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Product</button>
                 </div>
 
@@ -1675,12 +1783,15 @@ function OrdersPage() {
                         </div>
                         {it.is_custom && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 shrink-0">Custom</span>}
                         {it.linked_custom_item && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 shrink-0">Linked</span>}
+                        {it.is_bundle && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 shrink-0">📦 Bundle ({it._bundle_component_count || "?"} items)</span>}
+                        {!it.is_bundle && it._bundle_id && <span title="This line was part of a bundle sold on this order" className="px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 shrink-0">📦 {bundles.find(b => b.id === it._bundle_id)?.name || "From bundle"}</span>}
+                        {it.is_clearance && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 shrink-0">Clearance</span>}
                         <button onClick={() => removeItem(i)} className="text-gray-300 hover:text-red-500 text-sm shrink-0">✕</button>
                       </div>
 
                       <div className="grid grid-cols-3 gap-2">
                         <NumField label="Qty" value={it.quantity} onChange={v => updateItem(i, "quantity", v)} />
-                        <NumField label="Unit Price" value={it.unit_price} onChange={v => updateItem(i, "unit_price", v)} />
+                        <NumField label={it.is_bundle ? "Package Price" : "Unit Price"} value={it.unit_price} onChange={v => updateItem(i, "unit_price", v)} disabled={it.is_bundle} />
                         <div className="flex flex-col justify-end">
                           <span className="text-xs text-gray-400 mb-1">Line Total</span>
                           <span className="text-sm font-medium text-gray-900 py-1.5">
@@ -1688,6 +1799,7 @@ function OrdersPage() {
                           </span>
                         </div>
                       </div>
+                      {it.is_bundle && <p className="text-xs text-gray-400 -mt-1">Package price is fixed per bundle definition; component pricing is computed automatically when the order is saved.</p>}
 
                       {/* Customizable extras — shown for custom items AND items
                           that carry specs (e.g. custom items later linked to a
@@ -1831,15 +1943,16 @@ function OrdersPage() {
                         <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                         <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                       </div>
-                      <input type="date" value={it.arrivalDate || ""} disabled={arrivalSavingIdx !== null} onChange={async e => {
-                        const val = e.target.value;
-                        setArrivalSavingIdx(i);
-                        try {
-                          const token = await getToken();
-                          await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                          setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
-                        } finally { setArrivalSavingIdx(null); }
-                      }} className={`text-xs border rounded px-1.5 py-0.5 w-[110px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`} />
+                      <ArrivalDateInput value={it.arrivalDate} disabled={arrivalSavingIdx !== null}
+                        className={`text-xs border rounded px-1.5 py-0.5 w-[100px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`}
+                        onChange={async val => {
+                          setArrivalSavingIdx(i);
+                          try {
+                            const token = await getToken();
+                            await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
+                            setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                          } finally { setArrivalSavingIdx(null); }
+                        }} />
                     </div>
                   ))}
                 </div>
@@ -1860,13 +1973,50 @@ function OrdersPage() {
           <div className="absolute inset-0 bg-black/50" onClick={() => setPickerOpen(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-              <input autoFocus value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="Search products…"
+              <input autoFocus value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder={bundleMode ? "Search bundles…" : "Search products…"}
                 className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+              {!customItemMode && (
+                <button onClick={() => setBundleMode(m => !m)}
+                  title="Add a bundle (multiple products at a fixed package price)"
+                  className={`text-xs px-3 py-2 rounded-xl font-medium whitespace-nowrap transition-colors ${bundleMode ? "bg-violet-600 text-white" : "bg-violet-50 text-violet-700 hover:bg-violet-100"}`}>
+                  📦 {bundleMode ? "Bundles" : "Bundle"}
+                </button>
+              )}
               <button onClick={() => setPickerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl px-1">✕</button>
             </div>
             <div className="overflow-y-auto p-2">
-              {productLoading && <p className="text-center text-gray-400 py-6 text-sm">Searching…</p>}
-              {!productLoading && !customItemMode && products.length === 0 && (
+              {bundleMode && (() => {
+                const q = productSearch.trim().toLowerCase();
+                const filtered = bundles.filter(b => !q || b.code?.toLowerCase().includes(q) || b.name?.toLowerCase().includes(q));
+                return (
+                  <div className="space-y-1.5">
+                    {filtered.length === 0 && <p className="text-center text-gray-400 text-sm py-6">No bundles found</p>}
+                    {filtered.map(b => (
+                      <div key={b.id} className="border border-gray-100 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            <span className="font-mono text-violet-700">{b.code}</span> {b.name}
+                            {b.is_clearance && <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700 align-middle">Clearance</span>}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {(b.product_bundle_items || []).length} item{(b.product_bundle_items || []).length !== 1 ? "s" : ""}: {(b.product_bundle_items || []).map(bi => bi.products?.name).filter(Boolean).join(", ")}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-sm text-gray-700 font-medium">RM {b.package_price != null ? Number(b.package_price).toFixed(2) : "—"}</span>
+                          <input type="number" min="1" value={bundleQty[b.id] ?? 1}
+                            onChange={e => setBundleQty(q => ({ ...q, [b.id]: e.target.value }))}
+                            className="w-14 px-2 py-1 text-xs text-right border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400" />
+                          <button onClick={() => addBundleLineItem(b, bundleQty[b.id] ?? 1)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Add</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {!bundleMode && productLoading && <p className="text-center text-gray-400 py-6 text-sm">Searching…</p>}
+              {!bundleMode && !productLoading && !customItemMode && products.length === 0 && (
                 <div className="text-center py-6">
                   <p className="text-gray-400 text-sm mb-3">No products found</p>
                   <button onClick={() => { setCustomItemMode(true); setCustomItem(c => ({ ...c, product_name: productSearch })); }}
@@ -1876,7 +2026,7 @@ function OrdersPage() {
                   <p className="text-xs text-gray-400 mt-2">Custom items will be sent for review</p>
                 </div>
               )}
-              {!productLoading && !customItemMode && products.map(p => (
+              {!bundleMode && !productLoading && !customItemMode && products.map(p => (
                 <button key={p.id} onClick={() => addLineItem(p)}
                   className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-violet-50 transition-colors flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -1891,7 +2041,7 @@ function OrdersPage() {
                   </div>
                 </button>
               ))}
-              {!productLoading && !customItemMode && products.length > 0 && (
+              {!bundleMode && !productLoading && !customItemMode && products.length > 0 && (
                 <div className="border-t border-gray-100 mt-2 pt-2">
                   <button onClick={() => { setCustomItemMode(true); setCustomItem(c => ({ ...c, product_name: productSearch })); }}
                     className="w-full text-center text-xs text-gray-400 hover:text-amber-600 py-2">
@@ -1899,7 +2049,7 @@ function OrdersPage() {
                   </button>
                 </div>
               )}
-              {customItemMode && (
+              {!bundleMode && customItemMode && (
                 <div className="p-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-amber-700">Add Custom Item</p>
@@ -2103,12 +2253,12 @@ function Field({ label, value, onChange, placeholder, small, type }) {
   );
 }
 
-function NumField({ label, value, onChange }) {
+function NumField({ label, value, onChange, disabled }) {
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-      <input type="number" value={value} onChange={e => onChange(e.target.value)}
-        className="w-full px-3 py-1.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
+      <input type="number" value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
+        className={`w-full px-3 py-1.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400 ${disabled ? "bg-gray-50 text-gray-400" : ""}`} />
     </div>
   );
 }

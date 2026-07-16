@@ -17,6 +17,21 @@ const STATUS_STYLE = {
 
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Instalment"];
 
+// Fix #6: a blank item name must never render as a bare "-". Fall through
+// whatever descriptive text is available; flag it plainly when there's none.
+const NO_DESC = "(no description)";
+const itemDisplayName = (item) => {
+  const name = (item.itemName || item.product_name || "").trim();
+  if (name) return { text: name, isFallback: false };
+  const dim = (item.custom_dimensions || "").trim();
+  if (dim) return { text: dim, isFallback: false };
+  const note = (item.notes || "").trim();
+  if (note) return { text: note, isFallback: false };
+  const code = (item.itemCode || item.product_code || "").trim();
+  if (code) return { text: code, isFallback: false };
+  return { text: NO_DESC, isFallback: true };
+};
+
 function DriverPage() {
   useAuth();
   const toast = useToast();
@@ -132,8 +147,15 @@ function DriverPage() {
           // the driver never sees the rest of the sales order. Legacy stops
           // (no delivery_orders join) render the full order items as before.
           const dord = sc.delivery_orders || null;
+          // Fix #1/#6: carry supplier_name + whatever fallback fields the
+          // backend provides so a blank product_name still has somewhere to
+          // fall back to instead of losing the size/color context.
           const items = dord
-            ? (dord.delivery_order_items || []).filter(it => it.status !== "cancelled").map(it => ({ itemCode: it.product_code, itemName: [it.product_name, it.size, it.color].filter(Boolean).join(" "), unit: String(Number(it.quantity)) }))
+            ? (dord.delivery_order_items || []).filter(it => it.status !== "cancelled").map(it => ({
+                itemCode: it.product_code, itemName: [it.product_name, it.size, it.color].filter(Boolean).join(" "),
+                unit: String(Number(it.quantity)), supplier: it.supplier_name,
+                custom_dimensions: it.custom_dimensions, notes: it.notes,
+              }))
             : parseItems(o.items);
           const st = STATUS_STYLE[sc.status] || STATUS_STYLE.scheduled;
           const isExpanded = expandedStop === sc.id;
@@ -191,12 +213,15 @@ function DriverPage() {
                   {items.length > 0 && (
                     <div className="bg-gray-50 rounded-xl p-3">
                       <p className="text-xs font-bold text-gray-500 mb-2">ITEMS ({items.length})</p>
-                      {items.map((item, j) => (
-                        <div key={j} className="flex items-center justify-between text-sm py-1 border-b border-gray-100 last:border-0">
-                          <span className="text-gray-800">{item.itemCode ? `[${item.itemCode}] ` : ""}{item.itemName || "-"}</span>
-                          <span className="text-gray-400 text-xs">x{item.unit || 1}</span>
-                        </div>
-                      ))}
+                      {items.map((item, j) => {
+                        const dn = itemDisplayName(item);
+                        return (
+                          <div key={j} className="flex items-center justify-between text-sm py-1 border-b border-gray-100 last:border-0">
+                            <span className={dn.isFallback ? "italic text-red-500 font-medium" : "text-gray-800"}>{item.itemCode ? `[${item.itemCode}] ` : ""}{dn.text}</span>
+                            <span className="text-gray-400 text-xs">x{item.unit || 1}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 

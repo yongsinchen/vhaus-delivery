@@ -30,6 +30,26 @@ function commissionReason(c) {
   return null;
 }
 
+// Compact breakdown chips for the four commission components (Phase C).
+// commission_amt = tier + clearance + product_incentive + package_incentive.
+// Only rendered when at least one non-tier component is non-zero, so plain
+// orders (the common case) don't get extra visual noise.
+function CommissionBreakdown({ c }) {
+  const tier = Number(c.tier_commission_amt) || 0;
+  const clearance = Number(c.clearance_commission_amt) || 0;
+  const product = Number(c.product_incentive_amt) || 0;
+  const pkg = Number(c.package_incentive_amt) || 0;
+  if (clearance === 0 && product === 0 && pkg === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+      <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600">Tier {money(tier)}</span>
+      {clearance !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700">Clearance +{money(clearance)}</span>}
+      {product !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">Product +{money(product)}</span>}
+      {pkg !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700">Package +{money(pkg)}</span>}
+    </div>
+  );
+}
+
 function CommissionPage() {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
@@ -240,16 +260,20 @@ function CommissionPage() {
                 <div className="mb-2">
                   <p className="text-xs font-bold text-emerald-600 mb-1">ELIGIBLE ({eligible.length})</p>
                   {eligible.map(c => (
-                    <div key={c.id} className="flex items-center justify-between text-xs py-1.5 border-t border-gray-50">
-                      <div>
-                        <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
-                        <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
-                        {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
+                    <div key={c.id} className="text-xs py-1.5 border-t border-gray-50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
+                          <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                          {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +RM${Math.round(Number(c.net_amount) * Number(c.incentive_pct) / 100)}` : ""}</span>
+                          <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +RM${Math.round(Number(c.net_amount) * Number(c.incentive_pct) / 100)}` : ""}</span>
-                        <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
-                      </div>
+                      <CommissionBreakdown c={c} />
+                      {c.status === "paid" && c.paid_at && <p className="text-[11px] text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
                     </div>
                   ))}
                 </div>
@@ -271,6 +295,7 @@ function CommissionPage() {
                           <span className="text-gray-400">{money(c.commission_amt)}</span>
                         </div>
                       </div>
+                      <CommissionBreakdown c={c} />
                       <p className="text-amber-600 mt-0.5">{commissionReason(c)}</p>
                     </div>
                   ))}
@@ -328,7 +353,9 @@ function CommissionPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(c.net_amount)}
                 </p>
+                <CommissionBreakdown c={c} />
                 {commissionReason(c) && <p className="text-xs text-amber-600 mt-0.5">{commissionReason(c)}</p>}
+                {c.status === "paid" && c.paid_at && <p className="text-xs text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <p className="text-sm font-bold text-gray-900">{money(c.commission_amt)}</p>

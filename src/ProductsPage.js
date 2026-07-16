@@ -16,14 +16,21 @@ const authHeaders = async () => {
 
 const EMPTY_PRODUCT = {
   code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
-  unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0,
+  unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0, is_clearance: false,
+};
+
+const EMPTY_BUNDLE = {
+  code: "", name: "", description: "", package_price: "",
+  incentive_type: "fixed", incentive_value: "", is_clearance: false,
+  start_date: "", end_date: "", items: [],
 };
 
 function ProductsPage() {
-  const { user, activeCompanyId } = useAuth();
+  const { user, activeCompanyId, canPerm } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
+  const canEditBundles = canPerm ? canPerm("PRODUCTS_EDIT") : true;
 
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);   // company-level rows (for form / import cost-divisor lookup)
@@ -60,6 +67,18 @@ function ProductsPage() {
   const [linkResults, setLinkResults] = useState({});
   const [pendingProducts, setPendingProducts] = useState([]);
   const [pendingCost, setPendingCost] = useState({}); // productId -> cost input for approval
+
+  // Product Bundles (Phase C)
+  const [showBundles, setShowBundles] = useState(false);
+  const [bundles, setBundles] = useState([]);
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [bundleDrawerOpen, setBundleDrawerOpen] = useState(false);
+  const [editBundleId, setEditBundleId] = useState(null);
+  const [bundleForm, setBundleForm] = useState(EMPTY_BUNDLE);
+  const [bundleSaving, setBundleSaving] = useState(false);
+  const [bundleError, setBundleError] = useState("");
+  const [bundleProductSearch, setBundleProductSearch] = useState("");
+  const [bundleProductResults, setBundleProductResults] = useState([]);
 
   // Drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -260,6 +279,131 @@ function ProductsPage() {
     } catch (e) { toast.error("Failed to dismiss: " + e.message); }
   };
 
+  // ── Product Bundles (Phase C) ───────────────────────────────────────
+  const loadBundles = useCallback(async () => {
+    if (!companyId) return;
+    setBundlesLoading(true);
+    try {
+      const headers = await authHeaders();
+      // No active_only filter — admins managing bundles need to see (and
+      // reactivate) inactive ones too, not just what's currently sellable.
+      const res = await fetch(`${API}/product-bundles`, { headers });
+      const d = await res.json();
+      setBundles(d.bundles || []);
+    } catch (e) { console.error("loadBundles:", e); }
+    setBundlesLoading(false);
+  }, [companyId]);
+
+  const openBundleAdd = () => {
+    setEditBundleId(null);
+    setBundleForm(EMPTY_BUNDLE);
+    setBundleError("");
+    setBundleProductSearch("");
+    setBundleProductResults([]);
+    setBundleDrawerOpen(true);
+  };
+
+  const openBundleEdit = (b) => {
+    setEditBundleId(b.id);
+    setBundleForm({
+      code: b.code || "", name: b.name || "", description: b.description || "",
+      package_price: b.package_price ?? "", incentive_type: b.incentive_type || "fixed",
+      incentive_value: b.incentive_value ?? "", is_clearance: !!b.is_clearance,
+      start_date: b.start_date || "", end_date: b.end_date || "",
+      items: (b.product_bundle_items || []).slice().sort((a, c) => (a.sort_order ?? 0) - (c.sort_order ?? 0)).map(bi => ({
+        product_id: bi.products?.id || bi.product_id, code: bi.products?.code || "", name: bi.products?.name || "",
+        unit_price: bi.products?.unit_price ?? null, quantity: bi.quantity ?? 1,
+      })),
+    });
+    setBundleError("");
+    setBundleProductSearch("");
+    setBundleProductResults([]);
+    setBundleDrawerOpen(true);
+  };
+
+  const searchBundleProducts = async (q) => {
+    setBundleProductSearch(q);
+    if (q.trim().length < 2) { setBundleProductResults([]); return; }
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/products?company_id=${companyId}&search=${encodeURIComponent(q.trim())}&limit=10&is_active=true`, { headers });
+    const d = await res.json();
+    setBundleProductResults(d.products || []);
+  };
+
+  const addBundleComponent = (p) => {
+    setBundleForm(f => {
+      if (f.items.some(it => it.product_id === p.id)) return f; // no duplicate components
+      return { ...f, items: [...f.items, { product_id: p.id, code: p.code, name: p.name, unit_price: p.unit_price ?? null, quantity: 1 }] };
+    });
+    setBundleProductSearch("");
+    setBundleProductResults([]);
+  };
+
+  const updateBundleComponentQty = (idx, qty) => {
+    setBundleForm(f => ({ ...f, items: f.items.map((it, i) => i === idx ? { ...it, quantity: qty } : it) }));
+  };
+
+  const removeBundleComponent = (idx) => {
+    setBundleForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
+  };
+
+  const bundleComponentsTotal = bundleForm.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
+
+  const saveBundle = async () => {
+    if (!bundleForm.code.trim() || !bundleForm.name.trim()) { setBundleError("Code and name are required"); return; }
+    if (bundleForm.package_price === "" || isNaN(Number(bundleForm.package_price))) { setBundleError("Package price is required"); return; }
+    if (bundleForm.items.length === 0) { setBundleError("Add at least one component product"); return; }
+    setBundleSaving(true);
+    setBundleError("");
+    const headers = await authHeaders();
+    const body = {
+      code: bundleForm.code.trim(), name: bundleForm.name.trim(), description: bundleForm.description || null,
+      package_price: Number(bundleForm.package_price) || 0,
+      incentive_type: bundleForm.incentive_type || "fixed",
+      incentive_value: bundleForm.incentive_value === "" ? 0 : Number(bundleForm.incentive_value),
+      is_clearance: !!bundleForm.is_clearance,
+      start_date: bundleForm.start_date || null,
+      end_date: bundleForm.end_date || null,
+      items: bundleForm.items.map((it, idx) => ({ product_id: it.product_id, quantity: Number(it.quantity) || 1, sort_order: idx })),
+    };
+    const url = editBundleId ? `${API}/product-bundles/${editBundleId}` : `${API}/product-bundles`;
+    const method = editBundleId ? "PUT" : "POST";
+    try {
+      const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
+      const d = await res.json();
+      setBundleSaving(false);
+      if (!res.ok) { setBundleError(d.error || "Failed to save bundle"); return; }
+      toast.success(editBundleId ? "Bundle updated" : "Bundle created");
+      setBundleDrawerOpen(false);
+      loadBundles();
+    } catch (e) { setBundleSaving(false); setBundleError(e.message); }
+  };
+
+  const reactivateBundle = async (b) => {
+    try {
+      await withLoading("Reactivating bundle…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/product-bundles/${b.id}`, { method: "PUT", headers, body: JSON.stringify({ is_active: true }) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to reactivate"); }
+        toast.success("Bundle reactivated");
+        loadBundles();
+      });
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const deleteBundle = async (b) => {
+    if (!window.confirm(`Delete bundle "${b.name}" (${b.code})? Existing orders keep their history; this only removes it from future order picks.`)) return;
+    try {
+      await withLoading("Deleting bundle…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/product-bundles/${b.id}`, { method: "DELETE", headers });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed to delete"); }
+        toast.success("Bundle deleted");
+        loadBundles();
+      });
+    } catch (e) { toast.error(e.message); }
+  };
+
   const searchForLink = async (groupKey, q) => {
     setLinkSearch(prev => ({ ...prev, [groupKey]: q }));
     if (q.length < 2) { setLinkResults(prev => ({ ...prev, [groupKey]: [] })); return; }
@@ -320,6 +464,7 @@ function ProductsPage() {
       category_id: p.product_categories?.id || p.organization_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
       is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
+      is_clearance: !!p.is_clearance,
     });
     setFormError("");
     setDrawerOpen(true);
@@ -355,6 +500,7 @@ function ProductsPage() {
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
       is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0,
+      is_clearance: !!form.is_clearance,
       // Pass explicit org master link when user picked one in the search-first flow
       ...(selectedOrgProductId && !editId ? { organization_product_id: selectedOrgProductId } : {}),
     };
@@ -657,6 +803,10 @@ function ProductsPage() {
             className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${showReview ? "bg-amber-600 text-white" : "bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100"}`}>
             📋 Review Queue {(reviewTotal + pendingProducts.length) > 0 ? `(${reviewTotal + pendingProducts.length})` : ""}
           </button>
+          <button onClick={() => { setShowBundles(!showBundles); if (!showBundles) loadBundles(); }}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${showBundles ? "bg-violet-600 text-white" : "bg-violet-50 border border-violet-200 text-violet-700 hover:bg-violet-100"}`}>
+            📦 Bundles {bundles.length > 0 ? `(${bundles.length})` : ""}
+          </button>
           <button onClick={openImport} className="px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:border-violet-300 hover:text-violet-700 transition-colors">
             📄 Import Catalogue
           </button>
@@ -772,6 +922,77 @@ function ProductsPage() {
         </div>
       )}
 
+      {/* Product Bundles (Phase C) */}
+      {showBundles && (
+        <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-violet-800">Product Bundles</h3>
+              <p className="text-xs text-violet-600">Package multiple products at a fixed price. Salesmen add bundles as a single line on an order.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {canEditBundles && (
+                <button onClick={openBundleAdd} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-medium">+ Add Bundle</button>
+              )}
+              <button onClick={() => setShowBundles(false)} className="text-xs text-violet-600 hover:underline">Close</button>
+            </div>
+          </div>
+          {bundlesLoading && <div className="py-4 text-center text-violet-600 text-xs">Loading...</div>}
+          {!bundlesLoading && bundles.length === 0 && <p className="text-center text-violet-600 text-xs py-4">No bundles yet.</p>}
+          {!bundlesLoading && bundles.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 text-left text-gray-500 uppercase tracking-wider">
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Components</th>
+                    <th className="px-3 py-2 text-right">Package Price</th>
+                    <th className="px-3 py-2">Incentive</th>
+                    <th className="px-3 py-2 text-center">Status</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bundles.map(b => (
+                    <tr key={b.id} className={`border-b border-gray-50 last:border-0 ${!b.is_active ? "opacity-50" : ""}`}>
+                      <td className="px-3 py-2 font-mono text-violet-700">{b.code}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900">
+                        {b.name}
+                        {b.is_clearance && <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-orange-100 text-orange-700 align-middle">Clearance</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {(b.product_bundle_items || []).length} item{(b.product_bundle_items || []).length !== 1 ? "s" : ""}
+                        <span className="block text-[11px] text-gray-400 truncate max-w-[220px]">
+                          {(b.product_bundle_items || []).map(bi => bi.products?.name).filter(Boolean).join(", ")}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-900 font-medium">{b.package_price != null ? Number(b.package_price).toFixed(2) : "—"}</td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {b.incentive_value ? (b.incentive_type === "percent" ? `${b.incentive_value}%` : `RM ${Number(b.incentive_value).toFixed(2)}`) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${b.is_active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                          {b.is_active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => openBundleEdit(b)} className="text-xs text-gray-400 hover:text-violet-600 transition-colors mr-3">Edit</button>
+                        {canEditBundles && (b.is_active ? (
+                          <button onClick={() => deleteBundle(b)} className="text-xs text-gray-400 hover:text-red-600 transition-colors">Delete</button>
+                        ) : (
+                          <button onClick={() => reactivateBundle(b)} className="text-xs text-gray-400 hover:text-emerald-600 transition-colors">Reactivate</button>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <input
@@ -877,6 +1098,7 @@ function ProductsPage() {
                   {p.review_status === "rejected" && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Rejected</span>}
                   {p.review_status === "pending" && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Pending review</span>}
                   {p.is_customizable && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Custom</span>}
+                  {p.is_clearance && <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">Clearance</span>}
                 </td>
                 <td className="px-4 py-3 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
                   {isShared ? (
@@ -1031,6 +1253,14 @@ function ProductsPage() {
                     {form.is_customizable ? "Yes" : "No"}
                   </button>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Clearance</label>
+                  <button onClick={() => setForm(f => ({ ...f, is_clearance: !f.is_clearance }))}
+                    title="Marks this product as clearance stock — feeds clearance commission rules (if enabled for this company)"
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${form.is_clearance ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-500"}`}>
+                    {form.is_clearance ? "Yes" : "No"}
+                  </button>
+                </div>
               </div>
 
               <button onClick={saveProduct} disabled={saving}
@@ -1038,6 +1268,130 @@ function ProductsPage() {
                 {saving ? "Saving…" : editId ? "Update Product" : "Create Product"}
               </button>
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bundle Drawer (Add/Edit) ───────────────────────────────── */}
+      {bundleDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setBundleDrawerOpen(false)} />
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl animate-slide-in">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+              <h2 className="text-lg font-bold text-gray-900">{editBundleId ? "Edit Bundle" : "Add Bundle"}</h2>
+              <button onClick={() => setBundleDrawerOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              {bundleError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl whitespace-pre-line">{bundleError}</div>}
+              {!canEditBundles && <div className="bg-amber-50 text-amber-700 text-xs px-3 py-2 rounded-xl">You have read-only access to bundles.</div>}
+
+              <Field label="Code *" value={bundleForm.code} onChange={v => setBundleForm(f => ({ ...f, code: v }))} placeholder="e.g. BUNDLE-001" />
+              <Field label="Name *" value={bundleForm.name} onChange={v => setBundleForm(f => ({ ...f, name: v }))} placeholder="e.g. Living Room Starter Set" />
+              <Field label="Description" value={bundleForm.description} onChange={v => setBundleForm(f => ({ ...f, description: v }))} placeholder="Optional" />
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Package Price (RM) *" value={bundleForm.package_price} onChange={v => setBundleForm(f => ({ ...f, package_price: v }))} type="number" placeholder="0.00" />
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Clearance</label>
+                  <button onClick={() => setBundleForm(f => ({ ...f, is_clearance: !f.is_clearance }))}
+                    className={`w-full px-4 py-2 rounded-xl text-sm font-medium transition-colors ${bundleForm.is_clearance ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-500"}`}>
+                    {bundleForm.is_clearance ? "Yes" : "No"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Salesman incentive for selling this bundle */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+                <label className="block text-xs font-medium text-gray-500">Salesman Incentive (optional)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={bundleForm.incentive_type} onChange={e => setBundleForm(f => ({ ...f, incentive_type: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                    <option value="fixed">Fixed (RM)</option>
+                    <option value="percent">Percent (%)</option>
+                  </select>
+                  <input type="number" value={bundleForm.incentive_value} onChange={e => setBundleForm(f => ({ ...f, incentive_value: e.target.value }))}
+                    placeholder="0" className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <p className="text-xs text-gray-400">Paid as package incentive commission when the full bundle is sold as a set.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Start Date</label>
+                  <input type="date" value={bundleForm.start_date} onChange={e => setBundleForm(f => ({ ...f, start_date: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">End Date</label>
+                  <input type="date" value={bundleForm.end_date} onChange={e => setBundleForm(f => ({ ...f, end_date: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              </div>
+
+              {/* Component picker */}
+              <div className="border-t border-gray-100 pt-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Components *</label>
+                {canEditBundles && (
+                  <>
+                    <input value={bundleProductSearch} onChange={e => searchBundleProducts(e.target.value)}
+                      placeholder="Search product to add…"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    {bundleProductResults.length > 0 && (
+                      <div className="border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50 mt-1 max-h-40 overflow-y-auto">
+                        {bundleProductResults.map(p => (
+                          <button key={p.id} onClick={() => addBundleComponent(p)}
+                            className="w-full text-left px-3 py-2 hover:bg-violet-50 transition-colors flex items-center justify-between gap-2">
+                            <span className="text-sm text-gray-800 truncate"><span className="font-mono text-violet-700">{p.code}</span> {p.name}</span>
+                            <span className="text-xs text-gray-400 shrink-0">{p.unit_price != null ? p.unit_price.toFixed(2) : "—"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {bundleForm.items.length === 0 && (
+                  <p className="text-sm text-gray-400 py-3 text-center border border-dashed border-gray-200 rounded-xl mt-2">No components added yet</p>
+                )}
+                {bundleForm.items.length > 0 && (
+                  <div className="space-y-1.5 mt-2">
+                    {bundleForm.items.map((it, i) => (
+                      <div key={it.product_id} className="flex items-center gap-2 border border-gray-100 rounded-xl px-3 py-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-900 truncate"><span className="font-mono text-violet-700 text-xs">{it.code}</span> {it.name}</p>
+                          <p className="text-xs text-gray-400">{it.unit_price != null ? `RM ${Number(it.unit_price).toFixed(2)} each` : "No price"}</p>
+                        </div>
+                        <input type="number" min="1" value={it.quantity} disabled={!canEditBundles}
+                          onChange={e => updateBundleComponentQty(i, e.target.value)}
+                          className="w-16 px-2 py-1 text-xs text-right border border-gray-200 rounded-lg focus:outline-none focus:border-violet-400 disabled:bg-gray-50 disabled:text-gray-400" />
+                        {canEditBundles && <button onClick={() => removeBundleComponent(i)} className="text-gray-300 hover:text-red-500 text-sm shrink-0">✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {bundleForm.items.length > 0 && (
+                  <div className="flex items-center justify-between text-xs text-gray-500 mt-2 px-1">
+                    <span>Components at list price</span>
+                    <span className="font-medium text-gray-700">RM {bundleComponentsTotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {bundleForm.items.length > 0 && bundleForm.package_price !== "" && (
+                  <div className="flex items-center justify-between text-xs mt-1 px-1">
+                    <span className="text-gray-500">Savings vs. list price</span>
+                    <span className={`font-medium ${bundleComponentsTotal - Number(bundleForm.package_price) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      RM {(bundleComponentsTotal - Number(bundleForm.package_price)).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {canEditBundles && (
+                <button onClick={saveBundle} disabled={bundleSaving}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                  {bundleSaving ? "Saving…" : editBundleId ? "Update Bundle" : "Create Bundle"}
+                </button>
               )}
             </div>
           </div>

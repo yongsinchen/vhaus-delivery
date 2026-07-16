@@ -56,14 +56,60 @@ const stopReadiness = (items) => {
 
 const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", status: "Active" };
 
+// Fix #6: a blank item name must never render as a bare "-". Fall through
+// whatever descriptive text is available; when nothing is, flag it plainly
+// instead of hiding the gap.
+const NO_DESC = "(no description)";
+const itemDisplayName = (item) => {
+  const name = (item.itemName || item.product_name || "").trim();
+  if (name) return { text: name, isFallback: false };
+  const dim = (item.custom_dimensions || "").trim();
+  if (dim) return { text: dim, isFallback: false };
+  const note = (item.notes || "").trim();
+  if (note) return { text: note, isFallback: false };
+  const code = (item.itemCode || item.product_code || "").trim();
+  if (code) return { text: code, isFallback: false };
+  return { text: NO_DESC, isFallback: true };
+};
+
+// Fix #3: schedule status casing is inconsistent — the admin dropdown writes
+// Title Case ("Confirmed", "Out for Delivery", "Delivered") while the driver
+// app and DO lifecycle write lowercase ("scheduled", "arrived",
+// "out_for_delivery", "delivered", "draft"). Normalize before comparing so a
+// driver-completed DO-linked stop is reflected on the admin team-status pill
+// instead of always showing "Pending".
+const normalizeScheduleStatus = (s) => {
+  const low = String(s || "").toLowerCase().replace(/_/g, " ").trim();
+  if (low === "delivered") return "Delivered";
+  if (low === "out for delivery" || low === "arrived") return "Out for Delivery";
+  if (low === "confirmed") return "Confirmed";
+  if (low === "scheduled" || low === "draft" || low === "pending" || low === "failed") return "Pending";
+  return "Pending";
+};
+
 /** Derive a team-level status from its schedules */
 const deriveTeamStatus = (schedules) => {
   if (!schedules || schedules.length === 0) return "Pending";
-  const statuses = schedules.map(s => s.status);
+  const statuses = schedules.map(s => normalizeScheduleStatus(s.status));
   if (statuses.every(s => s === "Delivered")) return "Delivered";
   if (statuses.some(s => s === "Out for Delivery")) return "Out for Delivery";
   if (statuses.every(s => s === "Confirmed" || s === "Delivered")) return "Confirmed";
   return "Pending";
+};
+
+// Fix #7 (soft block): retry once with an operator-entered override reason
+// when the backend rejects a scheduling POST for landing on a blocked date.
+// Shared by every POST /delivery-schedules call site in this file.
+const postWithBlockRetry = async (url, payload) => {
+  let res = await af(url, { method: "POST", body: JSON.stringify(payload) });
+  let data = await res.json();
+  if (res.status === 400 && data.blocked_date) {
+    const reason = window.prompt(`${data.error}\n\nEnter a reason to schedule anyway, or leave blank to cancel:`, "");
+    if (!reason || !reason.trim()) return { error: data.error, cancelled: true };
+    res = await af(url, { method: "POST", body: JSON.stringify({ ...payload, override_reason: reason.trim() }) });
+    data = await res.json();
+  }
+  return data;
 };
 
 // -- Trip Card (for multi-trip orders in unassigned) -------------------
@@ -124,22 +170,41 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
 // not re-render every stop on the page.
 const ITEM_COLS = ["#", "Code", "Item", "Qty", "Supplier", "Ordered", "Sent", "Arrival"];
 
-const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo }) {
+const DO_TERMINAL_STATUSES = ["delivered", "completed", "cancelled"];
+
+const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
   const [saving, setSaving] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduling, setRescheduling] = useState(false);
   const isTrip = !!tripInfo;
 
   // Phase 2B: a DO schedule shows ONLY that shipment's items. DO items were
   // arrival-checked at DO creation, so they count as allocated/ready.
+  // Fix #1: carry product_code + supplier_name through so DO lines render the
+  // same Code/Supplier columns as legacy items. Fix #6: also carry
+  // custom_dimensions/notes (when the backend provides them) so blank
+  // product_name still has somewhere to fall back to.
   const dord = schedule.delivery_orders || null;
   const items = dord
-    ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)), _do: true }))
+    ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
+        itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
+        supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes, _do: true,
+      }))
     : parseItems(o.items);
   const readiness = stopReadiness(items);
   const preferredTime = o.time_slot || "";
   const isLegacy = String(schedule.id).startsWith("legacy-");
+  // Fix #8: a DO can be rescheduled until it's completed/cancelled — no more
+  // cancel+recreate to move a shipment's date.
+  const canReschedule = dord && !DO_TERMINAL_STATUSES.includes(String(dord.status || "").toLowerCase());
+  // Fix #4: reassigning a stop to another team on the same date — only other
+  // teams still open for assignment are offered.
+  const reassignTargets = (teams || []).filter(t => t.id !== teamId && ["Pending", "Confirmed"].includes(deriveTeamStatus(t.schedules)));
 
   if (!o || !o.so_number) return null;
 
@@ -159,6 +224,20 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
     });
     setSaving(false);
     if (onSaved) onSaved(); // trigger re-sort
+  };
+
+  const saveReschedule = async () => {
+    if (!rescheduleDate || !dord) return;
+    setRescheduling(true);
+    try {
+      const res = await af(`${API}/delivery-orders/${dord.id}`, {
+        method: "PATCH", body: JSON.stringify({ delivery_date: rescheduleDate })
+      });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setShowReschedule(false);
+      if (onSaved) onSaved();
+    } finally { setRescheduling(false); }
   };
 
   return (
@@ -181,6 +260,35 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
               <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs ml-auto" title="Unassign">×</button>
             )}
           </div>
+          {/* Fix #4 / #8: reassign to another team, or reschedule a DO's date,
+              without unassign+recreate. Both hidden once the stop is locked. */}
+          {!isLocked && !isLegacy && (onReassign || canReschedule) && (
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+              {onReassign && (
+                showReassign ? (
+                  <select autoFocus defaultValue="" onChange={e => { const tid = e.target.value; setShowReassign(false); if (tid) onReassign(schedule.id, tid); }}
+                    onBlur={() => setShowReassign(false)}
+                    className="text-[10px] border rounded px-1 py-0.5 text-gray-600 max-w-[110px]">
+                    <option value="">Move to…</option>
+                    {reassignTargets.map(t => <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name}</option>)}
+                  </select>
+                ) : (
+                  <button onClick={() => setShowReassign(true)} disabled={reassignTargets.length === 0} className="text-[10px] text-blue-500 hover:underline disabled:text-gray-300 disabled:no-underline" title={reassignTargets.length === 0 ? "No other open teams" : "Reassign to another team"}>Reassign</button>
+                )
+              )}
+              {canReschedule && (
+                showReschedule ? (
+                  <span className="flex items-center gap-1">
+                    <input type="date" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)} className="text-[10px] border rounded px-1 py-0.5 w-[102px]" />
+                    <button onClick={saveReschedule} disabled={rescheduling || !rescheduleDate} className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded disabled:opacity-50">{rescheduling ? "…" : "Save"}</button>
+                    <button onClick={() => setShowReschedule(false)} className="text-[10px] text-gray-400 hover:text-gray-600">Cancel</button>
+                  </span>
+                ) : (
+                  <button onClick={() => { setRescheduleDate(dord.delivery_date || schedule.scheduled_date || ""); setShowReschedule(true); }} className="text-[10px] text-purple-500 hover:underline">Reschedule</button>
+                )
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${readiness.cls}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${readiness.dot}`} />{readiness.label}
@@ -227,11 +335,12 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
               <tbody>
                 {items.map((item, i) => {
                   const st = itemStatus(item);
+                  const dn = itemDisplayName(item);
                   return (
                     <tr key={i} className="align-top">
                       <td className="px-1.5 py-0.5 border border-gray-100 text-center text-gray-400">{i + 1}</td>
                       <td className="px-1.5 py-0.5 border border-gray-100 font-mono text-gray-500 whitespace-nowrap">{item.itemCode || ""}</td>
-                      <td className="px-1.5 py-0.5 border border-gray-100 text-gray-800 font-medium break-words">{item.itemName || "-"}</td>
+                      <td className={`px-1.5 py-0.5 border border-gray-100 break-words ${dn.isFallback ? "italic text-red-500 font-medium" : "text-gray-800 font-medium"}`}>{dn.text}</td>
                       <td className="px-1.5 py-0.5 border border-gray-100 text-center text-gray-700">{item.unit || 1}</td>
                       <td className="px-1.5 py-0.5 border border-gray-100 text-gray-600 whitespace-nowrap">{item.supplier || ""}</td>
                       <td className="px-1.5 py-0.5 border border-gray-100 text-gray-500 whitespace-nowrap">{item.itemOrderDate || ""}</td>
@@ -292,9 +401,14 @@ function TeamPrintView({ team, onClose }) {
   (team.schedules || []).forEach(sc => {
     const o = sc.orders;
     if (!o) return;
-    // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO number
+    // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
+    // number. Fix #1: carry product_code + supplier_name so the printed sheet
+    // matches the on-screen Code/Supplier columns for DO lines too.
     const items = sc.delivery_orders
-      ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ itemName: i.product_name, unit: String(Number(i.quantity)) }))
+      ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
+          itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
+          supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+        }))
       : parseItemsSafe(o.items);
     const displayItems = items.length > 0 ? items : [{}];
     displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
@@ -358,7 +472,7 @@ function TeamPrintView({ team, onClose }) {
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,textAlign:"center",verticalAlign:"top"}}>{team.vehicle_plate||"-"}</td>}
                         <td style={{...BD,textAlign:"center"}}>{idx+1}</td>
                         <td style={{...BD,overflow:"hidden"}}>{item.itemCode||""}</td>
-                        <td style={{...BD,overflow:"hidden",wordBreak:"break-word"}}>{item.itemName||""}</td>
+                        <td style={{...BD,overflow:"hidden",wordBreak:"break-word",...(itemDisplayName(item).isFallback?{color:"red",fontStyle:"italic"}:{})}}>{Object.keys(item).length ? itemDisplayName(item).text : ""}</td>
                         <td style={{...BD,textAlign:"center"}}>{item.unit||""}</td>
                         <td style={{...BD}}>{item.supplier||""}</td>
                         <td style={{...BD,textAlign:"center"}}>{item.itemOrderDate||""}</td>
@@ -723,6 +837,84 @@ function AutoSchedulerModal({ date, companyId, onClose, onApproved }) {
   );
 }
 
+// -- Blocked Dates Modal (fix #7) ---------------------------------------
+// Settings CRUD for the soft-block list: dates dispatchers can still schedule
+// onto, but only after typing an override reason (enforced server-side).
+function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
+  const { withLoading } = useLoading();
+  const toast = useToast();
+  const [newDate, setNewDate] = useState("");
+  const [newReason, setNewReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const addBlockedDate = async () => {
+    if (!newDate) { alert("Pick a date first."); return; }
+    setSaving(true);
+    try {
+      await withLoading("Blocking date…", async () => {
+        const res = await af(`${API}/delivery-blocked-dates`, { method: "POST", body: JSON.stringify({ blocked_date: newDate, reason: newReason.trim() || null }) });
+        const data = await res.json();
+        if (!res.ok || data.error) { alert(data.error || "Failed to block date"); return; }
+        setNewDate(""); setNewReason(""); onRefresh();
+      });
+    } catch (e) { toast.error("Failed to block date: " + e.message); }
+    setSaving(false);
+  };
+
+  const removeBlockedDate = async (id) => {
+    if (!window.confirm("Remove this block? Dates will schedule normally again.")) return;
+    try {
+      await withLoading("Removing block…", async () => {
+        await af(`${API}/delivery-blocked-dates/${id}`, { method: "DELETE" });
+        onRefresh();
+      });
+    } catch (e) { toast.error("Failed to remove block: " + e.message); }
+  };
+
+  const sorted = [...(blockedDates || [])].sort((a, b) => String(a.blocked_date).localeCompare(String(b.blocked_date)));
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 pt-10 px-4 pb-10 overflow-y-auto">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <h3 className="font-bold text-gray-800 text-base">Blocked Delivery Dates</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-xs text-gray-500 mb-3">A blocked date does not stop scheduling outright — a dispatcher must enter an override reason to schedule on it. Existing schedules already on the date are unaffected.</p>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-end gap-2 flex-wrap">
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Date</label>
+              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+            </div>
+            <div className="flex-1 min-w-[160px]">
+              <label className="text-xs text-gray-500 block mb-0.5">Reason (optional)</label>
+              <input value={newReason} onChange={e => setNewReason(e.target.value)} placeholder="e.g. Public holiday, warehouse stock-take"
+                className="w-full border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+            </div>
+            <button onClick={addBlockedDate} disabled={saving} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">+ Block Date</button>
+          </div>
+          <div className="space-y-1.5 max-h-80 overflow-y-auto">
+            {sorted.length === 0 && <p className="text-xs text-gray-400 text-center py-6">No blocked dates in range.</p>}
+            {sorted.map(b => (
+              <div key={b.id} className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2">
+                <div>
+                  <span className="text-sm font-semibold text-gray-800">{b.blocked_date}</span>
+                  {b.reason && <span className="text-xs text-gray-500 ml-2">{b.reason}</span>}
+                </div>
+                <button onClick={() => removeBlockedDate(b.id)} className="text-xs text-gray-400 hover:text-red-500">Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end">
+          <button onClick={onClose} className="px-5 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // -- Main Component ----------------------------------------------------
 function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
@@ -750,6 +942,11 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [suggestions, setSuggestions] = useState(null);
   const [showReadiness, setShowReadiness] = useState(false);
   const [showSuggest, setShowSuggest] = useState(false);
+
+  // Fix #7: soft-blocked delivery dates — loaded for a window around the
+  // selected date so the picker can flag it and the settings modal has data.
+  const [blockedDates, setBlockedDates] = useState([]);
+  const [showBlockedDates, setShowBlockedDates] = useState(false);
 
   /** Load teams + schedules, group schedules into teams */
   const loadData = useCallback(async () => {
@@ -809,6 +1006,22 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     try { const res = await af(`${API}/delivery/vehicles`); const data = await res.json(); setVehicles(Array.isArray(data) ? data : []); }
     catch (e) { console.error(e); }
   }, []);
+
+  // Fix #7: fetch a window around the currently selected date (2 weeks back,
+  // ~2 months forward) so the date picker's block badge and the settings
+  // modal both have data without a full-table fetch.
+  const loadBlockedDates = useCallback(async () => {
+    try {
+      const base = new Date(date);
+      const from = new Date(base); from.setDate(from.getDate() - 14);
+      const to = new Date(base); to.setDate(to.getDate() + 60);
+      const iso = d => d.toISOString().split("T")[0];
+      const res = await af(`${API}/delivery-blocked-dates?from=${iso(from)}&to=${iso(to)}`);
+      const data = await res.json();
+      setBlockedDates(Array.isArray(data.blocked_dates) ? data.blocked_dates : []);
+    } catch (e) { console.error(e); }
+  }, [date]);
+  useEffect(() => { loadBlockedDates(); }, [loadBlockedDates]);
 
   const loadServiceOrders = useCallback(async () => {
     try {
@@ -908,10 +1121,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
 
     if (type === "do") {
       // Phase 2B: schedule a Delivery Order — backend flips the DO to
-      // "scheduled" and logs the event.
-      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ delivery_order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
-      const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      // "scheduled" and logs the event. Fix #7: soft-blocked dates retry once
+      // with a dispatcher-entered override reason.
+      const data = await postWithBlockRetry(`${API}/delivery-schedules`, { delivery_order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder });
+      if (data.error) { if (!data.cancelled) alert(data.error); return; }
       loadData();
       return;
     }
@@ -922,13 +1135,13 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       if (trip) {
         const tripOrder = unassigned.find(o => o.so_number === trip.so_number);
         if (tripOrder) {
-          await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: tripOrder.id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
+          const data = await postWithBlockRetry(`${API}/delivery-schedules`, { order_id: tripOrder.id, team_id: teamId, scheduled_date: date, sort_order: sortOrder });
+          if (data.error && !data.cancelled) alert(data.error);
         }
       }
     } else {
-      const res = await af(`${API}/delivery-schedules`, { method: "POST", body: JSON.stringify({ order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder }) });
-      const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      const data = await postWithBlockRetry(`${API}/delivery-schedules`, { order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder });
+      if (data.error) { if (!data.cancelled) alert(data.error); return; }
     }
     loadData();
   });
@@ -942,6 +1155,18 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         loadData();
       });
     } catch (e) { toast.error(e.message); }
+  }, [withLoading, toast, loadData]);
+
+  // Fix #4: reassign a stop to another team without unassign+recreate.
+  const reassignSchedule = useCallback(async (scheduleId, newTeamId) => {
+    try {
+      await withLoading("Reassigning…", async () => {
+        const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ team_id: newTeamId }) });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        loadData();
+      });
+    } catch (e) { toast.error("Failed to reassign: " + e.message); }
   }, [withLoading, toast, loadData]);
 
   const updateScheduleStatus = async (scheduleId, status) => {
@@ -985,18 +1210,27 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     <div className="max-w-7xl mx-auto px-4 py-4 relative">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <h2 className="text-base font-bold text-gray-700">Delivery Schedule</h2>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
+          {/* Fix #7: native <input type="date"> can't paint per-day markers,
+              so we flag the currently selected date inline when it's blocked. */}
+          {blockedDates.some(b => b.blocked_date === date) && (
+            <span className="text-xs bg-red-100 text-red-700 font-semibold px-2 py-1.5 rounded-lg border border-red-200" title={blockedDates.find(b => b.blocked_date === date)?.reason || "Blocked date — override reason required to schedule"}>
+              ⛔ Blocked{blockedDates.find(b => b.blocked_date === date)?.reason ? `: ${blockedDates.find(b => b.blocked_date === date).reason}` : ""}
+            </span>
+          )}
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
           <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
           {!readOnly && <button onClick={loadSuggestions} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
+          {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
           {!readOnly && <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>}
         </div>
       </div>
 
       {loading && <div className="absolute inset-0 z-40 flex items-start justify-center pt-24 bg-white/40 pointer-events-none"><div className="flex items-center gap-2 bg-white shadow-lg rounded-full px-4 py-2 text-sm text-gray-600 border"><span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />Updating…</div></div>}
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
+      {showBlockedDates && <BlockedDatesModal blockedDates={blockedDates} onClose={() => setShowBlockedDates(false)} onRefresh={loadBlockedDates} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
       {showAutoScheduler && (
@@ -1353,6 +1587,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           index={index}
                           isLocked={isLocked}
                           tripInfo={linkedTrip ? { trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : null}
+                          teams={teams}
+                          onReassign={readOnly ? null : reassignSchedule}
                           onUnassign={unassignOrder}
                           onDragStart={handleAssignedDragStart}
                           onDrop={handleAssignedDrop}

@@ -54,6 +54,61 @@ const fromDb = o => ({
   linkedSo: o.linked_so || null,
 });
 
+// Fix #5: a legacy order's own delivery_date only ever reflects the
+// whole-order date. Once it ships as split Delivery Orders each DO can carry
+// its own date, so the calendar / today / next-3-days widgets need one card
+// per DO date — not just the order's original single date. Mirrors the
+// activeDoSoNumbers exclusion pattern in DeliverySchedule.js: drop the legacy
+// row wherever its SO has at least one active DO, then add one synthetic
+// "shadow" card per DO (enriched from the matching legacy row when found, so
+// clicking it still opens the full Order view).
+const doStatusLabel = s => ({
+  draft: "Pending", scheduled: "Pending", out_for_delivery: "Out for Delivery",
+  arrived: "Out for Delivery", delivered: "Delivered", completed: "Delivered", failed: "Flagged",
+}[s] || "Pending");
+
+// `opts.lookupOrders`: resolve each DO's base order against the FULL
+// company order list, not just `baseOrders` — `baseOrders` may already be
+// salesman-filtered, and a DO belonging to another salesman's order must
+// still be found (to check ownership) even though it isn't in that filtered
+// list. `opts.salesmanFilter` (lowercased, trimmed salesman name): when set,
+// a shadow card is only kept if the resolved base order's `salesman` field
+// matches — same "/"-split, case-insensitive membership rule used by
+// `applySalesmanFilter`/`isMyOrder` elsewhere. This prevents another
+// salesman's DO (customer name + SO number included) from leaking into a
+// salesman's Today's-Deliveries / Next-3-Days widgets, which render for
+// salesmen with no further gating. When no base order is found under a
+// salesman filter, the DO is dropped rather than shown — ownership can't be
+// verified, and showing it would risk the same leak the filter exists to stop.
+const mergeWithDoOrders = (baseOrders, doRows, opts = {}) => {
+  if (!doRows || doRows.length === 0) return baseOrders;
+  const { lookupOrders = baseOrders, salesmanFilter = null } = opts;
+  const activeSoNumbers = new Set(doRows.map(d => d.so_number).filter(Boolean));
+  const bySo = {};
+  lookupOrders.forEach(o => { if (o.soNumber) bySo[o.soNumber] = o; });
+  const kept = baseOrders.filter(o => !activeSoNumbers.has(o.soNumber));
+  const matchesSalesman = (salesman) =>
+    !salesmanFilter || (salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(salesmanFilter);
+  const shadows = doRows
+    .map(d => {
+      const base = bySo[d.so_number];
+      if (salesmanFilter && (!base || !matchesSalesman(base.salesman))) return null;
+      return {
+        ...(base || { id: `do-${d.id}`, soNumber: d.so_number, customerName: d.customer_name, address: "", contact: "", balance: 0, items: [], type: "Delivery" }),
+        // Keep the REAL legacy order id (not a synthetic one) so Edit/Delete —
+        // which key off o.id for their API calls — keep working from a shadow
+        // card. React list keys use `_rowKey` instead, so distinct DOs of the
+        // same order never collide even though `id` is shared.
+        _rowKey: base ? `${base.id}-do-${d.id}` : `do-${d.id}`,
+        deliveryDate: d.delivery_date,
+        status: doStatusLabel(d.status),
+        _doNumber: d.do_number,
+      };
+    })
+    .filter(Boolean);
+  return [...kept, ...shadows];
+};
+
 // ── Design tokens ─────────────────────────────────────────────────
 const statusColor = s => ({
   "Pending": "bg-amber-100 text-amber-800",
@@ -103,7 +158,7 @@ const NAV = [
 // state values, and every one of them used to re-render this (heaviest)
 // JSX tree. As a memo child with stable props it only re-renders when the
 // dashboard data itself changes.
-const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman }) {
+const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates }) {
   return (
       <div className="space-y-6">
         <div>
@@ -133,11 +188,12 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {todayOrders.map(o => (
-                <div key={o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors" onClick={() => handleView(o)}>
+                <div key={o._rowKey || o.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors" onClick={() => handleView(o)}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
+                        {o._doNumber && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium" title="Ships as this Delivery Order on this date">{o._doNumber}</span>}
                         {o.type === "Service" && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">Service</span>}
                       </div>
                       <p className="font-semibold text-gray-800 text-sm">{o.customerName}</p>
@@ -149,13 +205,19 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                       {parseFloat(o.balance) > 0 && <span className="text-xs font-bold text-red-600">RM {o.balance}</span>}
                     </div>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {o.items?.filter(i=>i.itemName).map((item,i) => (
-                      <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
-                        {item.arrivalDate ? "✓" : "·"} {item.itemName}
-                      </span>
-                    ))}
-                  </div>
+                  {/* Fix (SEV-3): a shadow DO card's `items` come from the whole
+                      matched order — the by-month feed has no per-item detail —
+                      so they may not belong to THIS shipment/date. Suppress
+                      rather than show item-arrival chips that could be wrong. */}
+                  {!o._doNumber && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {o.items?.filter(i=>i.itemName).map((item,i) => (
+                        <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${item.arrivalDate ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                          {item.arrivalDate ? "✓" : "·"} {item.itemName}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -170,7 +232,13 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
               const d = new Date(now); d.setDate(d.getDate()+offset);
               const ds = d.toISOString().split("T")[0];
               const dayOrders = orders.filter(o => o.deliveryDate === ds);
-                  const someNotArrived = dayOrders.some(o => o.items?.some(i => !i.arrivalDate));
+              // Fix (SEV-3): shadow DO cards carry the whole matched order's
+              // items (no per-shipment detail in the by-month feed), so their
+              // readiness can't be trusted for THIS date — exclude them from
+              // the banner, and hide the banner entirely if every order that
+              // day is a shadow card (nothing left we can vouch for).
+              const readinessKnownOrders = dayOrders.filter(o => !o._doNumber);
+              const someNotArrived = readinessKnownOrders.some(o => o.items?.some(i => !i.arrivalDate));
               return (
                 <div key={ds} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <div className="flex items-center justify-between mb-2">
@@ -182,13 +250,15 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                   </div>
                   {dayOrders.length > 0 && (
                     <div className="mt-2">
-                      {someNotArrived
-                        ? <p className="text-xs text-amber-600 font-medium">⚠️ Some items not arrived</p>
-                        : <p className="text-xs text-emerald-600 font-medium">✅ All items ready</p>}
+                      {readinessKnownOrders.length > 0 && (
+                        someNotArrived
+                          ? <p className="text-xs text-amber-600 font-medium">⚠️ Some items not arrived</p>
+                          : <p className="text-xs text-emerald-600 font-medium">✅ All items ready</p>
+                      )}
                       <div className="mt-1.5 space-y-1">
                         {dayOrders.map(o => (
-                          <button key={o.id} onClick={() => handleView(o)} className="w-full text-left text-xs bg-gray-50 rounded-lg px-2 py-1.5 hover:bg-violet-50">
-                            <span className="font-semibold text-violet-700">{o.soNumber}</span> — {o.customerName}
+                          <button key={o._rowKey || o.id} onClick={() => handleView(o)} className="w-full text-left text-xs bg-gray-50 rounded-lg px-2 py-1.5 hover:bg-violet-50">
+                            <span className="font-semibold text-violet-700">{o.soNumber}</span>{o._doNumber && <span className="text-violet-400"> · {o._doNumber}</span>} — {o.customerName}
                           </button>
                         ))}
                       </div>
@@ -223,6 +293,10 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
             if (!calSalesman) return false;
             return (o.salesman || "").split("/").map(s => s.trim().toLowerCase()).includes(calSalesman.toLowerCase());
           };
+          // Fix #7: mark soft-blocked dates on the calendar so dispatchers see
+          // them before opening the schedule for that day.
+          const blockedByDate = {};
+          (blockedDates || []).forEach(b => { blockedByDate[b.blocked_date] = b; });
           return (
             <div>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -263,16 +337,21 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                       const isWeekend = di >= 5;
                       const hasUnconfirmed = deliveries.some(o => o.status === "Pending");
                       const allDelivered = deliveries.length > 0 && deliveries.every(o => o.status === "Delivered");
+                      const blocked = day && blockedByDate[ds];
                       return (
-                        <div key={di} className={`min-h-20 p-1.5 border-r border-gray-50 last:border-r-0 cursor-pointer transition-colors hover:bg-violet-50 ${!day ? "bg-gray-50/50" : isToday ? "bg-violet-50" : isWeekend ? "bg-gray-50/30" : ""}`}
+                        <div key={di} title={blocked ? `Blocked date${blocked.reason ? `: ${blocked.reason}` : ""}` : undefined}
+                          className={`min-h-20 p-1.5 border-r border-gray-50 last:border-r-0 cursor-pointer transition-colors hover:bg-violet-50 ${!day ? "bg-gray-50/50" : isToday ? "bg-violet-50" : blocked ? "bg-red-50/70" : isWeekend ? "bg-gray-50/30" : ""}`}
                           onClick={() => { if (ds) { setScheduleDate(ds); setPage(isSalesman ? "company-deliveries" : "deliveries"); } }}>
                           {day && (
                             <>
                               <div className="flex items-center justify-between mb-1">
-                                <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? "bg-violet-600 text-white" : isWeekend ? "text-violet-400" : "text-gray-500"}`}>{day}</span>
-                                {dayOrders.length > 0 && (
-                                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${allDelivered ? "bg-emerald-100 text-emerald-700" : hasUnconfirmed ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{dayOrders.length}</span>
-                                )}
+                                <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? "bg-violet-600 text-white" : isWeekend ? "text-violet-400" : "text-gray-500"}`}>{day}{blocked && <span className="sr-only"> (blocked)</span>}</span>
+                                <div className="flex items-center gap-1">
+                                  {blocked && <span className="text-[10px]" aria-hidden="true">⛔</span>}
+                                  {dayOrders.length > 0 && (
+                                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${allDelivered ? "bg-emerald-100 text-emerald-700" : hasUnconfirmed ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{dayOrders.length}</span>
+                                  )}
+                                </div>
                               </div>
                               {isEmpty && <div className="mt-1 text-center"><span className="text-xs text-gray-200">—</span></div>}
                               {deliveries.length > 0 && (
@@ -281,13 +360,13 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                                     const mine = isMyOrder(o);
                                     const highlight = calSalesman ? mine : true;
                                     return (
-                                      <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}}
+                                      <div key={o._rowKey || o.id} onClick={e=>{e.stopPropagation();handleView(o);}}
                                         className={`text-xs px-1 py-0.5 rounded font-medium truncate leading-tight transition-opacity hover:opacity-80 ${
                                           o.status==="Delivered" ? (highlight?"bg-emerald-100 text-emerald-700":"bg-emerald-50 text-emerald-300")
                                           : o.status==="Flagged" ? (highlight?"bg-red-100 text-red-600":"bg-red-50 text-red-300")
                                           : highlight ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"
                                         } ${!highlight?"opacity-50":""}`}>
-                                        {mine && calSalesman && <span className="mr-0.5">★</span>}{o.soNumber}
+                                        {mine && calSalesman && <span className="mr-0.5">★</span>}{o.soNumber}{o._doNumber && <span className="opacity-70"> · {o._doNumber}</span>}
                                       </div>
                                     );
                                   })}
@@ -297,7 +376,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                               {services.length > 0 && (
                                 <div className="mt-0.5">
                                   {services.slice(0,1).map(o => (
-                                    <div key={o.id} onClick={e=>{e.stopPropagation();handleView(o);}} className="text-xs px-1 py-0.5 rounded font-medium truncate leading-tight bg-indigo-100 text-indigo-700 hover:opacity-80">
+                                    <div key={o._rowKey || o.id} onClick={e=>{e.stopPropagation();handleView(o);}} className="text-xs px-1 py-0.5 rounded font-medium truncate leading-tight bg-indigo-100 text-indigo-700 hover:opacity-80">
                                       🔧 {o.soNumber}
                                     </div>
                                   ))}
@@ -317,6 +396,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-violet-100"></div><span className="text-xs text-gray-400">Pending delivery</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-100"></div><span className="text-xs text-gray-400">Delivered</span></div>
                 <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-indigo-100"></div><span className="text-xs text-gray-400">Service</span></div>
+                <div className="flex items-center gap-1.5"><span className="text-xs">⛔</span><span className="text-xs text-gray-400">Blocked (override reason required to schedule)</span></div>
                 {calSalesman && <div className="flex items-center gap-1.5"><span className="text-xs text-violet-600">★</span><span className="text-xs text-gray-400">{calSalesman}'s orders · others dimmed</span></div>}
                 <span className="text-xs text-gray-300">· Click any date to see orders</span>
               </div>
@@ -671,6 +751,12 @@ export default function App() {
   const [scheduleDate, setScheduleDate] = useState(null); // date to open the delivery schedule on (from calendar click)
   const [orders, setOrders] = useState([]);
   const [allCompanyOrders, setAllCompanyOrders] = useState([]);
+  // Fix #5: active Delivery Orders for the Overview widgets (raw rows from
+  // GET /delivery-orders-by-month), merged with `orders`/`allCompanyOrders`
+  // via mergeWithDoOrders below.
+  const [doOrders, setDoOrders] = useState([]);
+  // Fix #7: blocked delivery dates for the visible calendar month.
+  const [blockedDates, setBlockedDates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -801,6 +887,47 @@ export default function App() {
     if (calMonthStr < cutoffMonth) loadCalendarMonth(calMonthStr);
   }, [calMonthStr, user, companyId]); // eslint-disable-line
 
+  // Fix #5: active Delivery Orders, fetched per visible month (server scopes
+  // company). Merged client-side via mergeWithDoOrders — see that helper for
+  // why the merge happens above the calendar/today widgets, not the stat
+  // cards (which must keep counting the whole order, not per-shipment).
+  const doMonthsLoadedRef = useRef(new Set());
+  const loadDoMonth = async (monthStr) => {
+    if (doMonthsLoadedRef.current.has(monthStr)) return;
+    doMonthsLoadedRef.current.add(monthStr);
+    try {
+      const res = await authFetch(`${BACKEND}/delivery-orders-by-month?month=${monthStr}`);
+      const d = await res.json();
+      const rows = Array.isArray(d?.delivery_orders) ? d.delivery_orders : [];
+      setDoOrders(prev => { const seen = new Set(prev.map(x => x.id)); return [...prev, ...rows.filter(r => !seen.has(r.id))]; });
+    } catch (e) { console.error(e); }
+  };
+  useEffect(() => {
+    if (!user) return;
+    // Covers "today" + the 3-day-lookahead widget even when it crosses a
+    // month boundary.
+    const todayMonth = todayStr.slice(0, 7);
+    loadDoMonth(todayMonth);
+    const lookahead = new Date(); lookahead.setDate(lookahead.getDate() + 3);
+    const lookaheadMonth = lookahead.toISOString().slice(0, 7);
+    if (lookaheadMonth !== todayMonth) loadDoMonth(lookaheadMonth);
+  }, [user, companyId]); // eslint-disable-line
+  useEffect(() => { if (!user || !calMonthStr) return; loadDoMonth(calMonthStr); }, [calMonthStr, user, companyId]); // eslint-disable-line
+
+  // Fix #7: blocked delivery dates for the visible calendar month — small
+  // list, cheap to refetch on month navigation rather than accumulate.
+  const loadBlockedDatesForMonth = async (monthStr) => {
+    const [y, m] = monthStr.split("-").map(Number);
+    const from = `${monthStr}-01`;
+    const to = `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    try {
+      const res = await authFetch(`${BACKEND}/delivery-blocked-dates?from=${from}&to=${to}`);
+      const d = await res.json();
+      setBlockedDates(Array.isArray(d?.blocked_dates) ? d.blocked_dates : []);
+    } catch (e) { console.error(e); }
+  };
+  useEffect(() => { if (!user || !calMonthStr) return; loadBlockedDatesForMonth(calMonthStr); }, [calMonthStr, user, companyId]); // eslint-disable-line
+
   const loadServicePending = async () => {
     setSpLoading(true);
     try {
@@ -866,6 +993,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return; // wait for auth
     opsLoadedRef.current = false; // company/user switch: Operations must reload on next open
+    doMonthsLoadedRef.current = new Set(); setDoOrders([]); // company/user switch: re-fetch DO months (fix #5)
     loadOrders();
     loadBootstrap();
   }, [user?.id, companyId, user?.role]); // eslint-disable-line
@@ -889,9 +1017,32 @@ export default function App() {
     return items.length > 0 && items.some(i => i.arrivalDate);
   }), [orders]);
 
-  const todayOrders = useMemo(() => orders.filter(o => o.deliveryDate === todayStr), [orders]);
   const balanceOrders = useMemo(() => orders.filter(o => parseFloat(o.balance) > 0).sort((a,b) => new Date(a.deliveryDate)-new Date(b.deliveryDate)), [orders]);
   const flaggedOrders = useMemo(() => orders.filter(o => o.status === "Flagged"), [orders]);
+
+  // Fix #5: calendar-facing views only — merges in one card per active DO
+  // date so split-shipment orders show on every date they actually deliver,
+  // not just the order's original single delivery_date. Deliberately kept
+  // separate from `orders`/`allCompanyOrders` (used unmodified everywhere
+  // else, e.g. balance/ready/flagged stat cards) to avoid double-counting.
+  //
+  // `calendarOrders` feeds Today's-Deliveries + Next-3-Days, which render for
+  // salesmen with no further gating — so it resolves each DO against the
+  // FULL company order list (`allCompanyOrders`) to find the owning
+  // salesman, then only keeps the shadow card when it matches the active
+  // salesman filter (mirrors applySalesmanFilter/isMyOrder's rule). This
+  // must never leak another salesman's DO onto this salesman's widgets.
+  //
+  // `calendarAllCompanyOrders` feeds only the Monthly Calendar, which is
+  // already intentionally company-wide-with-dimming for salesmen — no
+  // salesman gate here by design.
+  const salesmanFilterName = isSalesman && user?.salesman_name ? user.salesman_name.toLowerCase().trim() : null;
+  const calendarOrders = useMemo(
+    () => mergeWithDoOrders(orders, doOrders, { lookupOrders: allCompanyOrders, salesmanFilter: salesmanFilterName }),
+    [orders, doOrders, allCompanyOrders, salesmanFilterName]
+  );
+  const calendarAllCompanyOrders = useMemo(() => mergeWithDoOrders(allCompanyOrders, doOrders), [allCompanyOrders, doOrders]);
+  const todayOrders = useMemo(() => calendarOrders.filter(o => o.deliveryDate === todayStr), [calendarOrders]);
 
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = useCallback(o => setViewOrder(o), []);
@@ -1083,7 +1234,7 @@ export default function App() {
 
   const renderPage = () => {
     // OVERVIEW
-    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={orders} allCompanyOrders={allCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} />;
+    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} />;
 
     // ORDERS (unified — reads from sales_orders)
     if (page === "orders") return <OrdersPage />;
