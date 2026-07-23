@@ -24,6 +24,127 @@ const ITEM_STATUS_BADGE = (it) => {
   return <span className={`px-2 py-0.5 rounded-full text-xs ${style[it.reason] || "bg-gray-100 text-gray-600"}`}>{(it.reason || "pending").replace(/_/g, " ")}</span>;
 };
 
+// Inline editor for a PENDING review line: link it to an SO (stamps arrival) and
+// a product/SKU, add to stock, or dismiss. Self-contained state; calls onDone to
+// refresh the drawer after a successful action.
+function ReviewItemActions({ item, onDone }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [so, setSo] = useState(item.so_number || "");
+  const [pQuery, setPQuery] = useState("");
+  const [pResults, setPResults] = useState([]);
+  const [product, setProduct] = useState(null); // { id, code, name }
+  const [busy, setBusy] = useState(false);
+  const [stockOpen, setStockOpen] = useState(false);
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehouseId, setWarehouseId] = useState("");
+  const [qty, setQty] = useState(item.quantity || 1);
+
+  const searchProducts = async (q) => {
+    setPQuery(q);
+    if (q.trim().length < 2) { setPResults([]); return; }
+    try {
+      const res = await fetch(`${API}/products?search=${encodeURIComponent(q)}&limit=8`, { headers: await authHeaders(false) });
+      const d = await res.json();
+      setPResults((d.products || []).slice(0, 8));
+    } catch { setPResults([]); }
+  };
+
+  const loadWarehouses = async () => {
+    try {
+      const res = await fetch(`${API}/warehouses`, { headers: await authHeaders(false) });
+      const d = await res.json();
+      const list = Array.isArray(d) ? d : (d.warehouses || []);
+      setWarehouses(list);
+      if (list.length && !warehouseId) setWarehouseId(list[0].id);
+    } catch {}
+  };
+
+  const call = async (fn) => { setBusy(true); try { await fn(); } catch (e) { toast.error(e.message); } finally { setBusy(false); } };
+
+  const linkResolve = () => call(async () => {
+    if (!so.trim() && !product) { toast.error("Enter an SO or pick a product first"); return; }
+    const res = await fetch(`${API}/do-review/${item.id}/resolve`, {
+      method: "PATCH", headers: await authHeaders(),
+      body: JSON.stringify({ so_number: so.trim() || null, item_code: item.item_code || item.item_name || null, product_id: product?.id || null }),
+    });
+    const d = await res.json(); if (!res.ok) throw new Error(d.error || "Failed");
+    toast.success("Linked & resolved"); onDone();
+  });
+
+  const addToStock = () => call(async () => {
+    if (!product) { toast.error("Pick a product first"); return; }
+    if (!warehouseId) { toast.error("Pick a warehouse"); return; }
+    const res = await fetch(`${API}/do-review/${item.id}/add-to-stock`, {
+      method: "PATCH", headers: await authHeaders(),
+      body: JSON.stringify({ product_id: product.id, warehouse_id: warehouseId, quantity: Number(qty) || 1 }),
+    });
+    const d = await res.json(); if (!res.ok) throw new Error(d.error || "Failed");
+    toast.success("Added to stock & resolved"); onDone();
+  });
+
+  const dismiss = () => { if (!window.confirm("Dismiss this item? It won't be matched or stocked.")) return; call(async () => {
+    const res = await fetch(`${API}/do-review/${item.id}/dismiss`, { method: "PATCH", headers: await authHeaders() });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Failed"); }
+    toast.success("Dismissed"); onDone();
+  }); };
+
+  if (!open) return <button onClick={() => setOpen(true)} className="text-xs text-violet-600 hover:underline font-medium">Link / Resolve</button>;
+
+  return (
+    <div className="p-2 rounded-lg bg-violet-50 border border-violet-100 space-y-2">
+      <div>
+        <label className="text-[10px] font-semibold text-gray-500 uppercase">SO number</label>
+        <input value={so} onChange={e => setSo(e.target.value)} placeholder="e.g. 30799"
+          className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300" />
+      </div>
+      <div className="relative">
+        <label className="text-[10px] font-semibold text-gray-500 uppercase">Product (SKU)</label>
+        {product ? (
+          <div className="flex items-center justify-between border border-violet-200 bg-white rounded-lg px-2 py-1 text-xs">
+            <span><span className="font-mono text-violet-700">{product.code}</span> {product.name}</span>
+            <button onClick={() => { setProduct(null); setPQuery(""); }} className="text-gray-400 hover:text-gray-600 ml-2">✕</button>
+          </div>
+        ) : (
+          <>
+            <input value={pQuery} onChange={e => searchProducts(e.target.value)} placeholder="Search code or name…"
+              className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300" />
+            {pResults.length > 0 && (
+              <div className="absolute z-10 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                {pResults.map(p => (
+                  <button key={p.id} onClick={() => { setProduct(p); setPResults([]); setPQuery(""); }}
+                    className="w-full text-left px-2 py-1 text-xs hover:bg-violet-50">
+                    <span className="font-mono text-violet-700">{p.code}</span> {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={linkResolve} disabled={busy} className="text-xs bg-violet-600 text-white px-3 py-1 rounded-lg hover:bg-violet-700 disabled:opacity-50">Link &amp; Resolve</button>
+        <button onClick={() => { setStockOpen(s => !s); if (!warehouses.length) loadWarehouses(); }} disabled={busy} className="text-xs border border-violet-300 text-violet-700 px-3 py-1 rounded-lg hover:bg-violet-100 disabled:opacity-50">Add to stock…</button>
+        <button onClick={dismiss} disabled={busy} className="text-xs border border-gray-200 text-gray-500 px-3 py-1 rounded-lg hover:bg-gray-100 disabled:opacity-50">Dismiss</button>
+        <button onClick={() => setOpen(false)} className="text-xs text-gray-400 px-2 py-1 hover:text-gray-600">Cancel</button>
+      </div>
+      {stockOpen && (
+        <div className="p-2 rounded-lg bg-white border border-gray-100 space-y-2">
+          {!product && <p className="text-[11px] text-amber-600">Pick a product above first.</p>}
+          <div className="flex gap-2">
+            <select value={warehouseId} onChange={e => setWarehouseId(e.target.value)} className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs">
+              <option value="">-- Warehouse --</option>
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name || w.code || w.id}</option>)}
+            </select>
+            <input type="number" min="1" value={qty} onChange={e => setQty(e.target.value)} className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+          </div>
+          <button onClick={addToStock} disabled={busy || !product || !warehouseId} className="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Add {qty} to stock &amp; resolve</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SupplierDOPage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
@@ -69,6 +190,18 @@ function SupplierDOPage() {
         setDetail(data);
       });
     } catch (e) { toast.error("Failed to load DO: " + e.message); }
+  };
+
+  // Silent refresh of the open drawer + list after a review action (no overlay).
+  const reloadDetail = async () => {
+    const id = detail?.delivery?.id;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API}/supplier-dos/${id}`, { headers: await authHeaders(false) });
+      const data = await res.json();
+      if (res.ok) setDetail(data);
+    } catch {}
+    loadDOs();
   };
 
   // ── Step 1: upload file → extract + match preview ─────────────────
@@ -327,16 +460,25 @@ function SupplierDOPage() {
                     <tbody>
                       {(detail.items || []).length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-400 text-xs">No items recorded (older DOs only logged exceptions)</td></tr>}
                       {(detail.items || []).map((it, idx) => (
-                        <tr key={it.id || idx} className="border-t border-gray-50">
-                          <td className="px-3 py-2">
-                            <p className="font-medium text-gray-900">{it.item_name || "-"}</p>
-                            {it.item_code && <p className="text-xs text-violet-600 font-mono">{it.item_code}</p>}
-                          </td>
-                          <td className="px-3 py-2">{it.so_number ? <span className="text-xs font-mono text-violet-700">{it.so_number}</span> : <span className="text-xs text-gray-400">—</span>}</td>
-                          <td className="px-3 py-2 text-center text-xs">{it.quantity || "-"}</td>
-                          <td className="px-3 py-2 text-center text-xs text-gray-600">{it.arrival_date ? fmt(it.arrival_date) : "—"}</td>
-                          <td className="px-3 py-2 text-center">{ITEM_STATUS_BADGE(it)}</td>
-                        </tr>
+                        <React.Fragment key={it.id || idx}>
+                          <tr className="border-t border-gray-50">
+                            <td className="px-3 py-2">
+                              <p className="font-medium text-gray-900">{it.item_name || "-"}</p>
+                              {it.item_code && <p className="text-xs text-violet-600 font-mono">{it.item_code}</p>}
+                            </td>
+                            <td className="px-3 py-2">{it.so_number ? <span className="text-xs font-mono text-violet-700">{it.so_number}</span> : <span className="text-xs text-gray-400">—</span>}</td>
+                            <td className="px-3 py-2 text-center text-xs">{it.quantity || "-"}</td>
+                            <td className="px-3 py-2 text-center text-xs text-gray-600">{it.arrival_date ? fmt(it.arrival_date) : "—"}</td>
+                            <td className="px-3 py-2 text-center">{ITEM_STATUS_BADGE(it)}</td>
+                          </tr>
+                          {it.status === "Pending" && (
+                            <tr className="bg-violet-50/20">
+                              <td colSpan={5} className="px-3 pb-2">
+                                <ReviewItemActions item={it} onDone={reloadDetail} />
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
