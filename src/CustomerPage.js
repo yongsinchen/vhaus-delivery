@@ -139,6 +139,19 @@ function CustomerPage() {
     }
   };
 
+  const deletePayment = async (p) => {
+    if (!p?.id) return; // deposit lines have no payment row to delete
+    if (!window.confirm(`Remove this ${money(p.amount)} payment? The order balance will be recalculated.`)) return;
+    try {
+      await withLoading("Removing payment…", async () => {
+        const res = await af(`${API}/payments/${p.id}`, { method: "DELETE" });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || "Failed to remove payment");
+        toast.success("Payment removed"); if (detail) openDetail(detail.customer);
+      });
+    } catch (err) { toast.error(err.message || "Failed to remove payment"); }
+  };
+
   return (
     <div className="p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -341,13 +354,14 @@ function CustomerPage() {
                     <h3 className="text-sm font-bold text-gray-700 mb-2">Payments ({(detail.payments || []).length})</h3>
                     {(detail.payments || []).length === 0 && <p className="text-xs text-gray-400">No payments recorded</p>}
                     <div className="space-y-2">
-                      {(detail.payments || []).map(p => (
-                        <div key={p.id} className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                      {(detail.payments || []).map((p, idx) => (
+                        <div key={p.id || `dep-${idx}`} className={`border rounded-xl p-3 flex items-center justify-between ${p._deposit ? "bg-violet-50 border-violet-100" : "bg-emerald-50 border-emerald-100"}`}>
                           <div>
-                            <span className="text-sm font-bold text-emerald-700">{money(p.amount)}</span>
+                            <span className={`text-sm font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</span>
                             <span className="text-xs text-gray-500 ml-2">{p.payment_method}</span>
+                            {p._deposit && p.so_number && <span className="text-xs text-gray-400 ml-2">SO {p.so_number}</span>}
                             {p.reference_no && <span className="text-xs text-gray-400 ml-2">Ref: {p.reference_no}</span>}
-                            <p className="text-xs text-gray-400">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : ""}</p>
+                            <p className="text-xs text-gray-400">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : ""}{p._deposit ? " · deposit" : ""}</p>
                             {p.proof_url && (
                               <div className="mt-1 flex flex-wrap gap-2">
                                 {p.proof_url.split(",").map(u => u.trim()).filter(Boolean).map((u, i) => (
@@ -356,6 +370,12 @@ function CustomerPage() {
                               </div>
                             )}
                           </div>
+                          {p.id ? (
+                            <button onClick={() => deletePayment(p)} title="Remove payment"
+                              className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400" title="Edit the deposit on the order">on order</span>
+                          )}
                         </div>
                       ))}
                     </div>
