@@ -428,12 +428,20 @@ function TeamPrintView({ team, onClose }) {
     // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
     // number. Fix #1: carry product_code + supplier_name so the printed sheet
     // matches the on-screen Code/Supplier columns for DO lines too.
-    const items = sc.delivery_orders
+    let items = sc.delivery_orders
       ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
           itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
           supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
         }))
       : parseItemsSafe(o.items);
+    // Service orders have no line items (inert order, items='[]'); surface the
+    // service detail as the Item so it prints in the Item column instead of
+    // only landing in Remark. Strip the "Linked to SO: <n> |" prefix the RPC
+    // writes into service_note/remark.
+    if (o.type === "Service" && items.length === 0) {
+      const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
+      items = [{ itemName: detail || "Service" }];
+    }
     const displayItems = items.length > 0 ? items : [{}];
     displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
   });
@@ -503,7 +511,7 @@ function TeamPrintView({ team, onClose }) {
                         <td style={{...BD,textAlign:"center"}}>{item.supplierSentDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}></td>
                         <td style={{...BD,textAlign:"center"}}>{item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>}</td>
-                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>{o.remark&&<div>{o.remark}</div>}{sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}</td>}
+                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>{o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (o.remark&&<div>{o.remark}</div>)}{sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}</td>}
                       </tr>
                     ))}
                   </tbody></table>
