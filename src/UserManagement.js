@@ -149,6 +149,13 @@ function UserManagement() {
   // Current user's role level for escalation prevention
   const myRoleLevel = currentUser?.role === "master" ? 100 : roles.find(r => r.role_key === (currentUser?.role || "").toUpperCase())?.level || 0;
 
+  // Company Team scope: show only users registered under the logged-in account
+  // (the active company). The backend also returns multi-company "access" users
+  // — those belong to another account, so exclude them here. When no company is
+  // active (master global view), fall back to the full list.
+  const scopeCompanyId = activeCompanyId || currentUser?.company_id || null;
+  const visibleUsers = scopeCompanyId ? users.filter(u => u.company_id === scopeCompanyId) : users;
+
   const openCreate = () => {
     setForm({
       ...EMPTY_FORM,
@@ -284,7 +291,7 @@ function UserManagement() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div>
-          <p className="text-sm text-gray-400">{isMaster ? "All companies" : "Your company"} · {users.length} users</p>
+          <p className="text-sm text-gray-400">{scopeCompanyId ? "Your company" : "All companies"} · {visibleUsers.length} users</p>
         </div>
         <div className="flex gap-2">
           {successMsg && <span className="text-xs text-emerald-600 font-medium self-center">{successMsg}</span>}
@@ -300,7 +307,7 @@ function UserManagement() {
       {/* User list */}
       {loading ? (
         <div className="text-center py-12 text-gray-400">Loading users...</div>
-      ) : users.length === 0 ? (
+      ) : visibleUsers.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">👥</div>
           <p className="font-medium">No users yet</p>
@@ -308,7 +315,7 @@ function UserManagement() {
         </div>
       ) : (
         <div className="space-y-2">
-          {users.map(u => (
+          {visibleUsers.map(u => (
             <div key={u.id} className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between gap-3 flex-wrap transition-opacity ${!u.is_active ? "opacity-50" : ""}`}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-sm flex-shrink-0">
