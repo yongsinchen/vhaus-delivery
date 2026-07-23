@@ -1582,7 +1582,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                               {isLocked
                                 ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
                                 : isConfirmed
-                                ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).map(s => <option key={s}>{s}</option>)
+                                ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).concat(team.team_date < todayMY ? ["Delivered"] : []).map(s => <option key={s}>{s}</option>)
                                 : ["Pending","Confirmed"].concat(team.team_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
                               }
                             </select>
