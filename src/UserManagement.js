@@ -3,7 +3,7 @@ import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { useLoading } from "./UIComponents";
 
 const BACKEND = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
-const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", is_active: true };
+const EMPTY_FORM = { name: "", email: "", password: "", role: "salesman", company_id: "", telegram_id: "", salesman_name: "", branch_id: "", is_active: true };
 
 function UserManagement() {
   const { user: currentUser, activeCompanyId } = useAuth();
@@ -12,6 +12,7 @@ function UserManagement() {
 
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -41,6 +42,12 @@ function UserManagement() {
       .from("companies").select("id, name, code").order("name");
     if (compErr) console.error("Load companies error:", compErr);
     setCompanies(comps || []);
+
+    // Load branches so the user form can assign one (grouped by company).
+    const { data: brs, error: brErr } = await supabase
+      .from("branches").select("id, name, company_id").order("name");
+    if (brErr) console.error("Load branches error:", brErr);
+    setBranches(brs || []);
 
     // Load users via backend
     try {
@@ -160,6 +167,7 @@ function UserManagement() {
     setForm({
       ...EMPTY_FORM,
       company_id: isMaster ? "" : (currentUser?.company_id || ""),
+      branch_id: "",
     });
     setEditId(null);
     setError("");
@@ -176,6 +184,7 @@ function UserManagement() {
       company_id: u.company_id || "",
       telegram_id: u.telegram_id || "",
       salesman_name: u.salesman_name || "",
+      branch_id: u.branch_id || "",
       is_active: u.is_active !== false,
     });
     setEditId(u.id);
@@ -214,6 +223,7 @@ function UserManagement() {
           company_id: form.company_id || null,
           telegram_id: form.telegram_id.trim() || null,
           salesman_name: form.salesman_name.trim() || null,
+          branch_id: form.branch_id || null,
           is_active: form.is_active,
         }),
       });
@@ -250,6 +260,7 @@ function UserManagement() {
           company_id: form.company_id || null,
           telegram_id: form.telegram_id.trim() || null,
           salesman_name: form.salesman_name.trim() || null,
+          branch_id: form.branch_id || null,
         }),
       });
 
@@ -330,6 +341,7 @@ function UserManagement() {
                   <p className="text-xs text-gray-400 mt-0.5">
                     {u.email}
                     {u.companies?.name && <span className="ml-2 text-gray-300">· {u.companies.name}</span>}
+                    {u.branch_id && branches.find(b => b.id === u.branch_id) && <span className="ml-2 text-violet-400">· {branches.find(b => b.id === u.branch_id).name}</span>}
                     {u.telegram_id && <span className="ml-2 text-blue-400">· TG: {u.telegram_id}</span>}
                     {u.salesman_name && <span className="ml-2 text-emerald-500">· {u.salesman_name}</span>}
                   </p>
@@ -402,13 +414,30 @@ function UserManagement() {
                 <label className="text-xs font-medium text-gray-600 block mb-1">
                   Company {form.role !== "master" && <span className="text-red-500">*</span>}
                 </label>
-                <select value={form.company_id} onChange={e => setForm(p => ({ ...p, company_id: e.target.value }))}
+                <select value={form.company_id} onChange={e => setForm(p => ({ ...p, company_id: e.target.value, branch_id: "" }))}
                   disabled={!isMaster}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white disabled:bg-gray-50">
                   <option value="">-- Select company --</option>
                   {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
+
+              {/* Branch — drives the order form's salesman-by-branch grouping */}
+              {(() => {
+                const companyBranches = branches.filter(b => b.company_id === form.company_id);
+                return (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Branch</label>
+                    <select value={form.branch_id} onChange={e => setForm(p => ({ ...p, branch_id: e.target.value }))}
+                      disabled={!form.company_id}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white disabled:bg-gray-50">
+                      <option value="">{form.company_id ? "-- No branch --" : "Select a company first"}</option>
+                      {companyBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-0.5">Groups this salesman under a branch in the order form picker</p>
+                  </div>
+                );
+              })()}
 
               {/* Salesman name */}
               <div>
