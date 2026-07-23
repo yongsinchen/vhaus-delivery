@@ -35,7 +35,7 @@ function ServicePage() {
   const [convertRemark, setConvertRemark] = useState("");
 
   // Create form
-  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false });
+  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" });
   const [orderSearch, setOrderSearch] = useState("");
   const [orderResults, setOrderResults] = useState([]);
 
@@ -87,7 +87,7 @@ function ServicePage() {
         const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify(createForm) });
         const d = await res.json();
         if (!d.service) throw new Error(d.error || "Failed");
-        toast.success("Service case created"); setShowCreate(false); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false }); loadServices();
+        toast.success("Service case created"); setShowCreate(false); setOrderSearch(""); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); loadServices();
       });
     } catch (e) { toast.error(e.message); }
   };
@@ -276,6 +276,7 @@ function ServicePage() {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {(svc._order?.so_number || svc.orders?.so_number) && <span className="text-violet-600 font-medium">{svc._order?.so_number || svc.orders?.so_number} · </span>}
                     {svc._order?.customer_name || svc.orders?.customer_name || svc.customer_name || "No order linked"}
+                    {(svc._order?.salesman || svc.orders?.salesman) && <span className="ml-2 text-gray-400">· {svc._order?.salesman || svc.orders?.salesman}</span>}
                     {(svc._assigned?.name || svc.assigned?.name) && <span className="ml-2 text-gray-400">→ {svc._assigned?.name || svc.assigned?.name}</span>}
                   </p>
                   {svc.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{svc.description}</p>}
@@ -333,12 +334,20 @@ function ServicePage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Link to Order (optional)</label>
-                <input value={orderSearch} onChange={e => searchOrders(e.target.value)} placeholder="Search SO number or customer..."
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                {orderResults.length > 0 && (
+                {createForm.order_id ? (
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-sm">
+                    <span className="text-violet-700 font-medium truncate">{orderSearch || "Order linked"}</span>
+                    <button onClick={() => { setCreateForm(f => ({ ...f, order_id: "" })); setOrderSearch(""); }}
+                      className="ml-2 text-xs text-gray-500 hover:text-gray-700 shrink-0">Clear</button>
+                  </div>
+                ) : (
+                  <input value={orderSearch} onChange={e => searchOrders(e.target.value)} placeholder="Search SO number or customer..."
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                )}
+                {!createForm.order_id && orderResults.length > 0 && (
                   <div className="border border-gray-200 rounded-xl mt-1 max-h-32 overflow-y-auto">
                     {orderResults.map(o => (
-                      <button key={o.id} onClick={() => { setCreateForm(f => ({ ...f, order_id: o.id })); setOrderSearch(`${o.so_number} — ${o.customer_name}`); setOrderResults([]); }}
+                      <button key={o.id} onClick={() => { setCreateForm(f => ({ ...f, order_id: o.id, customer_name: "", customer_phone: "", customer_address: "" })); setOrderSearch(`${o.so_number} — ${o.customer_name}`); setOrderResults([]); }}
                         className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
                         <span className="font-bold text-violet-700">{o.so_number}</span> {o.customer_name}
                       </button>
@@ -346,6 +355,22 @@ function ServicePage() {
                   </div>
                 )}
               </div>
+              {/* No linked order → capture customer details directly (backend stores
+                  them on the service + its inert delivery order). */}
+              {!createForm.order_id && (
+                <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <p className="text-xs font-medium text-gray-500">Customer details</p>
+                  <input value={createForm.customer_name} onChange={e => setCreateForm(f => ({ ...f, customer_name: e.target.value }))}
+                    placeholder="Customer name"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  <input value={createForm.customer_phone} onChange={e => setCreateForm(f => ({ ...f, customer_phone: e.target.value }))}
+                    placeholder="Contact number"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                  <textarea value={createForm.customer_address} onChange={e => setCreateForm(f => ({ ...f, customer_address: e.target.value }))}
+                    placeholder="Address" rows={2}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
                 <textarea value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
@@ -393,7 +418,7 @@ function ServicePage() {
                       <span className="text-2xl">{TYPE_ICON[detail.service?.service_type]}</span>
                       <div>
                         <h2 className="font-bold text-gray-900">{SERVICE_TYPES[detail.service?.service_type]}</h2>
-                        <p className="text-xs text-gray-500">{detail.order?.so_number} · {detail.order?.customer_name}</p>
+                        <p className="text-xs text-gray-500">{[detail.order?.so_number, detail.order?.customer_name].filter(Boolean).join(" · ")}</p>
                       </div>
                     </div>
                     <button onClick={() => setDetail(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
@@ -448,6 +473,7 @@ function ServicePage() {
                       <p className="text-sm font-medium text-gray-900">{detail.order.customer_name}</p>
                       {detail.order.contact && <p className="text-xs text-gray-600">{detail.order.contact}</p>}
                       {detail.order.address && <p className="text-xs text-gray-500">{detail.order.address}</p>}
+                      {detail.order.salesman && <p className="text-xs text-gray-500 pt-1">Salesman: <span className="font-medium text-gray-700">{detail.order.salesman}</span></p>}
                     </div>
                   )}
 

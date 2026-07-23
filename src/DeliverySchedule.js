@@ -190,10 +190,20 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
   // custom_dimensions/notes (when the backend provides them) so blank
   // product_name still has somewhere to fall back to.
   const dord = schedule.delivery_orders || null;
+  // Resolve each DO line's supplier arrival date from the legacy order's items
+  // JSON (where the supplier-DO OCR records arrivalDate), matched on code/name,
+  // so the DO board shows when each line arrived — not just supplier/code.
+  const arrivalByKey = {};
+  for (const li of parseItems(o.items)) {
+    const k = String(li.itemCode || li.itemName || "").toLowerCase().trim();
+    if (k && li.arrivalDate) arrivalByKey[k] = li.arrivalDate;
+  }
   const items = dord
     ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
         itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
-        supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes, _do: true,
+        supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+        arrivalDate: arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
+        _do: true,
       }))
     : parseItems(o.items);
   const readiness = stopReadiness(items);
@@ -358,11 +368,25 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
         </div>
       </div>
 
-      {/* Remark strip + dispatcher note — full width, below the table */}
-      {o.remark && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded px-2 py-1 text-[11px] mt-1">
-          <span className="font-semibold">Remark: </span>{o.remark}
-        </div>
+      {/* Remark strip + dispatcher note — full width, below the table.
+          Service stops show the linked SO and service detail in their own
+          labelled fields instead of the combined "Linked to SO: <n> | …" blob
+          the service RPC writes into remark/service_note. */}
+      {o.type === "Service" ? (() => {
+        const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
+        if (!o.linked_so && !detail) return null;
+        return (
+          <div className="bg-violet-50 border border-violet-200 text-violet-800 rounded px-2 py-1 text-[11px] mt-1 space-y-0.5">
+            {o.linked_so && <div><span className="font-semibold">Linked SO: </span>{o.linked_so}</div>}
+            {detail && <div><span className="font-semibold">Service: </span>{detail}</div>}
+          </div>
+        );
+      })() : (
+        o.remark && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded px-2 py-1 text-[11px] mt-1">
+            <span className="font-semibold">Remark: </span>{o.remark}
+          </div>
+        )
       )}
       {!isLocked ? (
         <input value={notes} onChange={e => setNotes(e.target.value)}
