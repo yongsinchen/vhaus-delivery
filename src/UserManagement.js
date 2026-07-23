@@ -43,11 +43,15 @@ function UserManagement() {
     if (compErr) console.error("Load companies error:", compErr);
     setCompanies(comps || []);
 
-    // Load branches so the user form can assign one (grouped by company).
-    const { data: brs, error: brErr } = await supabase
-      .from("branches").select("id, name, company_id").order("name");
-    if (brErr) console.error("Load branches error:", brErr);
-    setBranches(brs || []);
+    // Load branches so the user form can assign one, and so cards can show the
+    // branch name. Via the backend (service role) — a direct supabase query is
+    // blocked by RLS on the branches table and returns nothing.
+    try {
+      const bHeaders = await getAuthHeaders();
+      const bRes = await fetch(`${BACKEND}/branches`, { headers: bHeaders });
+      const bData = await bRes.json().catch(() => ({}));
+      setBranches(Array.isArray(bData.branches) ? bData.branches : []);
+    } catch (e) { console.error("Load branches error:", e); }
 
     // Load users via backend
     try {
@@ -162,6 +166,26 @@ function UserManagement() {
   // active (master global view), fall back to the full list.
   const scopeCompanyId = activeCompanyId || currentUser?.company_id || null;
   const visibleUsers = scopeCompanyId ? users.filter(u => u.company_id === scopeCompanyId) : users;
+
+  // Masters can assign a user to another company; lazily load that company's
+  // branches for the dropdown (merged in), since loadData only fetched the
+  // active company's. No-op once we already have that company's branches.
+  useEffect(() => {
+    if (!showForm || !form.company_id) return;
+    if (branches.some(b => b.company_id === form.company_id)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND}/branches?company_id=${form.company_id}`, { headers });
+        const d = await res.json().catch(() => ({}));
+        if (!cancelled && Array.isArray(d.branches) && d.branches.length) {
+          setBranches(prev => { const ids = new Set(prev.map(b => b.id)); return [...prev, ...d.branches.filter(b => !ids.has(b.id))]; });
+        }
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [showForm, form.company_id]); // eslint-disable-line
 
   const openCreate = () => {
     setForm({

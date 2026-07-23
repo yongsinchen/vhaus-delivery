@@ -561,7 +561,10 @@ function OrdersPage() {
       setCategorySpecs(map);
     });
     authHeaders().then(h => fetch(`${API}/company-settings?company_id=${companyId}`, { headers: h })).then(r => r.json()).then(d => {
-      if (d.settings && d.settings.company_name) {
+      // Load whenever a settings row exists — not only when company_name is set —
+      // so a company that uploaded a logo but left the name blank still prints
+      // its logo (each field falls back to a default individually).
+      if (d.settings) {
         setCompanyInfo({
           name: d.settings.company_name || DEFAULT_COMPANY.name,
           reg: d.settings.registration_no || DEFAULT_COMPANY.reg,
