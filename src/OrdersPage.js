@@ -809,6 +809,7 @@ function OrdersPage() {
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
       country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
       items: (f.sales_order_items || []).map(it => ({
+        id: it.id, // carried so amount-only edits can match lines when an active DO exists
         product_id: it.product_id, product_code: it.product_code, product_name: it.product_name,
         size: it.size, color: it.color, is_custom: it.is_custom,
         linked_custom_item: it.linked_custom_item || false,
