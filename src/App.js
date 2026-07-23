@@ -196,7 +196,7 @@ const NAV = [
 // state values, and every one of them used to re-render this (heaviest)
 // JSX tree. As a memo child with stable props it only re-renders when the
 // dashboard data itself changes.
-const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity }) {
+const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity }) {
   return (
       <div className="space-y-6">
         <div>
@@ -445,6 +445,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, orders, allC
         {/* Recent Delivery Updates — admin-gated (manage roles only, hidden
             for salesmen). Backend enforces DELIVERY_ORDER_VIEW server-side;
             this gate just keeps it off a salesman's dashboard. */}
+        {isMaster && <BranchSalesPanel />}
         {canViewDeliveryActivity && <DeliveryActivityPanel />}
 
         {/* Outstanding balances */}
@@ -583,6 +584,91 @@ function DeliveryActivityPanel() {
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Branch Sales performance panel (master-only, Overview page) ──────
+// Self-contained like DeliveryActivityPanel: owns its month + fetch state so
+// OverviewPage's prop surface doesn't grow. Shows each branch's total sales
+// (RM) for the picked month, biggest first, with a share bar.
+function BranchSalesPanel() {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await authFetch(`${BACKEND}/dashboard/branch-sales?month=${month}`);
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const d = await res.json();
+      setRows(Array.isArray(d?.branches) ? d.branches : []);
+      setTotal(Number(d?.total) || 0);
+    } catch (e) {
+      setError(e.message || "Failed to load branch sales");
+    }
+    setLoading(false);
+  }, [month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmtRM = n => `RM ${(Number(n) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const max = rows.reduce((m, r) => Math.max(m, Number(r.total_sales) || 0), 0);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="font-bold text-gray-800">Branch Performance</h2>
+          <p className="text-xs text-gray-400">Total sales by branch</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-violet-300" />
+          <button onClick={load} disabled={loading} className="text-xs bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 font-medium text-gray-600">{loading ? "…" : "↻"}</button>
+        </div>
+      </div>
+      {loading ? (
+        <div className="p-4 space-y-2">{[1,2,3].map(i => <div key={i} className="h-9 bg-gray-100 rounded-xl animate-pulse" />)}</div>
+      ) : error ? (
+        <div className="text-center py-8 text-gray-400">
+          <p className="text-sm text-red-500 mb-2">{error}</p>
+          <button onClick={load} className="text-xs bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700">Retry</button>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="text-center py-10 text-gray-400">
+          <div className="text-3xl mb-2">🏢</div>
+          <p className="text-sm font-medium">No sales this month</p>
+          <p className="text-xs mt-0.5">Create branches in Company Settings and assign orders to them.</p>
+        </div>
+      ) : (
+        <>
+          <div className="divide-y divide-gray-50">
+            {rows.map((r, i) => {
+              const pct = total > 0 ? Math.round((Number(r.total_sales) / total) * 100) : 0;
+              const barPct = max > 0 ? Math.round((Number(r.total_sales) / max) * 100) : 0;
+              return (
+                <div key={r.branch_id || `unassigned-${i}`} className="px-4 py-2.5">
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <span className={`text-sm font-medium ${r.branch_id ? "text-gray-800" : "text-gray-400 italic"}`}>{r.branch_name}</span>
+                    <span className="text-sm font-bold text-gray-900 whitespace-nowrap">{fmtRM(r.total_sales)} <span className="text-xs font-normal text-gray-400">({pct}%)</span></span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-violet-400" style={{ width: `${barPct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="px-4 py-2.5 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+            <span className="text-xs font-medium text-gray-500">Company total</span>
+            <span className="text-sm font-bold text-gray-900">{fmtRM(total)}</span>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1371,7 +1457,7 @@ export default function App() {
 
   const renderPage = () => {
     // OVERVIEW
-    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
+    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
     if (page === "orders") return <OrdersPage />;
