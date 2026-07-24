@@ -37,9 +37,15 @@ const parseItems = items => {
 // Derived from the three legacy date fields the warehouse Excel sheet used:
 // arrival > supplier sent > ordered > nothing.
 const itemStatus = (item) => {
-  // Service line items carry their own done/pending status (not the warehouse
-  // arrival lifecycle). Done counts as "ready" for stop readiness.
+  // Service line items: Claim items (action 3) gate on the claimed part
+  // arriving — not arrived until arrival_date is set, so the stop stays
+  // Partial/Waiting. Assemble/Service items gate on their done/pending status.
   if (item.service_item) {
+    if (Number(item.action_type) === 3) {
+      return item.arrivalDate
+        ? { label: "✓ Arrived", cls: "bg-emerald-100 text-emerald-700", arrived: true }
+        : { label: "No arrival", cls: "bg-red-100 text-red-600", arrived: false };
+    }
     return item.item_status === "done"
       ? { label: "✓ Done", cls: "bg-emerald-100 text-emerald-700", arrived: true }
       : { label: "Pending", cls: "bg-gray-100 text-gray-600", arrived: false };
@@ -531,7 +537,9 @@ function TeamPrintView({ team, onClose }) {
                         <td style={{...BD,textAlign:"center"}}>{item.supplierSentDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}></td>
                         <td style={{...BD,textAlign:"center"}}>{item.service_item
-                          ? (item.item_status==="done"?<span style={{color:"#059669",fontWeight:"bold"}}>✓ Done</span>:<span style={{color:"#6b7280"}}>Pending</span>)
+                          ? (Number(item.action_type)===3
+                              ? (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)
+                              : (item.item_status==="done"?<span style={{color:"#059669",fontWeight:"bold"}}>✓ Done</span>:<span style={{color:"#6b7280"}}>Pending</span>))
                           : (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)}</td>
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>{o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (o.remark&&<div>{o.remark}</div>)}{sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}</td>}
                       </tr>
