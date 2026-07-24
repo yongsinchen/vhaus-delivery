@@ -1218,9 +1218,18 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const updateAllSchedulesStatus = async (teamId, status) => {
     const team = teams.find(t => t.id === teamId);
     if (!team) return;
+    // Reverting a route to Pending/Confirmed (e.g. undoing an accidental
+    // "Out for Delivery") must never un-deliver a stop that is already
+    // Delivered — that would bypass the completion ledger. Downgrades touch
+    // only the still-open stops; forward moves touch every stop.
+    const isDowngrade = status === "Pending" || status === "Confirmed";
+    const targets = isDowngrade
+      ? (team.schedules || []).filter(s => normalizeScheduleStatus(s.status) !== "Delivered")
+      : (team.schedules || []);
+    if (targets.length === 0) return;
     try {
       await withLoading("Updating route status…", async () => {
-        await Promise.all((team.schedules || []).map(s => updateScheduleStatus(s.id, status)));
+        await Promise.all(targets.map(s => updateScheduleStatus(s.id, status)));
         await loadData();
       });
     } catch (e) { toast.error("Failed to update route: " + e.message); }
@@ -1590,7 +1599,13 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                               onChange={e => updateAllSchedulesStatus(team.id, e.target.value)}
                               className={`text-xs rounded px-2 py-0.5 border-0 font-medium cursor-pointer ${statusColor(teamStatus)}`}>
                               {isLocked
-                                ? ["Out for Delivery","Delivered"].map(s => <option key={s}>{s}</option>)
+                                ? (teamStatus === "Out for Delivery"
+                                    // Allow undoing an accidental Out for Delivery back to a
+                                    // normal status. Delivered stops are protected in
+                                    // updateAllSchedulesStatus so a revert never un-delivers.
+                                    ? ["Out for Delivery","Confirmed","Pending","Delivered"]
+                                    : ["Out for Delivery","Delivered"]
+                                  ).map(s => <option key={s}>{s}</option>)
                                 : isConfirmed
                                 ? ["Confirmed","Pending"].concat(team.team_date === todayMY ? ["Out for Delivery"] : []).concat(team.team_date < todayMY ? ["Delivered"] : []).map(s => <option key={s}>{s}</option>)
                                 : ["Pending","Confirmed"].concat(team.team_date === todayMY ? ["Out for Delivery"] : [], ["Delivered"]).map(s => <option key={s}>{s}</option>)
@@ -1602,6 +1617,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           )}
                           {!readOnly && isConfirmed && (
                             <p className="text-xs text-green-600 text-right font-medium">Confirmed — set to Pending to edit</p>
+                          )}
+                          {!readOnly && isLocked && teamStatus === "Out for Delivery" && (
+                            <p className="text-xs text-gray-400 text-right">Set to Confirmed/Pending to undo &amp; edit</p>
                           )}
                         </div>
                         <button onClick={() => setPrintTeam({ ...team, team_date: team.team_date || date })} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">Print</button>
