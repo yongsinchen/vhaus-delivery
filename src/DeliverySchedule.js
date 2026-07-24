@@ -37,6 +37,13 @@ const parseItems = items => {
 // Derived from the three legacy date fields the warehouse Excel sheet used:
 // arrival > supplier sent > ordered > nothing.
 const itemStatus = (item) => {
+  // Service line items carry their own done/pending status (not the warehouse
+  // arrival lifecycle). Done counts as "ready" for stop readiness.
+  if (item.service_item) {
+    return item.item_status === "done"
+      ? { label: "✓ Done", cls: "bg-emerald-100 text-emerald-700", arrived: true }
+      : { label: "Pending", cls: "bg-gray-100 text-gray-600", arrived: false };
+  }
   if (item._do) return { label: "✓ Allocated", cls: "bg-emerald-100 text-emerald-700", arrived: true };
   if (item.arrivalDate) return { label: "✓ Arrived", cls: "bg-emerald-100 text-emerald-700", arrived: true };
   if (item.supplierSentDate) return { label: "Sent", cls: "bg-orange-100 text-orange-700", arrived: false };
@@ -61,14 +68,17 @@ const EMPTY_VEHICLE = { driver_name: "", vehicle_plate: "", vehicle_type: "", st
 // instead of hiding the gap.
 const NO_DESC = "(no description)";
 const itemDisplayName = (item) => {
+  // Service items prefix their action (Assemble / Service / Claim) so the work
+  // to do is obvious on the board and the printed schedule.
+  const prefix = item.service_item && item.action_label ? `[${item.action_label}] ` : "";
   const name = (item.itemName || item.product_name || "").trim();
-  if (name) return { text: name, isFallback: false };
+  if (name) return { text: prefix + name, isFallback: false };
   const dim = (item.custom_dimensions || "").trim();
-  if (dim) return { text: dim, isFallback: false };
+  if (dim) return { text: prefix + dim, isFallback: false };
   const note = (item.notes || "").trim();
-  if (note) return { text: note, isFallback: false };
+  if (note) return { text: prefix + note, isFallback: false };
   const code = (item.itemCode || item.product_code || "").trim();
-  if (code) return { text: code, isFallback: false };
+  if (code) return { text: prefix + code, isFallback: false };
   return { text: NO_DESC, isFallback: true };
 };
 
@@ -520,7 +530,9 @@ function TeamPrintView({ team, onClose }) {
                         <td style={{...BD,textAlign:"center"}}>{item.itemOrderDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}>{item.supplierSentDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}></td>
-                        <td style={{...BD,textAlign:"center"}}>{item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>}</td>
+                        <td style={{...BD,textAlign:"center"}}>{item.service_item
+                          ? (item.item_status==="done"?<span style={{color:"#059669",fontWeight:"bold"}}>✓ Done</span>:<span style={{color:"#6b7280"}}>Pending</span>)
+                          : (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)}</td>
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>{o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (o.remark&&<div>{o.remark}</div>)}{sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}</td>}
                       </tr>
                     ))}
