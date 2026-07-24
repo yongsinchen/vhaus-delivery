@@ -428,10 +428,20 @@ function TeamPrintView({ team, onClose }) {
     // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
     // number. Fix #1: carry product_code + supplier_name so the printed sheet
     // matches the on-screen Code/Supplier columns for DO lines too.
+    // Resolve each DO line's supplier arrival date from the legacy order's items
+    // JSON (where the supplier-DO OCR records arrivalDate), matched on code/name,
+    // so the printed "Arrival PG" column shows when each line arrived instead of
+    // always printing "No arrival" — mirrors the on-screen StopRow resolution.
+    const arrivalByKey = {};
+    for (const li of parseItemsSafe(o.items)) {
+      const k = String(li.itemCode || li.itemName || "").toLowerCase().trim();
+      if (k && li.arrivalDate) arrivalByKey[k] = li.arrivalDate;
+    }
     let items = sc.delivery_orders
       ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
           itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
           supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+          arrivalDate: arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
         }))
       : parseItemsSafe(o.items);
     // Service orders have no line items (inert order, items='[]'); surface the
