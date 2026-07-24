@@ -91,7 +91,7 @@ function ServicePage() {
       await withLoading("Creating service case…", async () => {
         const items = createItems
           .filter(i => String(i.description || "").trim())
-          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1 }));
+          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1, arrival_date: Number(i.action_type) === 3 ? (i.arrival_date || null) : null }));
         const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify({ ...createForm, items }) });
         const d = await res.json();
         if (!d.service) throw new Error(d.error || "Failed");
@@ -432,19 +432,30 @@ function ServicePage() {
                 ) : (
                   <div className="space-y-2">
                     {createItems.map((it, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 w-4 text-right">{i + 1}.</span>
-                        <input value={it.description} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x))}
-                          placeholder="e.g. Dining chair"
-                          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                        <select value={it.action_type} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, action_type: Number(e.target.value) } : x))}
-                          className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white shrink-0">
-                          {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                        <input type="number" min="1" value={it.quantity} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
-                          className="w-12 px-1.5 py-1.5 rounded-lg border border-gray-200 text-xs text-center shrink-0" />
-                        <button type="button" onClick={() => setCreateItems(a => a.filter((_, idx) => idx !== i))}
-                          className="text-gray-300 hover:text-red-500 text-base px-1 shrink-0">×</button>
+                      <div key={i} className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400 w-4 text-right">{i + 1}.</span>
+                          <input value={it.description} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x))}
+                            placeholder="e.g. Dining chair"
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                          <select value={it.action_type} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, action_type: Number(e.target.value) } : x))}
+                            className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white shrink-0">
+                            {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          </select>
+                          <input type="number" min="1" value={it.quantity} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
+                            className="w-12 px-1.5 py-1.5 rounded-lg border border-gray-200 text-xs text-center shrink-0" />
+                          <button type="button" onClick={() => setCreateItems(a => a.filter((_, idx) => idx !== i))}
+                            className="text-gray-300 hover:text-red-500 text-base px-1 shrink-0">×</button>
+                        </div>
+                        {/* Claim items need the claimed part to arrive first. */}
+                        {Number(it.action_type) === 3 && (
+                          <div className="flex items-center gap-2 pl-6">
+                            <span className="text-xs text-gray-400">Arrival date</span>
+                            <input type="date" value={it.arrival_date || ""} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, arrival_date: e.target.value } : x))}
+                              className="px-2 py-1 rounded-lg border border-gray-200 text-xs" />
+                            <span className="text-xs text-gray-400">optional — leave blank until the part arrives</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -572,6 +583,19 @@ function ServicePage() {
                             </button>
                             <button onClick={() => deleteServiceItem(it.id)} className="text-xs px-2 py-1 rounded-lg text-red-500 hover:bg-red-50 ml-auto">Remove</button>
                           </div>
+                          {/* Claim items gate delivery readiness on the claimed
+                              part arriving — record its arrival date here. */}
+                          {Number(it.action_type) === 3 && (
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              <span className="text-xs font-medium text-gray-500">Arrival</span>
+                              <input type="date" value={(it.arrival_date || "").slice(0, 10)}
+                                onChange={e => updateServiceItem(it.id, { arrival_date: e.target.value || null })}
+                                className="text-xs px-2 py-1 rounded-lg border border-gray-200" />
+                              {it.arrival_date
+                                ? <span className="text-xs text-emerald-600 font-medium">✓ Arrived</span>
+                                : <span className="text-xs text-red-500 font-medium">No arrival yet</span>}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
