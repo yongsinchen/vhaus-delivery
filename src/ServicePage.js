@@ -15,6 +15,9 @@ const STATUS_STYLE = {
 };
 const LEG_STATUS = { pending: "bg-gray-100 text-gray-600", scheduled: "bg-blue-100 text-blue-700", in_progress: "bg-amber-100 text-amber-700", completed: "bg-emerald-100 text-emerald-700" };
 const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue-100 text-blue-700", approved: "bg-violet-100 text-violet-700", received: "bg-emerald-100 text-emerald-700", rejected: "bg-red-100 text-red-600" };
+// Per-item action on a service case (matches backend service_items.action_type).
+const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
+const ITEM_ACTION_ICON = { 1: "🪛", 2: "🔧", 3: "🔄" };
 
 function ServicePage() {
   const { user, activeCompanyId } = useAuth();
@@ -38,6 +41,8 @@ function ServicePage() {
   const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" });
   const [orderSearch, setOrderSearch] = useState("");
   const [orderResults, setOrderResults] = useState([]);
+  // Line items entered while creating a case (added later via the detail drawer).
+  const [createItems, setCreateItems] = useState([]);
 
   const [suppliers, setSuppliers] = useState([]); // eslint-disable-line
 
@@ -84,12 +89,49 @@ function ServicePage() {
   const createService = async () => {
     try {
       await withLoading("Creating service case…", async () => {
-        const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify(createForm) });
+        const items = createItems
+          .filter(i => String(i.description || "").trim())
+          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1 }));
+        const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify({ ...createForm, items }) });
         const d = await res.json();
         if (!d.service) throw new Error(d.error || "Failed");
-        toast.success("Service case created"); setShowCreate(false); setOrderSearch(""); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); loadServices();
+        toast.success("Service case created"); setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); loadServices();
       });
     } catch (e) { toast.error(e.message); }
+  };
+
+  // ── Service items (per-case line items with their own action + status) ──
+  const addServiceItem = async (serviceId) => {
+    const description = window.prompt("Item description (e.g. Dining chair):");
+    if (!description || !description.trim()) return;
+    try {
+      await withLoading("Adding item…", async () => {
+        await af(`${API}/service-cases/${serviceId}/items`, { method: "POST", body: JSON.stringify({ description: description.trim(), action_type: 2, quantity: 1 }) });
+        if (detail?.service) openDetail(detail.service);
+        loadServices();
+      });
+    } catch (e) { toast.error("Failed to add item: " + e.message); }
+  };
+
+  const updateServiceItem = async (itemId, updates) => {
+    try {
+      await withLoading("Updating item…", async () => {
+        await af(`${API}/service-items/${itemId}`, { method: "PATCH", body: JSON.stringify(updates) });
+        if (detail?.service) openDetail(detail.service);
+        loadServices();
+      });
+    } catch (e) { toast.error("Failed to update item: " + e.message); }
+  };
+
+  const deleteServiceItem = async (itemId) => {
+    if (!window.confirm("Remove this item?")) return;
+    try {
+      await withLoading("Removing item…", async () => {
+        await af(`${API}/service-items/${itemId}`, { method: "DELETE" });
+        if (detail?.service) openDetail(detail.service);
+        loadServices();
+      });
+    } catch (e) { toast.error("Failed to remove item: " + e.message); }
   };
 
   const updateServiceStatus = async (id, status) => {
@@ -377,6 +419,37 @@ function ServicePage() {
                   placeholder="What's the issue? What needs to be done?" rows={3}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
               </div>
+              {/* Line items — one row per thing to do, each with its own action.
+                  Optional at creation; can also be added from the detail drawer. */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-gray-500">Items (optional)</label>
+                  <button type="button" onClick={() => setCreateItems(a => [...a, { description: "", action_type: 2, quantity: 1 }])}
+                    className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Item</button>
+                </div>
+                {createItems.length === 0 ? (
+                  <p className="text-xs text-gray-400">No items — you can also add them after creating the case.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {createItems.map((it, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 w-4 text-right">{i + 1}.</span>
+                        <input value={it.description} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x))}
+                          placeholder="e.g. Dining chair"
+                          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                        <select value={it.action_type} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, action_type: Number(e.target.value) } : x))}
+                          className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white shrink-0">
+                          {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <input type="number" min="1" value={it.quantity} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
+                          className="w-12 px-1.5 py-1.5 rounded-lg border border-gray-200 text-xs text-center shrink-0" />
+                        <button type="button" onClick={() => setCreateItems(a => a.filter((_, idx) => idx !== i))}
+                          className="text-gray-300 hover:text-red-500 text-base px-1 shrink-0">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Service Creation Date</label>
@@ -465,6 +538,44 @@ function ServicePage() {
                       <p className="text-sm text-gray-700">{detail.service.description}</p>
                     </div>
                   )}
+
+                  {/* Items — the work list for this visit, each with its own
+                      action + done/pending status. Mirrored to the delivery
+                      schedule print server-side. */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-bold text-gray-500">ITEMS ({(detail.items || []).length})</p>
+                      <button onClick={() => addServiceItem(detail.service.id)} className="text-xs px-3 py-1 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Item</button>
+                    </div>
+                    {(detail.items || []).length === 0 && <p className="text-xs text-gray-400">No items yet</p>}
+                    <div className="space-y-2">
+                      {(detail.items || []).map((it, idx) => (
+                        <div key={it.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-gray-400 mr-1">{idx + 1}.</span>
+                              <span className="text-sm font-medium text-gray-900">{it.description}</span>
+                              {Number(it.quantity) > 1 && <span className="text-xs text-gray-400 ml-1">× {Number(it.quantity)}</span>}
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${it.status === "done" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
+                              {it.status === "done" ? "✓ Done" : "Pending"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <select value={it.action_type} onChange={e => updateServiceItem(it.id, { action_type: Number(e.target.value) })}
+                              className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
+                              {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{ITEM_ACTION_ICON[k]} {v}</option>)}
+                            </select>
+                            <button onClick={() => updateServiceItem(it.id, { status: it.status === "done" ? "pending" : "done" })}
+                              className={`text-xs px-3 py-1 rounded-lg ${it.status === "done" ? "bg-gray-100 text-gray-600" : "bg-emerald-600 text-white"}`}>
+                              {it.status === "done" ? "Mark pending" : "Mark done"}
+                            </button>
+                            <button onClick={() => deleteServiceItem(it.id)} className="text-xs px-2 py-1 rounded-lg text-red-500 hover:bg-red-50 ml-auto">Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* Customer info */}
                   {detail.order && (
