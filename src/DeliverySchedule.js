@@ -982,12 +982,116 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 }
 
 // -- Main Component ----------------------------------------------------
+// Delivery Orders tab — a flat list of every Delivery Order created for the
+// company, so undated (TBC) DOs have a home (they no longer clutter each date's
+// unassigned pool) and their delivery date can be set/changed from one place.
+function DeliveryOrdersTab({ onChanged }) {
+  const toast = useToast();
+  const [dos, setDos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showDone, setShowDone] = useState(false);
+  const [edit, setEdit] = useState({});      // do id -> date string being edited
+  const [savingId, setSavingId] = useState(null);
+  const TERMINAL = ["completed", "cancelled"];
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await af(`${API}/delivery-orders`);
+      const d = await res.json();
+      const list = d.delivery_orders || [];
+      setDos(list);
+      const e = {}; list.forEach(o => { e[o.id] = o.delivery_date || ""; });
+      setEdit(e);
+    } catch { toast.error("Failed to load delivery orders"); }
+    setLoading(false);
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
+
+  const applyDate = async (id, dateVal) => {
+    setSavingId(id);
+    try {
+      const res = await af(`${API}/delivery-orders/${id}`, { method: "PATCH", body: JSON.stringify({ delivery_date: dateVal || null }) });
+      const d = await res.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success(dateVal ? `Scheduled to ${dateVal}` : "Set to TBC");
+      await load();
+      if (onChanged) onChanged();
+    } finally { setSavingId(null); }
+  };
+
+  const statusCls = s => ({ draft: "bg-gray-100 text-gray-600", scheduled: "bg-blue-100 text-blue-700", out_for_delivery: "bg-amber-100 text-amber-700", arrived: "bg-indigo-100 text-indigo-700", delivered: "bg-green-100 text-green-700", completed: "bg-green-100 text-green-700", failed: "bg-red-100 text-red-700", cancelled: "bg-gray-200 text-gray-500" }[String(s || "").toLowerCase()] || "bg-gray-100 text-gray-600");
+
+  const rows = dos
+    .filter(o => showDone || !TERMINAL.includes(String(o.status || "").toLowerCase()))
+    .sort((a, b) => {
+      const ad = a.delivery_date || "", bd = b.delivery_date || "";  // TBC (no date) first
+      if (!ad && bd) return -1;
+      if (ad && !bd) return 1;
+      return ad.localeCompare(bd);
+    });
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
+        <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span></h3>
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-gray-500 flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show completed/cancelled</label>
+          <button onClick={load} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
+        </div>
+      </div>
+      {loading ? <div className="p-6 text-center text-gray-400 text-sm">Loading…</div>
+        : rows.length === 0 ? <div className="p-6 text-center text-gray-400 text-sm">No delivery orders.</div>
+        : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="bg-gray-50 text-gray-500 text-left">
+                <th className="px-3 py-2">DO #</th><th className="px-3 py-2">SO #</th><th className="px-3 py-2">Customer</th>
+                <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Delivery date</th><th className="px-3 py-2"></th>
+              </tr></thead>
+              <tbody>
+                {rows.map(o => {
+                  const so = o.sales_orders || {};
+                  const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
+                  const terminal = TERMINAL.includes(String(o.status || "").toLowerCase());
+                  return (
+                    <tr key={o.id} className="border-t">
+                      <td className="px-3 py-2 font-bold text-violet-700 whitespace-nowrap">{o.do_number}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{so.order_number}</td>
+                      <td className="px-3 py-2">{so.customer_name}</td>
+                      <td className="px-3 py-2 text-gray-500 max-w-[240px] truncate">{items.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</td>
+                      <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${statusCls(o.status)}`}>{o.status}</span></td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {terminal ? <span className="text-gray-500">{o.delivery_date || "—"}</span>
+                          : <><input type="date" value={edit[o.id] || ""} onChange={e => setEdit(p => ({ ...p, [o.id]: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
+                              {!o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</>}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {!terminal && (
+                          <div className="flex items-center gap-1">
+                            <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
+                            {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+  );
+}
+
 function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
   // Open on the date passed in (e.g. clicked from the overview calendar).
   useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
+  const [viewMode, setViewMode] = useState("schedule"); // "schedule" board | "orders" Delivery Orders tab
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
   const [trips, setTrips] = useState([]);
@@ -1140,7 +1244,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     // A DO with a target delivery_date only appears in the pool on that date's
     // tab; undated drafts appear on every date (they still need a slot).
     // Failed attempts (Phase 5) always show — they need rescheduling urgently.
-    ...unassignedDos.filter(d => d.status === "failed" || !d.delivery_date || d.delivery_date === date).map(d => ({ ...d, _type: "do" })),
+    // Undated (TBC) DOs no longer appear on every date — they live in the
+    // "Delivery Orders" tab until a date is set. Failed attempts still surface
+    // for urgent rescheduling; dated DOs show on their own date.
+    ...unassignedDos.filter(d => d.status === "failed" || d.delivery_date === date).map(d => ({ ...d, _type: "do" })),
   ].sort((a, b) => {
     const aTime = (a._type === "order" || a._type === "service") ? (a.time_slot || "") : (a.orders?.time_slot || "");
     const bTime = (b._type === "order" || b._type === "service") ? (b.time_slot || "") : (b.orders?.time_slot || "");
@@ -1279,7 +1386,14 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 relative">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <h2 className="text-base font-bold text-gray-700">Delivery Schedule</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-bold text-gray-700">Delivery Schedule</h2>
+          <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
+            <button onClick={() => setViewMode("schedule")} className={`px-3 py-1 rounded-md ${viewMode === "schedule" ? "bg-white shadow text-blue-700" : "text-gray-500"}`}>📅 Schedule</button>
+            <button onClick={() => setViewMode("orders")} className={`px-3 py-1 rounded-md ${viewMode === "orders" ? "bg-white shadow text-blue-700" : "text-gray-500"}`}>📦 Delivery Orders</button>
+          </div>
+        </div>
+        {viewMode === "schedule" && (
         <div className="flex items-center gap-2 flex-wrap">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium text-blue-700" />
           {/* Fix #7: native <input type="date"> can't paint per-day markers,
@@ -1296,6 +1410,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
           {!readOnly && <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>}
         </div>
+        )}
       </div>
 
       {loading && <div className="absolute inset-0 z-40 flex items-start justify-center pt-24 bg-white/40 pointer-events-none"><div className="flex items-center gap-2 bg-white shadow-lg rounded-full px-4 py-2 text-sm text-gray-600 border"><span className="inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />Updating…</div></div>}
@@ -1409,7 +1524,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         </div>
       )}
 
-      <div className="flex flex-col xl:flex-row gap-4">
+      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} />}
+
+      <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
         {/* Unassigned Panel */}
         <div className="xl:w-72 flex-shrink-0">
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
