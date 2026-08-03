@@ -997,7 +997,6 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
   const [serviceOrders, setServiceOrders] = useState([]);
-  const [unscheduledServices, setUnscheduledServices] = useState([]);
   const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
   const [readiness, setReadiness] = useState(null);
@@ -1090,10 +1089,6 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       const res = await af(`${API}/delivery/unassigned?date=${date}${companyId ? `&company_id=${companyId}` : ""}`);
       const data = await res.json();
       setServiceOrders(Array.isArray(data) ? data.filter(o => o.type === "Service") : []);
-
-      const res2 = await af(`${API}/services/unscheduled${companyId ? `?company_id=${companyId}` : ""}`);
-      const data2 = await res2.json();
-      setUnscheduledServices(Array.isArray(data2) ? data2 : []);
     } catch (e) { console.error("loadServiceOrders error:", e); }
   }, [date, companyId]);
 
@@ -1527,53 +1522,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           </div>
         </div>
 
-        {/* Unscheduled Services Panel */}
-        {unscheduledServices.length > 0 && (
-          <div className="xl:w-72 flex-shrink-0">
-            <div className="bg-white rounded-xl border border-violet-200 shadow-sm">
-              <div className="px-4 py-3 border-b bg-violet-50 rounded-t-xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-violet-700">
-                    Unscheduled Services <span className="ml-1 bg-violet-200 text-violet-800 text-xs px-2 py-0.5 rounded-full">{unscheduledServices.length}</span>
-                  </h3>
-                </div>
-                <p className="text-xs text-gray-400 mt-0.5">Drag to team — date auto-set to {date}</p>
-              </div>
-              <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
-                {unscheduledServices.map(item => {
-                  const items = parseItems(item.items);
-                  return (
-                    <div key={`usvc-${item.id}`}
-                      className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
-                      draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order", _setDate: true })}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
-                          <span className="font-bold text-violet-700 text-xs">{item.so_number}</span>
-                          {item.sv_number && <span className="text-xs text-violet-400">{item.sv_number}</span>}
-                        </div>
-                        {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
-                      </div>
-                      <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
-                      <p className="text-xs text-gray-400 leading-tight truncate">{item.address}</p>
-                      {item.service_note && <p className="text-xs text-violet-600 mt-0.5 truncate">{item.service_note}</p>}
-                      <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                      {!readOnly && teams.length > 0 && (
-                        <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order", true); }}
-                          className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                          <option value="">Schedule to team...</option>
-                          {teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; }).map(t => (
-                            <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Unscheduled Services panel removed — services without a delivery
+            date are no longer shown on the delivery board; give them a date on
+            the Service page and they appear as dated services. */}
 
         {/* Team Cards (replaces Route Cards) */}
         <div className="flex-1 min-w-0">
