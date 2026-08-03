@@ -337,6 +337,17 @@ function CommissionPage() {
                   });
                 } catch (e) { toast.error("Recalculation failed: " + e.message); }
               }} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">🔄 Recalculate All Orders</button>
+              <button onClick={async () => {
+                try {
+                  await withLoading("Re-syncing missing orders… this may take a moment", async () => {
+                    const res = await af(`${API}/sales-orders/resync-missing`, { method: "POST" });
+                    const d = await res.json();
+                    if (d.error) throw new Error(d.error);
+                    toast.success(`${d.synced}/${d.missing} missing orders synced, ${d.commissioned} commissioned`);
+                    loadCommissions();
+                  });
+                } catch (e) { toast.error("Re-sync failed: " + e.message); }
+              }} className="px-4 py-2 rounded-xl text-sm bg-amber-600 text-white hover:bg-amber-700" title="Find confirmed sales orders that never created a delivery/commission row and sync them">🔗 Re-sync Missing Orders</button>
             </div>
           )}
           {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
