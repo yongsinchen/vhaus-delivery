@@ -252,12 +252,15 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
     if (onSaved) onSaved(); // trigger re-sort
   };
 
-  const saveReschedule = async () => {
-    if (!rescheduleDate || !dord) return;
+  // tbc=true reschedules to "To Be Confirmed" (clears the date); otherwise uses
+  // the picked date. Either way the backend unassigns the DO from its team, so
+  // it returns to the unassigned pool for the new date (or every date, if TBC).
+  const saveReschedule = async (tbc = false) => {
+    if (!dord || (!tbc && !rescheduleDate)) return;
     setRescheduling(true);
     try {
       const res = await af(`${API}/delivery-orders/${dord.id}`, {
-        method: "PATCH", body: JSON.stringify({ delivery_date: rescheduleDate })
+        method: "PATCH", body: JSON.stringify({ delivery_date: tbc ? null : rescheduleDate })
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
@@ -306,7 +309,8 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
                 showReschedule ? (
                   <span className="flex items-center gap-1">
                     <input type="date" value={rescheduleDate} onChange={e => setRescheduleDate(e.target.value)} className="text-[10px] border rounded px-1 py-0.5 w-[102px]" />
-                    <button onClick={saveReschedule} disabled={rescheduling || !rescheduleDate} className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded disabled:opacity-50">{rescheduling ? "…" : "Save"}</button>
+                    <button onClick={() => saveReschedule(false)} disabled={rescheduling || !rescheduleDate} className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded disabled:opacity-50">{rescheduling ? "…" : "Save"}</button>
+                    <button onClick={() => saveReschedule(true)} disabled={rescheduling} className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded disabled:opacity-50" title="Reschedule to To-Be-Confirmed (no date) — order goes to the unassigned pool">TBC</button>
                     <button onClick={() => setShowReschedule(false)} className="text-[10px] text-gray-400 hover:text-gray-600">Cancel</button>
                   </span>
                 ) : (
