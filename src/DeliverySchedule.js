@@ -1133,10 +1133,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const combinedUnassigned = [
     ...unassigned.filter(o => !o.is_multi_trip && o.type !== "Service" && !activeDoSoNumbers.has(o.so_number)).map(o => ({ ...o, _type: "order" })),
     ...serviceOrders.map(o => ({ ...o, _type: "service" })),
-    // Undated (unscheduled) service orders — created without a date, so they
-    // don't come back from /delivery/unassigned?date=. Show them in the pool so
-    // they can be scheduled. Dedupe against dated serviceOrders by id.
-    ...unscheduledServices.filter(u => !serviceOrders.some(so => so.id === u.id)).map(o => ({ ...o, _type: "service" })),
+    // Undated (unscheduled) services are intentionally NOT mixed into the
+    // unassigned column — they have no delivery date, so they belong only in
+    // the dedicated "Unscheduled Services" section below (they were previously
+    // shown in both, cluttering the day's unassigned pool).
     ...trips.map(t => ({ ...t, _type: "trip" })),
     // A DO with a target delivery_date only appears in the pool on that date's
     // tab; undated drafts appear on every date (they still need a slot).
