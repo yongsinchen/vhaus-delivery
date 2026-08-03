@@ -343,7 +343,9 @@ function CommissionPage() {
                     const res = await af(`${API}/sales-orders/resync-missing`, { method: "POST" });
                     const d = await res.json();
                     if (d.error) throw new Error(d.error);
-                    toast.success(`${d.synced}/${d.missing} missing orders synced, ${d.commissioned} commissioned`);
+                    const msg = `${d.synced}/${d.missing} synced, ${d.commissioned} commissioned${d.failed ? `, ${d.failed} FAILED` : ""}`;
+                    if (d.failed) toast.error(msg + " — see console"), console.warn("Re-sync failures:", d.errors);
+                    else toast.success(msg);
                     loadCommissions();
                   });
                 } catch (e) { toast.error("Re-sync failed: " + e.message); }
