@@ -455,6 +455,7 @@ function OrdersPage() {
   const [specOptionsMap, setSpecOptionsMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
+  const [amendedCount, setAmendedCount] = useState(0); // true total across all pages, not just the loaded page
   const [sortKey, setSortKey] = useState("created_at:desc"); // "column:order" passed to /sales-orders
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -526,6 +527,15 @@ function OrdersPage() {
     setPage(d.page || 1);
     setLoading(false);
     setRefreshing(false);
+    // Amended orders can sit on any page, so the "pending review" banner must
+    // use the server-side total for amended — not orders.filter() on the loaded
+    // page (which under-counts when they're scattered across pages). Refresh it
+    // on every list load so it stays in sync after a re-confirm/amend.
+    try {
+      const cRes = await fetch(`${API}/sales-orders?${new URLSearchParams({ status: "amended", limit: 1, page: 1 })}`, { headers });
+      const cd = await cRes.json();
+      setAmendedCount(cd.total || 0);
+    } catch { /* leave prior count */ }
   }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters change
@@ -1185,11 +1195,13 @@ function OrdersPage() {
         </button>
       </div>
 
-      {/* Amended review banner */}
-      {orders.filter(o => o.status === "amended").length > 0 && (
+      {/* Amended review banner — count is the server-side total for amended
+          orders (across all pages), so it no longer under-reports when several
+          amended orders sit on different pages. Clicking filters to show them all. */}
+      {amendedCount > 0 && (
         <button onClick={() => setFilterStatus(filterStatus === "amended" ? "" : "amended")}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${filterStatus === "amended" ? "bg-amber-500 text-white" : "bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100"}`}>
-          ⚠️ {orders.filter(o => o.status === "amended").length} amended order{orders.filter(o => o.status === "amended").length !== 1 ? "s" : ""} pending review
+          ⚠️ {amendedCount} amended order{amendedCount !== 1 ? "s" : ""} pending review{filterStatus === "amended" ? " (showing all — click to clear)" : " — click to review all"}
         </button>
       )}
 
