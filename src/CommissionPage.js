@@ -344,7 +344,7 @@ function CommissionPage() {
                     const d = await res.json();
                     if (d.error) throw new Error(d.error);
                     const msg = `${d.synced}/${d.missing} synced, ${d.commissioned} commissioned${d.failed ? `, ${d.failed} FAILED` : ""}`;
-                    if (d.failed) toast.error(msg + " — see console"), console.warn("Re-sync failures:", d.errors);
+                    if (d.failed) { toast.error(msg + " — see console"); console.warn("Re-sync failures:", d.errors); }
                     else toast.success(msg);
                     loadCommissions();
                   });
