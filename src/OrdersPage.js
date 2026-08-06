@@ -538,8 +538,9 @@ function OrdersPage() {
     } catch { /* leave prior count */ }
   }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
-  // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, debouncedSearch, perPage]); // eslint-disable-line
+  // Reset to page 1 when filters or sort change. sortKey must be here — the sort
+  // dropdown only calls setSortKey, so without it a sort change never re-fetches.
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   useEffect(() => {
     if (!companyId) return;
@@ -1217,10 +1218,10 @@ function OrdersPage() {
         <select value={sortKey} onChange={e => setSortKey(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="created_at:desc">Newest first</option>
-          <option value="delivery_date:asc">Delivery Date ↑</option>
-          <option value="delivery_date:desc">Delivery Date ↓</option>
-          <option value="order_date:asc">Close Deal Date ↑</option>
-          <option value="order_date:desc">Close Deal Date ↓</option>
+          <option value="delivery_date:desc">Delivery Date — latest first</option>
+          <option value="delivery_date:asc">Delivery Date — oldest first</option>
+          <option value="order_date:desc">Order Date — latest first</option>
+          <option value="order_date:asc">Order Date — oldest first</option>
         </select>
       </div>
 
