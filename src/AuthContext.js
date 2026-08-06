@@ -27,7 +27,9 @@ export const roleLabel = r => ({
 
 export const can = (user, action) => {
   if (!user) return false;
-  const role = user.role;
+  // Part-time is a salesman-equivalent role — treat it as salesman for every
+  // permission/UI decision (the stored role stays 'part_time' for labeling).
+  const role = user.role === "part_time" ? "salesman" : user.role;
 
   const rules = {
     // Tab visibility
@@ -69,7 +71,7 @@ export const can = (user, action) => {
 export const canSeeOrder = (user, order) => {
   if (!user) return false;
   if (["master","manager","company_admin","finance"].includes(user.role)) return true;
-  if (user.role === "salesman") {
+  if (user.role === "salesman" || user.role === "part_time") {
     const salesmen = (order.salesman || order.salesman_name || "")
       .split("/").map(s => s.trim().toLowerCase());
     return salesmen.includes((user.salesman_name || "").toLowerCase());

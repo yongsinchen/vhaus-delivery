@@ -58,7 +58,10 @@ function CommissionPage() {
   const toast = useToast();
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
-  const effectiveRole = (activeRoleKey || user?.role || "").toLowerCase();
+  // Part-time is a salesman-equivalent role — treat it as salesman here so the
+  // commission view (own payout/history only) matches a salesman's.
+  const rawRole = (activeRoleKey || user?.role || "").toLowerCase();
+  const effectiveRole = rawRole === "part_time" ? "salesman" : rawRole;
   const isSalesman = effectiveRole === "salesman";
   // Salesmen see only their own payout/history — Rules, Product Incentives, and
   // Holds are admin-only actions that affect everyone's commission, not personal views.
@@ -402,7 +405,7 @@ function CommissionPage() {
               <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.role_name === "salesman" ? "bg-emerald-100 text-emerald-700" : "bg-violet-100 text-violet-700"}`}>{r.role_name}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.role_name === "salesman" ? "bg-emerald-100 text-emerald-700" : r.role_name === "part_time" ? "bg-teal-100 text-teal-700" : "bg-violet-100 text-violet-700"}`}>{r.role_name === "part_time" ? "Part-Time" : r.role_name}</span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.channel === "branch" ? "bg-gray-100 text-gray-600" : "bg-amber-100 text-amber-700"}`}>{r.channel || "branch"}</span>
                     {r.tier_name && <span className="text-sm font-medium text-gray-700">{r.tier_name}</span>}
                   </div>
@@ -433,14 +436,15 @@ function CommissionPage() {
                     <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
                     <select value={ruleForm.role_name} onChange={e => setRuleForm(f => ({ ...f, role_name: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
                       <option value="salesman">Salesman</option>
+                      <option value="part_time">Part-Time</option>
                       <option value="branch_manager">Branch Manager (Override)</option>
                     </select>
                   </div>
-                  {ruleForm.role_name === "salesman" && (
+                  {(ruleForm.role_name === "salesman" || ruleForm.role_name === "part_time") && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Apply to (blank = all salesmen)</label>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Apply to (blank = all {ruleForm.role_name === "part_time" ? "part-timers" : "salesmen"})</label>
                       <select value={ruleForm.user_id} onChange={e => setRuleForm(f => ({ ...f, user_id: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-                        <option value="">All Salesmen (company-wide tier)</option>
+                        <option value="">All {ruleForm.role_name === "part_time" ? "Part-Timers" : "Salesmen"} (company-wide tier)</option>
                         {salesmen.map(s => <option key={s.id} value={s.id}>{s.salesman_name || s.name}</option>)}
                       </select>
                     </div>

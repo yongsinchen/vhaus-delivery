@@ -960,7 +960,10 @@ export default function App() {
   const toast = useToast();
   const can = canPerm || legacyCan;
   const companyId = activeCompanyId || user?.company_id;
-  const effectiveRole = activeRoleKey || user?.role;
+  // Part-time is a salesman-equivalent role: alias it here so every gate below
+  // (isSalesman, nav visibility, can()) treats it exactly like a salesman.
+  const rawEffectiveRole = activeRoleKey || user?.role;
+  const effectiveRole = rawEffectiveRole === "part_time" ? "salesman" : rawEffectiveRole;
   const isMaster = effectiveRole === "master";
   const isSalesman = effectiveRole === "salesman";
 
