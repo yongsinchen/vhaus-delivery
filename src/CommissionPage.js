@@ -6,6 +6,9 @@ const API = "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+// Sort commission rows by their Sales Order number in ascending order. `numeric`
+// keeps SO-2 before SO-10 (natural order), and blanks sink to the bottom.
+const bySoAsc = (a, b) => String(a.orders?.so_number || "~").localeCompare(String(b.orders?.so_number || "~"), undefined, { numeric: true, sensitivity: "base" });
 
 const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
@@ -215,11 +218,12 @@ function CommissionPage() {
             {payout && (payout.users || []).length > 0 && (
               <button onClick={() => {
                 const rows = (payout.users || []).flatMap(u => {
-                  const eligible = u.commissions.filter(c => c.status === "eligible");
-                  const pending = u.commissions.filter(c => c.status === "pending");
+                  const eligible = u.commissions.filter(c => c.status === "eligible").sort(bySoAsc);
+                  const pending = u.commissions.filter(c => c.status === "pending").sort(bySoAsc);
+                  const totalSales = u.commissions.reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
                   const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
                   const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
-                  return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role})</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
+                  return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role}) · Total Sales: ${money(totalSales)}</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
                     ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
@@ -237,17 +241,21 @@ function CommissionPage() {
           {payout && (payout.users || []).length === 0 && <div className="text-center py-8 text-gray-400">No commissions for this month. Set up rules and click "Recalculate All" in the All Commissions tab.</div>}
 
           {payout && (payout.users || []).map(u => {
-            const eligible = u.commissions.filter(c => c.status === "eligible" || c.status === "paid");
-            const pending = u.commissions.filter(c => c.status === "pending");
+            const eligible = u.commissions.filter(c => c.status === "eligible" || c.status === "paid").sort(bySoAsc);
+            const pending = u.commissions.filter(c => c.status === "pending").sort(bySoAsc);
             // eslint-disable-next-line no-unused-vars
             const held = u.commissions.filter(c => c.status === "held");
             const pendingTotal = pending.reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
+            // Total sales this salesman generated — the net amount commissions are
+            // computed on, summed across every order in the payout (not the commission).
+            const totalSales = u.commissions.reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
             return (
             <div key={u.user_id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="font-bold text-gray-900 text-lg">{u.name}</p>
                   <p className="text-xs text-gray-500">{u.role} · {u.commissions.length} order(s)</p>
+                  <p className="text-xs font-semibold text-gray-600 mt-0.5">Total Sales: {money(totalSales)}</p>
                 </div>
                 <div className="text-right">
                   <p className={`text-xl font-bold ${u.total >= 0 ? "text-emerald-700" : "text-red-600"}`}>{money(u.total)}</p>
