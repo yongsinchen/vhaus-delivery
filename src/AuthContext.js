@@ -20,7 +20,7 @@ export const roleLabel = r => ({
   master: "Master", super_admin: "Super Admin",
   director: "Director", manager: "Manager",
   company_admin: "Company Admin",
-  salesman: "Salesman", finance: "Finance",
+  salesman: "Salesman", part_time: "Part-time", finance: "Finance",
   warehouse: "Warehouse", operation: "Warehouse",
   driver: "Driver", viewer: "Viewer",
 }[r] || r);
