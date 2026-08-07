@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { let { data } = await supabase.auth.getSession(); let s = data?.session; if (s?.expires_at && s.expires_at * 1000 < Date.now() + 60000) { const { data: r } = await supabase.auth.refreshSession(); s = r?.session || s; } return s?.access_token || ""; };
 const authHeaders = async (json = true) => { const cid = localStorage.getItem("pulseActiveCompanyId"); return { ...(json && { "Content-Type": "application/json" }), Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) }; };
 const fmt = (d) => { if (!d) return "-"; try { return new Date(d).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" }); } catch { return d; } };

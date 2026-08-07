@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef , memo } from 
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const af = async (url, opts = {}) => { const { data } = await supabase.auth.getSession(); const token = data?.session?.access_token; const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
 const getToken = async () => {

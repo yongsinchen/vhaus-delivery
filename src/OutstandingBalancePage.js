@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo , memo } from "react";
 import { supabase } from "./AuthContext";
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => {
   const token = await getToken();

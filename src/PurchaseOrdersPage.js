@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
 const getToken = async () => {
   let { data } = await supabase.auth.getSession();

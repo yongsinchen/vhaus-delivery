@@ -9,7 +9,7 @@ const af = async (url, opts = {}) => {
   return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
 const getToken = async () => {
   let { data } = await supabase.auth.getSession();

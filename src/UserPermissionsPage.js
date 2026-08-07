@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback , memo } from "react";
 import { useAuth } from "./AuthContext";
 
-const API = "https://vhaus-bot-production.up.railway.app";
+const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
 function UserPermissionsPage() {
   const { authFetch } = useAuth();
