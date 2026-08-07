@@ -6,6 +6,18 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+// Parse a response that is SUPPOSED to be JSON, but say something useful when it
+// isn't. An unknown route returns Express's HTML 404 page, which would otherwise
+// surface to the user as "Unexpected token '<'" and tell them nothing.
+const readJson = async (res, label) => {
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch {
+    throw new Error(res.status === 404
+      ? `${label} not found on the server (404). The backend may not have this endpoint deployed yet.`
+      : `${label} returned ${res.status} ${res.statusText || ""} instead of JSON.`);
+  }
+};
 // Sort commission rows by their Sales Order number in ascending order. `numeric`
 // keeps SO-2 before SO-10 (natural order), and blanks sink to the bottom.
 const bySoAsc = (a, b) => String(a.orders?.so_number || "~").localeCompare(String(b.orders?.so_number || "~"), undefined, { numeric: true, sensitivity: "base" });
@@ -46,6 +58,28 @@ const SORTS = [
 const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
+// A paid commission is never mutated — corrections go through adjustments. The
+// backend enforces this; the UI hides the control so nobody is offered a 409.
+const isPaid = c => c.status === "paid" || !!c.paid_at;
+const hasProductIncentive = c => (Number(c.product_incentive_amt) || 0) !== 0;
+
+// On/off switch for a sales order's product incentive. ON means the incentive counts
+// towards commission; OFF means it does not, for every salesman on that order.
+// Eligibility is the manager's decision alone — there is no rule behind it — so this
+// is a plain toggle, not a derived state. Rendered only for master/director/manager
+// (COMMISSION_APPROVE); the backend authorises independently.
+function IncentiveToggle({ c, canToggle, onToggle, busy }) {
+  if (!canToggle || !hasProductIncentive(c) || isPaid(c)) return null;
+  const on = !c.product_incentive_waived;
+  return (
+    <button onClick={e => { e.stopPropagation(); onToggle(c, !on); }} disabled={busy}
+      title={on ? "Incentive counts towards this order's commission — click to exclude it" : "Incentive excluded from this order — click to count it again"}
+      className={`text-[11px] px-2 py-0.5 rounded-md font-semibold transition-colors disabled:opacity-50 ${on ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-gray-300 text-gray-700 hover:bg-gray-400"}`}>
+      Incentive {on ? "ON" : "OFF"}
+    </button>
+  );
+}
+
 // Explain why a commission hasn't been paid yet, so salesmen never have to wonder.
 function commissionReason(c) {
   if (c.status === "paid") return null;
@@ -80,7 +114,9 @@ function CommissionBreakdown({ c }) {
     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
       <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600">Tier {money(tier)}</span>
       {clearance !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700">Clearance +{money(clearance)}</span>}
-      {product !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">Product +{money(product)}</span>}
+      {product !== 0 && (c.product_incentive_waived
+        ? <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-400 line-through" title="Incentive switched off for this order — not counted">Product +{money(product)}</span>
+        : <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">Product +{money(product)}</span>)}
       {pkg !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700">Package +{money(pkg)}</span>}
     </div>
   );
@@ -90,7 +126,7 @@ function CommissionBreakdown({ c }) {
 // navigation because the app has no router (App.js drives pages from useState), so
 // leaving the page would discard the month, search and sort the user set up.
 // Everything shown here already travels with the commission row — no extra fetch.
-function OrderDetailModal({ c, onClose }) {
+function OrderDetailModal({ c, onClose, canWaiveIncentive, onToggleIncentive, incentiveBusy }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -129,7 +165,16 @@ function OrderDetailModal({ c, onClose }) {
           {row("Rate", `${c.rate_pct}%${c.incentive_pct > 0 ? ` + ${c.incentive_pct}% incentive` : ""}`)}
           {Number(c.tier_commission_amt) !== 0 && row("Tier", money(c.tier_commission_amt))}
           {Number(c.clearance_commission_amt) !== 0 && row("Clearance", money(c.clearance_commission_amt))}
-          {Number(c.product_incentive_amt) !== 0 && row("Product incentive", money(c.product_incentive_amt))}
+          {/* product_incentive_amt keeps holding the amount that WOULD be payable even
+              when switched off, so the row shows what is being excluded rather than
+              hiding it. */}
+          {Number(c.product_incentive_amt) !== 0 && row("Product incentive", (
+            <span className="inline-flex items-center gap-2">
+              <span className={c.product_incentive_waived ? "line-through text-gray-400" : ""}>{money(c.product_incentive_amt)}</span>
+              {c.product_incentive_waived && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500">not counted</span>}
+              <IncentiveToggle c={c} canToggle={canWaiveIncentive} onToggle={onToggleIncentive} busy={incentiveBusy} />
+            </span>
+          ))}
           {Number(c.package_incentive_amt) !== 0 && row("Package incentive", money(c.package_incentive_amt))}
           {row("Deposit gate met", c.deposit_met ? "Yes" : "No")}
           {row("Payout month", c.payout_month ? monthLabel(c.payout_month) : "Not scheduled yet")}
@@ -147,7 +192,7 @@ function OrderDetailModal({ c, onClose }) {
 }
 
 function CommissionPage() {
-  const { user, activeCompanyId, activeRoleKey } = useAuth();
+  const { user, activeCompanyId, activeRoleKey, canPerm } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
@@ -349,6 +394,29 @@ function CommissionPage() {
     } catch (e) { toast.error("Failed: " + e.message); }
   };
 
+  // Switch a sales order's product incentive on/off. COMMISSION_APPROVE is held by
+  // master, director and manager only; this check is UX — the backend authorises.
+  const canToggleIncentive = canPerm("COMMISSION_APPROVE");
+  const [incentiveBusy, setIncentiveBusy] = useState(null); // order_id being updated
+  const toggleOrderIncentive = async (comm, eligible) => {
+    setIncentiveBusy(comm.order_id);
+    try {
+      const res = await af(`${API}/commissions/order/${comm.order_id}/product-incentive`, { method: "PATCH", body: JSON.stringify({ eligible }) });
+      const d = await readJson(res, "Incentive toggle");
+      if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
+      const n = (d.updated || []).length;
+      if (n === 0) toast.warning("Nothing changed — the incentive may already be in that state, or the commission is paid.");
+      else toast.success(eligible ? `Incentive counted for ${comm.orders?.so_number || "this order"}` : `Incentive excluded from ${comm.orders?.so_number || "this order"}`);
+      // Keep an open modal in step with the row that just changed.
+      setDetail(prev => { const hit = (d.updated || []).find(r => r.id === prev?.id); return hit ? { ...prev, ...hit, orders: prev.orders, users: prev.users } : prev; });
+      // Every downstream figure — this commission, the salesman's total, the page
+      // total and the printed report — derives from commission_amt server-side, so
+      // reloading is what keeps them all consistent.
+      loadPayout(); loadCommissions();
+    } catch (e) { toast.error("Failed: " + e.message); }
+    finally { setIncentiveBusy(null); }
+  };
+
   const releaseHold = async (holdId) => {
     try {
       await withLoading("Releasing hold…", async () => {
@@ -431,8 +499,11 @@ function CommissionPage() {
                   const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
                   const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
                   return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role}) · Total Sales: ${money(totalSales)}</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
-                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
-                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
+                    // commission_amt already excludes a switched-off incentive, so the
+                    // printed figures follow automatically. The marker exists so a reader
+                    // can see WHY a row pays less than its rate implies.
+                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}${c.product_incentive_waived ? ` <span style="color:#92400e;font-size:9px">(incentive off)</span>` : ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}${c.product_incentive_waived ? ` <span style="color:#92400e;font-size:9px">(incentive off)</span>` : ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
                   ];
@@ -508,7 +579,10 @@ function CommissionPage() {
                           <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
                         </div>
                       </div>
-                      <CommissionBreakdown c={c} />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <CommissionBreakdown c={c} />
+                        <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
+                      </div>
                       {c.status === "paid" && c.paid_at && <p className="text-[11px] text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
                     </div>
                   ))}
@@ -532,7 +606,10 @@ function CommissionPage() {
                           <span className="text-gray-400">{money(c.commission_amt)}</span>
                         </div>
                       </div>
-                      <CommissionBreakdown c={c} />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <CommissionBreakdown c={c} />
+                        <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
+                      </div>
                       <p className="text-amber-600 mt-0.5">{commissionReason(c)}</p>
                     </div>
                   ))}
@@ -616,7 +693,10 @@ function CommissionPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(c.net_amount)}
                 </p>
-                <CommissionBreakdown c={c} />
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <CommissionBreakdown c={c} />
+                  <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
+                </div>
                 {commissionReason(c) && <p className="text-xs text-amber-600 mt-0.5">{commissionReason(c)}</p>}
                 {c.status === "paid" && c.paid_at && <p className="text-xs text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
               </div>
@@ -826,7 +906,9 @@ function CommissionPage() {
         </div>
       )}
 
-      <OrderDetailModal c={detail} onClose={() => setDetail(null)} />
+      <OrderDetailModal c={detail} onClose={() => setDetail(null)}
+        canWaiveIncentive={canToggleIncentive} onToggleIncentive={toggleOrderIncentive}
+        incentiveBusy={incentiveBusy !== null && incentiveBusy === detail?.order_id} />
     </div>
   );
 }
