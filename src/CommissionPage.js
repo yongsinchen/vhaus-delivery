@@ -61,22 +61,67 @@ const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emera
 // A paid commission is never mutated — corrections go through adjustments. The
 // backend enforces this; the UI hides the control so nobody is offered a 409.
 const isPaid = c => c.status === "paid" || !!c.paid_at;
-const hasProductIncentive = c => (Number(c.product_incentive_amt) || 0) !== 0;
 
-// On/off switch for a sales order's product incentive. ON means the incentive counts
-// towards commission; OFF means it does not, for every salesman on that order.
-// Eligibility is the manager's decision alone — there is no rule behind it — so this
-// is a plain toggle, not a derived state. Rendered only for master/director/manager
-// (COMMISSION_APPROVE); the backend authorises independently.
-function IncentiveToggle({ c, canToggle, onToggle, busy }) {
-  if (!canToggle || !hasProductIncentive(c) || isPaid(c)) return null;
-  const on = !c.product_incentive_waived;
+// Per-item incentive switches for one sales order. Each button is one product
+// incentive the order's items earn, labelled with the product name. Eligibility is
+// the manager's decision alone — there is no rule behind it — so these are plain
+// toggles. Rendered only for master/director/manager (COMMISSION_APPROVE); the
+// backend authorises independently, so hiding them is UX, not security.
+//
+// Keyed on the product incentive rather than the item, because order items carry no
+// stable id — see matchProductIncentives in vhaus-bot/lib/commission.js.
+function IncentiveItems({ orderId, canToggle, paid, onChanged }) {
+  const toast = useToast();
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!orderId) { setItems(null); return; }
+    (async () => {
+      try {
+        const res = await af(`${API}/orders/${orderId}/incentive-items`);
+        const d = await readJson(res, "Incentive items");
+        if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
+        if (alive) setItems(d.items || []);
+      } catch { if (alive) setItems([]); }
+    })();
+    return () => { alive = false; };
+  }, [orderId]);
+
+  const toggle = async (row) => {
+    setBusy(row.incentive_id);
+    try {
+      const res = await af(`${API}/orders/${orderId}/incentive-items`, {
+        method: "PATCH", body: JSON.stringify({ incentive_id: row.incentive_id, excluded: !row.excluded }),
+      });
+      const d = await readJson(res, "Incentive toggle");
+      if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
+      setItems(d.items || []);
+      toast.success(row.excluded ? `${row.product_name} incentive counted` : `${row.product_name} incentive excluded`);
+      onChanged?.();
+    } catch (e) { toast.error("Failed: " + e.message); }
+    finally { setBusy(null); }
+  };
+
+  if (items === null) return <p className="text-xs text-gray-400 py-1">Loading incentive items…</p>;
+  if (items.length === 0) return null;
   return (
-    <button onClick={e => { e.stopPropagation(); onToggle(c, !on); }} disabled={busy}
-      title={on ? "Incentive counts towards this order's commission — click to exclude it" : "Incentive excluded from this order — click to count it again"}
-      className={`text-[11px] px-2 py-0.5 rounded-md font-semibold transition-colors disabled:opacity-50 ${on ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-gray-300 text-gray-700 hover:bg-gray-400"}`}>
-      Incentive {on ? "ON" : "OFF"}
-    </button>
+    <div className="mt-2 space-y-1">
+      <p className="text-[11px] text-gray-400">Eligibility per item{canToggle && !paid ? " — click to switch" : ""}</p>
+      {items.map(row => (
+        <div key={row.incentive_id} className="flex items-center justify-between gap-2">
+          <button onClick={() => canToggle && !paid && toggle(row)} disabled={!canToggle || paid || busy === row.incentive_id}
+            title={canToggle && !paid ? (row.excluded ? `Count ${row.product_name} towards commission` : `Exclude ${row.product_name} from commission`) : undefined}
+            className={`text-left text-xs px-2 py-1 rounded-lg font-medium transition-colors flex-1 truncate disabled:cursor-default ${row.excluded ? "bg-gray-100 text-gray-400 line-through" : "bg-emerald-50 text-emerald-800"} ${canToggle && !paid ? (row.excluded ? "hover:bg-gray-200" : "hover:bg-emerald-100") : ""}`}>
+            {busy === row.incentive_id ? "…" : row.product_name}
+            {row.qty > 1 && <span className="text-[10px] opacity-70"> ×{row.qty}</span>}
+          </button>
+          <span className={`text-xs flex-shrink-0 ${row.excluded ? "text-gray-400 line-through" : "text-gray-700"}`}>{money(row.amount)}</span>
+        </div>
+      ))}
+      <p className="text-[10px] text-gray-400">Order-level amounts, shared between the salesmen on this order.</p>
+    </div>
   );
 }
 
@@ -114,9 +159,7 @@ function CommissionBreakdown({ c }) {
     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
       <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600">Tier {money(tier)}</span>
       {clearance !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700">Clearance +{money(clearance)}</span>}
-      {product !== 0 && (c.product_incentive_waived
-        ? <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-400 line-through" title="Incentive switched off for this order — not counted">Product +{money(product)}</span>
-        : <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">Product +{money(product)}</span>)}
+      {product !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700">Product +{money(product)}</span>}
       {pkg !== 0 && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-700">Package +{money(pkg)}</span>}
     </div>
   );
@@ -126,7 +169,7 @@ function CommissionBreakdown({ c }) {
 // navigation because the app has no router (App.js drives pages from useState), so
 // leaving the page would discard the month, search and sort the user set up.
 // Everything shown here already travels with the commission row — no extra fetch.
-function OrderDetailModal({ c, onClose, canWaiveIncentive, onToggleIncentive, incentiveBusy }) {
+function OrderDetailModal({ c, onClose, canWaiveIncentive, onIncentiveChanged }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -165,21 +208,16 @@ function OrderDetailModal({ c, onClose, canWaiveIncentive, onToggleIncentive, in
           {row("Rate", `${c.rate_pct}%${c.incentive_pct > 0 ? ` + ${c.incentive_pct}% incentive` : ""}`)}
           {Number(c.tier_commission_amt) !== 0 && row("Tier", money(c.tier_commission_amt))}
           {Number(c.clearance_commission_amt) !== 0 && row("Clearance", money(c.clearance_commission_amt))}
-          {/* product_incentive_amt keeps holding the amount that WOULD be payable even
-              when switched off, so the row shows what is being excluded rather than
-              hiding it. */}
-          {Number(c.product_incentive_amt) !== 0 && row("Product incentive", (
-            <span className="inline-flex items-center gap-2">
-              <span className={c.product_incentive_waived ? "line-through text-gray-400" : ""}>{money(c.product_incentive_amt)}</span>
-              {c.product_incentive_waived && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-500">not counted</span>}
-              <IncentiveToggle c={c} canToggle={canWaiveIncentive} onToggle={onToggleIncentive} busy={incentiveBusy} />
-            </span>
-          ))}
+          {/* This is the salesman's SHARE of the order's payable incentive; the
+              per-item list below shows the order-level amounts it comes from. */}
+          {Number(c.product_incentive_amt) !== 0 && row("Product incentive", money(c.product_incentive_amt))}
           {Number(c.package_incentive_amt) !== 0 && row("Package incentive", money(c.package_incentive_amt))}
           {row("Deposit gate met", c.deposit_met ? "Yes" : "No")}
           {row("Payout month", c.payout_month ? monthLabel(c.payout_month) : "Not scheduled yet")}
           {c.paid_at && row("Paid on", new Date(c.paid_at).toLocaleDateString())}
           {commissionReason(c) && row("Why not paid", <span className="text-amber-600">{commissionReason(c)}</span>)}
+
+          <IncentiveItems orderId={c.order_id} canToggle={canWaiveIncentive} paid={isPaid(c)} onChanged={onIncentiveChanged} />
 
           <div className="flex items-center justify-between mt-4 pt-3 border-t">
             <span className="text-sm font-medium text-gray-600">Commission</span>
@@ -394,28 +432,13 @@ function CommissionPage() {
     } catch (e) { toast.error("Failed: " + e.message); }
   };
 
-  // Switch a sales order's product incentive on/off. COMMISSION_APPROVE is held by
-  // master, director and manager only; this check is UX — the backend authorises.
+  // Per-item incentive switches live in the order-details modal. COMMISSION_APPROVE
+  // is held by master, director and manager only; this check is UX — the backend
+  // authorises. After a switch the backend re-runs the real commission calculation,
+  // so reloading is what brings every downstream figure back in step: the row, the
+  // salesman's total, Total Payout and the printed report.
   const canToggleIncentive = canPerm("COMMISSION_APPROVE");
-  const [incentiveBusy, setIncentiveBusy] = useState(null); // order_id being updated
-  const toggleOrderIncentive = async (comm, eligible) => {
-    setIncentiveBusy(comm.order_id);
-    try {
-      const res = await af(`${API}/commissions/order/${comm.order_id}/product-incentive`, { method: "PATCH", body: JSON.stringify({ eligible }) });
-      const d = await readJson(res, "Incentive toggle");
-      if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
-      const n = (d.updated || []).length;
-      if (n === 0) toast.warning("Nothing changed — the incentive may already be in that state, or the commission is paid.");
-      else toast.success(eligible ? `Incentive counted for ${comm.orders?.so_number || "this order"}` : `Incentive excluded from ${comm.orders?.so_number || "this order"}`);
-      // Keep an open modal in step with the row that just changed.
-      setDetail(prev => { const hit = (d.updated || []).find(r => r.id === prev?.id); return hit ? { ...prev, ...hit, orders: prev.orders, users: prev.users } : prev; });
-      // Every downstream figure — this commission, the salesman's total, the page
-      // total and the printed report — derives from commission_amt server-side, so
-      // reloading is what keeps them all consistent.
-      loadPayout(); loadCommissions();
-    } catch (e) { toast.error("Failed: " + e.message); }
-    finally { setIncentiveBusy(null); }
-  };
+  const onIncentiveChanged = useCallback(() => { loadPayout(); loadCommissions(); }, [loadPayout, loadCommissions]);
 
   const releaseHold = async (holdId) => {
     try {
@@ -502,8 +525,8 @@ function CommissionPage() {
                     // commission_amt already excludes a switched-off incentive, so the
                     // printed figures follow automatically. The marker exists so a reader
                     // can see WHY a row pays less than its rate implies.
-                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}${c.product_incentive_waived ? ` <span style="color:#92400e;font-size:9px">(incentive off)</span>` : ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
-                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}${c.product_incentive_waived ? ` <span style="color:#92400e;font-size:9px">(incentive off)</span>` : ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
+                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
                   ];
@@ -579,10 +602,7 @@ function CommissionPage() {
                           <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <CommissionBreakdown c={c} />
-                        <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
-                      </div>
+                      <CommissionBreakdown c={c} />
                       {c.status === "paid" && c.paid_at && <p className="text-[11px] text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
                     </div>
                   ))}
@@ -606,10 +626,7 @@ function CommissionPage() {
                           <span className="text-gray-400">{money(c.commission_amt)}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <CommissionBreakdown c={c} />
-                        <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
-                      </div>
+                      <CommissionBreakdown c={c} />
                       <p className="text-amber-600 mt-0.5">{commissionReason(c)}</p>
                     </div>
                   ))}
@@ -693,10 +710,7 @@ function CommissionPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(c.net_amount)}
                 </p>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <CommissionBreakdown c={c} />
-                  <IncentiveToggle c={c} canToggle={canToggleIncentive} onToggle={toggleOrderIncentive} busy={incentiveBusy === c.order_id} />
-                </div>
+                <CommissionBreakdown c={c} />
                 {commissionReason(c) && <p className="text-xs text-amber-600 mt-0.5">{commissionReason(c)}</p>}
                 {c.status === "paid" && c.paid_at && <p className="text-xs text-blue-600 mt-0.5">Paid {new Date(c.paid_at).toLocaleDateString()}</p>}
               </div>
@@ -907,8 +921,7 @@ function CommissionPage() {
       )}
 
       <OrderDetailModal c={detail} onClose={() => setDetail(null)}
-        canWaiveIncentive={canToggleIncentive} onToggleIncentive={toggleOrderIncentive}
-        incentiveBusy={incentiveBusy !== null && incentiveBusy === detail?.order_id} />
+        canWaiveIncentive={canToggleIncentive} onIncentiveChanged={onIncentiveChanged} />
     </div>
   );
 }
