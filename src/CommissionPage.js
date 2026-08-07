@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback , memo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 
@@ -9,6 +9,39 @@ const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFract
 // Sort commission rows by their Sales Order number in ascending order. `numeric`
 // keeps SO-2 before SO-10 (natural order), and blanks sink to the bottom.
 const bySoAsc = (a, b) => String(a.orders?.so_number || "~").localeCompare(String(b.orders?.so_number || "~"), undefined, { numeric: true, sensitivity: "base" });
+
+// --- Month helpers -----------------------------------------------------------
+// The month selector is a PAYOUT month, always stored as "YYYY-MM-01". A payout
+// month is fed by the orders of the month BEFORE it (see getPayoutMonth in
+// vhaus-bot/server.js), so August's payout covers July's orders. Both months are
+// shown in the UI because the distinction is not obvious from the number alone.
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+const currentMonth = () => monthKey(new Date());
+const shiftMonth = (m, n) => { const [y, mo] = m.slice(0, 7).split("-").map(Number); return monthKey(new Date(y, mo - 1 + n, 1)); };
+const monthLabel = m => { const [y, mo] = m.slice(0, 7).split("-").map(Number); return new Date(y, mo - 1, 1).toLocaleDateString("en-MY", { month: "long", year: "numeric" }); };
+const orderMonthLabel = m => monthLabel(shiftMonth(m, -1));
+
+// Total sales a salesman generated in the batch — the net amount commission is
+// computed on, summed over their orders. Shared by the card, the sort, and the
+// printed report so all three can never disagree.
+const totalSalesOf = u => u.commissions.reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
+
+// --- Remembered filters ------------------------------------------------------
+// Kept per user AND per company: one person's August at Vhaus PG is not their
+// August at UGL. Sort and search persist across sessions (localStorage). The month
+// deliberately uses sessionStorage instead — it survives a refresh, but reopening
+// the page weeks later starts on the current month rather than silently showing a
+// stale one, which is the confusion this whole change is meant to remove.
+const prefsKey = (companyId, userId) => `pulseCommissionPrefs:${companyId || "-"}:${userId || "-"}`;
+const readPrefs = (store, key) => { try { return JSON.parse(store.getItem(key) || "{}") || {}; } catch { return {}; } };
+const writePrefs = (store, key, patch) => { try { store.setItem(key, JSON.stringify({ ...readPrefs(store, key), ...patch })); } catch { /* private mode / quota — filters just don't persist */ } };
+
+const SORTS = [
+  { key: "name", label: "Name", get: u => (u.name || "").toLowerCase() },
+  { key: "sales", label: "Total Sales", get: totalSalesOf },
+  { key: "payout", label: "Total Payout", get: u => Number(u.total) || 0 },
+  { key: "orders", label: "Order Count", get: u => u.commissions.length },
+];
 
 const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
@@ -53,6 +86,66 @@ function CommissionBreakdown({ c }) {
   );
 }
 
+// Order + commission detail for a single row. Rendered as a modal rather than a
+// navigation because the app has no router (App.js drives pages from useState), so
+// leaving the page would discard the month, search and sort the user set up.
+// Everything shown here already travels with the commission row — no extra fetch.
+function OrderDetailModal({ c, onClose }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  if (!c) return null;
+  const o = c.orders || {};
+  const row = (label, value) => (
+    <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-gray-50 last:border-0">
+      <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
+      <span className="text-sm text-gray-800 text-right">{value}</span>
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex items-center justify-between sticky top-0 bg-white rounded-t-2xl">
+          <div>
+            <h3 className="font-bold text-gray-900">{o.so_number || "Order"}</h3>
+            <p className="text-xs text-gray-500">{o.customer_name || "—"}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200">×</button>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-1">Order</p>
+          {row("Order date", o.order_date || "—")}
+          {row("Order status", o.status || "—")}
+          {row("Order amount", money(o.order_amount))}
+          {row("Outstanding balance", <span className={Number(o.balance) > 0 ? "text-amber-600 font-medium" : ""}>{money(o.balance)}</span>)}
+
+          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mt-4 mb-1">Commission</p>
+          {row("Salesman", c.users?.name || c.users?.salesman_name || "—")}
+          {row("Role", c.role_name || "—")}
+          {row("Status", <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[c.status] || "bg-gray-100"}`}>{c.status}</span>)}
+          {row("Net amount", money(c.net_amount))}
+          {row("Rate", `${c.rate_pct}%${c.incentive_pct > 0 ? ` + ${c.incentive_pct}% incentive` : ""}`)}
+          {Number(c.tier_commission_amt) !== 0 && row("Tier", money(c.tier_commission_amt))}
+          {Number(c.clearance_commission_amt) !== 0 && row("Clearance", money(c.clearance_commission_amt))}
+          {Number(c.product_incentive_amt) !== 0 && row("Product incentive", money(c.product_incentive_amt))}
+          {Number(c.package_incentive_amt) !== 0 && row("Package incentive", money(c.package_incentive_amt))}
+          {row("Deposit gate met", c.deposit_met ? "Yes" : "No")}
+          {row("Payout month", c.payout_month ? monthLabel(c.payout_month) : "Not scheduled yet")}
+          {c.paid_at && row("Paid on", new Date(c.paid_at).toLocaleDateString())}
+          {commissionReason(c) && row("Why not paid", <span className="text-amber-600">{commissionReason(c)}</span>)}
+
+          <div className="flex items-center justify-between mt-4 pt-3 border-t">
+            <span className="text-sm font-medium text-gray-600">Commission</span>
+            <span className="text-lg font-bold text-emerald-700">{money(c.commission_amt)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CommissionPage() {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
@@ -68,8 +161,14 @@ function CommissionPage() {
   const TABS = isSalesman ? ["Payout", "All Commissions"] : ALL_TABS;
   const [tab, setTab] = useState(0);
 
+  const storeKey = prefsKey(companyId, user?.id);
   const [payout, setPayout] = useState(null);
-  const [payoutMonth, setPayoutMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; });
+  const [payoutMonth, setPayoutMonth] = useState(() => readPrefs(sessionStorage, prefsKey(companyId, user?.id)).month || currentMonth());
+  const [search, setSearch] = useState(() => readPrefs(localStorage, prefsKey(companyId, user?.id)).search || "");
+  const [sortKey, setSortKey] = useState(() => readPrefs(localStorage, prefsKey(companyId, user?.id)).sortKey || "payout");
+  const [sortDir, setSortDir] = useState(() => readPrefs(localStorage, prefsKey(companyId, user?.id)).sortDir || "desc");
+  const [payoutLoading, setPayoutLoading] = useState(true);
+  const [detail, setDetail] = useState(null); // commission row shown in the order-details modal
   const [commissions, setCommissions] = useState([]);
   const [rules, setRules] = useState([]);
   const [holds, setHolds] = useState([]); // eslint-disable-line
@@ -88,19 +187,26 @@ function CommissionPage() {
 
   const loadPayout = useCallback(async () => {
     if (!companyId) return;
-    const res = await af(`${API}/commission-payout?company_id=${companyId}&payout_month=${payoutMonth}`);
-    const d = await res.json();
-    setPayout(d);
+    setPayoutLoading(true);
+    try {
+      const res = await af(`${API}/commission-payout?company_id=${companyId}&payout_month=${payoutMonth}`);
+      const d = await res.json();
+      setPayout(d);
+    } finally { setPayoutLoading(false); }
   }, [companyId, payoutMonth]);
 
+  // Month-scoped at the query level: the backend returns only this payout batch,
+  // never the full history. Without payout_month this endpoint returns every
+  // commission ever recorded, which is what made the page read as accumulated.
   const loadCommissions = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const res = await af(`${API}/commissions?company_id=${companyId}`);
-    const d = await res.json();
-    setCommissions(d.commissions || []);
-    setLoading(false);
-  }, [companyId]);
+    try {
+      const res = await af(`${API}/commissions?company_id=${companyId}&payout_month=${payoutMonth}`);
+      const d = await res.json();
+      setCommissions(d.commissions || []);
+    } finally { setLoading(false); }
+  }, [companyId, payoutMonth]);
 
   const loadRules = useCallback(async () => {
     if (!companyId) return;
@@ -117,7 +223,54 @@ function CommissionPage() {
   }, [companyId]);
 
   useEffect(() => { if (tab === 0) loadPayout(); }, [tab, loadPayout]);
-  useEffect(() => { if (tab === 1) loadCommissions(); }, [tab, loadCommissions]);
+  // Holds (tab 4) renders from `commissions` too, so it has to trigger the load —
+  // previously opening Holds directly showed "No held commissions" until you had
+  // visited All Commissions first.
+  useEffect(() => { if (tab === 1 || tab === 4) loadCommissions(); }, [tab, loadCommissions]);
+
+  // `companyId` resolves after the first render, and switching company changes the
+  // storage key, so prefs are (re)loaded whenever the key changes. `prefsLoaded`
+  // gates the writers below: without it they would fire on the render where the key
+  // has changed but the state still holds the previous company's values, saving them
+  // under the new company's key. It is set in the same batch as the loaded values,
+  // so by the time the writers see a matching key the state is already correct.
+  const [prefsLoaded, setPrefsLoaded] = useState(null);
+  useEffect(() => {
+    if (prefsLoaded === storeKey) return;
+    const l = readPrefs(localStorage, storeKey);
+    const s = readPrefs(sessionStorage, storeKey);
+    setSearch(l.search || "");
+    setSortKey(l.sortKey || "payout");
+    setSortDir(l.sortDir || "desc");
+    setPayoutMonth(s.month || currentMonth());
+    setPrefsLoaded(storeKey);
+  }, [storeKey, prefsLoaded]);
+
+  // Remember the month for the session, and sort/search for good.
+  useEffect(() => { if (prefsLoaded === storeKey) writePrefs(sessionStorage, storeKey, { month: payoutMonth }); }, [prefsLoaded, storeKey, payoutMonth]);
+  useEffect(() => { if (prefsLoaded === storeKey) writePrefs(localStorage, storeKey, { search, sortKey, sortDir }); }, [prefsLoaded, storeKey, search, sortKey, sortDir]);
+
+  // Search and sort are applied client-side: /commission-payout already returns the
+  // whole month grouped per salesman, so this is instant and needs no round-trip.
+  const needle = search.trim().toLowerCase();
+  const visibleUsers = useMemo(() => {
+    const sort = SORTS.find(s => s.key === sortKey) || SORTS[2];
+    const dir = sortDir === "asc" ? 1 : -1;
+    return (payout?.users || [])
+      .filter(u => !needle || (u.name || "").toLowerCase().includes(needle))
+      .slice()
+      .sort((a, b) => { const x = sort.get(a), y = sort.get(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
+  }, [payout, needle, sortKey, sortDir]);
+
+  // Same keyword narrows the flat commission lists, matched on salesman name.
+  const visibleCommissions = useMemo(() => commissions.filter(c => {
+    if (!needle) return true;
+    return `${c.users?.name || ""} ${c.users?.salesman_name || ""}`.toLowerCase().includes(needle);
+  }), [commissions, needle]);
+
+  const visibleTotal = useMemo(() => visibleUsers.reduce((s, u) => s + (Number(u.total) || 0), 0), [visibleUsers]);
+  const isFiltered = needle.length > 0;
+  const atCurrentMonth = payoutMonth >= currentMonth();
   useEffect(() => { if (tab === 2) {
     loadRules();
     af(`${API}/salesman-names?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen(d.salesmen || []));
@@ -212,18 +365,69 @@ function CommissionPage() {
         {TABS.map((t, i) => <button key={t} onClick={() => setTab(i)} className={`px-4 py-2 text-sm font-medium rounded-t-xl transition-colors whitespace-nowrap ${tab === i ? "bg-violet-600 text-white" : "text-gray-500 hover:text-violet-700 hover:bg-violet-50"}`}>{t}</button>)}
       </div>
 
+      {/* Shared month / search / sort toolbar — Payout, All Commissions and Holds
+          are all views of the same payout batch, so they share one set of controls
+          rather than each tab filtering independently. */}
+      {(tab === 0 || tab === 1 || tab === 4) && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPayoutMonth(m => shiftMonth(m, -1))} title="Previous month"
+                className="w-9 h-9 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50">‹</button>
+              {/* Changing the month re-runs the loaders through their useEffect deps,
+                  so there is nothing to refresh by hand. */}
+              <input type="month" value={payoutMonth.slice(0, 7)}
+                onChange={e => { if (e.target.value) setPayoutMonth(e.target.value + "-01"); }}
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
+              <button onClick={() => setPayoutMonth(m => shiftMonth(m, 1))} disabled={atCurrentMonth}
+                title={atCurrentMonth ? "Already at the latest payout month" : "Next month"}
+                className="w-9 h-9 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed">›</button>
+              {!atCurrentMonth && (
+                <button onClick={() => setPayoutMonth(currentMonth())}
+                  className="ml-1 px-3 py-2 rounded-xl text-xs font-medium bg-violet-50 text-violet-700 hover:bg-violet-100">This month</button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">
+              Payout <b className="text-gray-700">{monthLabel(payoutMonth)}</b> · orders dated {orderMonthLabel(payoutMonth)}
+            </p>
+            <div className="flex-1" />
+            {!isSalesman && (
+              <div className="relative">
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search salesman…"
+                  className="pl-3 pr-8 py-2 w-56 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                {search && <button onClick={() => setSearch("")} title="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">×</button>}
+              </div>
+            )}
+          </div>
+          {tab === 0 && !isSalesman && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-gray-400 mr-1">Sort by</span>
+              {SORTS.map(s => (
+                <button key={s.key}
+                  onClick={() => { if (sortKey === s.key) setSortDir(d => (d === "asc" ? "desc" : "asc")); else { setSortKey(s.key); setSortDir(s.key === "name" ? "asc" : "desc"); } }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${sortKey === s.key ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                  {s.label}{sortKey === s.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* TAB 0: Payout */}
       {tab === 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
-            <input type="month" value={payoutMonth.slice(0, 7)} onChange={e => setPayoutMonth(e.target.value + "-01")} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
-            <button onClick={loadPayout} className="px-4 py-2 rounded-xl text-sm bg-violet-600 text-white hover:bg-violet-700">Refresh</button>
             {payout && (payout.users || []).length > 0 && (
               <button onClick={() => {
-                const rows = (payout.users || []).flatMap(u => {
+                // Print exactly what is on screen — the same search filter and sort
+                // order — so a printed report can never disagree with the page it
+                // was printed from.
+                const rows = visibleUsers.flatMap(u => {
                   const eligible = u.commissions.filter(c => c.status === "eligible").sort(bySoAsc);
                   const pending = u.commissions.filter(c => c.status === "pending").sort(bySoAsc);
-                  const totalSales = u.commissions.reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
+                  const totalSales = totalSalesOf(u);
                   const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
                   const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
                   return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role}) · Total Sales: ${money(totalSales)}</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
@@ -234,24 +438,44 @@ function CommissionPage() {
                   ];
                 });
                 const w = window.open("", "_blank"); if (!w) return;
-                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Month: ${payoutMonth.slice(0,7)} · Total: ${money(payout.total)} · ${(payout.users||[]).length} person(s)</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(payout.total)}</p></body></html>`);
+                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Payout month: ${monthLabel(payoutMonth)} · Orders dated: ${orderMonthLabel(payoutMonth)}<br/>Total: ${money(visibleTotal)} · ${visibleUsers.length} person(s)${isFiltered ? ` · filtered by "${search.trim()}"` : ""}</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(visibleTotal)}</p></body></html>`);
                 w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
               }} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Report</button>
             )}
-            {payout && <span className="text-sm font-bold text-gray-700">Total Payout: {money(payout.total)}</span>}
+            {payout && !payoutLoading && (
+              <span className="text-sm font-bold text-gray-700">
+                Total Payout: {money(visibleTotal)}
+                {isFiltered && <span className="ml-1 font-normal text-gray-400">({visibleUsers.length} of {(payout.users || []).length} shown)</span>}
+              </span>
+            )}
           </div>
 
-          {payout && (payout.users || []).length === 0 && <div className="text-center py-8 text-gray-400">No commissions for this month. Set up rules and click "Recalculate All" in the All Commissions tab.</div>}
+          {payoutLoading && <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-28 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
 
-          {payout && (payout.users || []).map(u => {
+          {!payoutLoading && payout && (payout.users || []).length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No commission records found</p>
+              <p className="text-xs text-gray-400 mt-1">Nothing is scheduled for payout in {monthLabel(payoutMonth)} (orders dated {orderMonthLabel(payoutMonth)}).</p>
+              {/* Recalculate lives on the All Commissions tab and is admin-only, so
+                  only point there for people who can actually act on it. */}
+              {!isSalesman && <p className="text-xs text-gray-400 mt-1">If you expected records here, check the Rules tab, then run "Recalculate All Orders" under All Commissions.</p>}
+            </div>
+          )}
+
+          {!payoutLoading && payout && (payout.users || []).length > 0 && visibleUsers.length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No salesman matches "{search.trim()}"</p>
+              <button onClick={() => setSearch("")} className="text-xs text-violet-600 hover:underline mt-1">Clear search</button>
+            </div>
+          )}
+
+          {!payoutLoading && payout && visibleUsers.map(u => {
             const eligible = u.commissions.filter(c => c.status === "eligible" || c.status === "paid").sort(bySoAsc);
             const pending = u.commissions.filter(c => c.status === "pending").sort(bySoAsc);
             // eslint-disable-next-line no-unused-vars
             const held = u.commissions.filter(c => c.status === "held");
             const pendingTotal = pending.reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
-            // Total sales this salesman generated — the net amount commissions are
-            // computed on, summed across every order in the payout (not the commission).
-            const totalSales = u.commissions.reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
+            const totalSales = totalSalesOf(u);
             return (
             <div key={u.user_id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
@@ -271,7 +495,8 @@ function CommissionPage() {
                 <div className="mb-2">
                   <p className="text-xs font-bold text-emerald-600 mb-1">ELIGIBLE ({eligible.length})</p>
                   {eligible.map(c => (
-                    <div key={c.id} className="text-xs py-1.5 border-t border-gray-50">
+                    <div key={c.id} onClick={() => setDetail(c)} title="View order details"
+                      className="text-xs py-1.5 border-t border-gray-50 cursor-pointer hover:bg-violet-50/60 rounded-lg px-1 -mx-1">
                       <div className="flex items-center justify-between">
                         <div>
                           <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
@@ -295,7 +520,8 @@ function CommissionPage() {
                 <div className="mb-2">
                   <p className="text-xs font-bold text-amber-600 mb-1">PENDING DEPOSIT &lt; 30% ({pending.length})</p>
                   {pending.map(c => (
-                    <div key={c.id} className="text-xs py-1.5 border-t border-gray-50 opacity-80">
+                    <div key={c.id} onClick={() => setDetail(c)} title="View order details"
+                      className="text-xs py-1.5 border-t border-gray-50 opacity-80 cursor-pointer hover:bg-violet-50/60 hover:opacity-100 rounded-lg px-1 -mx-1">
                       <div className="flex items-center justify-between">
                         <div>
                           <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
@@ -364,9 +590,22 @@ function CommissionPage() {
             </div>
           )}
           {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-          {!loading && commissions.length === 0 && <div className="text-center py-8 text-gray-400">No commissions yet. Set up rules first, then click "Recalculate All Orders".</div>}
-          {commissions.map(c => (
-            <div key={c.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+          {!loading && commissions.length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No commission records found</p>
+              <p className="text-xs text-gray-400 mt-1">Nothing in the {monthLabel(payoutMonth)} payout batch (orders dated {orderMonthLabel(payoutMonth)}).</p>
+              {!isSalesman && <p className="text-xs text-gray-400 mt-1">Set up rules first, then click "Recalculate All Orders".</p>}
+            </div>
+          )}
+          {!loading && commissions.length > 0 && visibleCommissions.length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No commissions match "{search.trim()}"</p>
+              <button onClick={() => setSearch("")} className="text-xs text-violet-600 hover:underline mt-1">Clear search</button>
+            </div>
+          )}
+          {!loading && visibleCommissions.map(c => (
+            <div key={c.id} onClick={() => setDetail(c)} title="View order details"
+              className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center justify-between cursor-pointer hover:border-violet-200 hover:shadow transition-shadow">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-violet-700 text-sm">{c.orders?.so_number || "?"}</span>
@@ -385,8 +624,9 @@ function CommissionPage() {
                 <p className="text-sm font-bold text-gray-900">{money(c.commission_amt)}</p>
                 {!isSalesman && (
                   <div className="flex gap-1">
-                    <button onClick={() => addAdjustment(c.id)} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" title="Adjust">±</button>
-                    {c.status !== "held" && <button onClick={() => addHold(c.id)} className="text-xs px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Hold">🔒</button>}
+                    {/* stopPropagation: the whole card opens the details modal. */}
+                    <button onClick={e => { e.stopPropagation(); addAdjustment(c.id); }} className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200" title="Adjust">±</button>
+                    {c.status !== "held" && <button onClick={e => { e.stopPropagation(); addHold(c.id); }} className="text-xs px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100" title="Hold">🔒</button>}
                   </div>
                 )}
               </div>
@@ -558,22 +798,35 @@ function CommissionPage() {
       {/* TAB 4: Holds */}
       {tab === 4 && (
         <div className="space-y-2">
-          {commissions.filter(c => c.status === "held").length === 0 && <div className="text-center py-8 text-gray-400">No held commissions</div>}
-          {commissions.filter(c => c.status === "held").map(c => (
-            <div key={c.id} className="bg-red-50 rounded-2xl border border-red-200 p-4 flex items-center justify-between">
+          {loading && <div className="space-y-2">{[1, 2, 3].map(i => <div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
+          {!loading && visibleCommissions.filter(c => c.status === "held").length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No commission records found</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {isFiltered ? `No held commissions match "${search.trim()}" in ` : "Nothing is held in "}
+                the {monthLabel(payoutMonth)} payout batch.
+              </p>
+            </div>
+          )}
+          {!loading && visibleCommissions.filter(c => c.status === "held").map(c => (
+            <div key={c.id} onClick={() => setDetail(c)} title="View order details"
+              className="bg-red-50 rounded-2xl border border-red-200 p-4 flex items-center justify-between cursor-pointer hover:border-red-300">
               <div>
                 <span className="font-bold text-violet-700 text-sm">{c.orders?.so_number}</span>
                 <span className="text-sm text-gray-700 ml-2">{c.orders?.customer_name}</span>
                 <p className="text-xs text-gray-500 mt-0.5">{c.users?.name || "?"} · {money(c.commission_amt)} held</p>
               </div>
-              <button onClick={() => {
+              <button onClick={e => {
+                e.stopPropagation();
                 const hold = c._holds?.[0];
                 if (hold) releaseHold(hold.id);
-              }} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Release Hold</button>
+              }} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex-shrink-0">Release Hold</button>
             </div>
           ))}
         </div>
       )}
+
+      <OrderDetailModal c={detail} onClose={() => setDetail(null)} />
     </div>
   );
 }
