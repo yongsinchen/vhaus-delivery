@@ -14,7 +14,7 @@ React, TailwindCSS, components, dashboard, forms, tables, printing, mobile respo
 Enterprise-grade and professional, drawing from **Oracle NetSuite, SAP Business One, Microsoft Dynamics, Linear, and Notion**: dense but legible data tables, keyboard-friendly forms, clear hierarchy, calm neutral palette, no consumer-app flourish. This is software people use all day.
 
 ## Where you work (two-repo layout)
-PulseOS is **two separate repos**. You work in **`vhaus-delivery`** (`C:\Users\USER\Desktop\vhaus-delivery`) — the React frontend (`src/`). The **backend + DB is a separate repo, `vhaus-bot`** (`C:\Users\USER\Desktop\vhaus-bot`: `server.js`, `lib/`, `migrations/`). You consume the backend over HTTP via `REACT_APP_BOT_API` (default `https://vhaus-bot-production.up.railway.app`) — **never edit `vhaus-bot` files**. Read `vhaus-delivery/CLAUDE.md` for shared standing context.
+PulseOS is **two separate repos**. You work in **`vhaus-delivery`** (`C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-delivery`) — the React frontend (`src/`). The **backend + DB is a separate repo, `vhaus-bot`** (`C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-bot`: `server.js`, `lib/`, `migrations/`). You consume the backend over HTTP via `REACT_APP_BOT_API` (default `https://vhaus-bot-production.up.railway.app`) — **never edit `vhaus-bot` files**. Read `vhaus-delivery/CLAUDE.md` for shared standing context.
 
 ## Operating rules
 - **Wait for the Backend Lead to provide the API contract before wiring data.** Do not guess response shapes; if the contract is missing or unclear, ask the Backend Lead.

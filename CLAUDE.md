@@ -27,8 +27,8 @@ PulseOS is **two separate repositories**. Confirm which one you are editing befo
 
 | Repo | Path | Role | Contains |
 | :-- | :-- | :-- | :-- |
-| **vhaus-delivery** | `C:\Users\USER\Desktop\vhaus-delivery` (this repo) | **Frontend** | React app: `src/*.js` pages/components, `public/`, `build/`. **No backend here.** |
-| **vhaus-bot** | `C:\Users\USER\Desktop\vhaus-bot` | **Backend + DB** | `server.js` (~555 KB Express), `lib/`, `migrations/`, `permission-engine.js`, `module-registry.js`, service files, `scripts/` |
+| **vhaus-delivery** | `C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-delivery` (this repo) | **Frontend** | React app: `src/*.js` pages/components, `public/`, `build/`. **No backend here.** |
+| **vhaus-bot** | `C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-bot` | **Backend + DB** | `server.js` (~555 KB Express), `lib/`, `migrations/`, `permission-engine.js`, `module-registry.js`, service files, `scripts/` |
 
 Consequences:
 - **Backend, database, and migration work happens in `vhaus-bot`**, not here. The Backend Lead and Database Architect operate primarily in that repo.

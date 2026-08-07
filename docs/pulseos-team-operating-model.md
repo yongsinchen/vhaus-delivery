@@ -12,8 +12,8 @@ PulseOS spans **two separate repos**:
 
 | Repo | Path | Role |
 | :-- | :-- | :-- |
-| **vhaus-delivery** | `C:\Users\USER\Desktop\vhaus-delivery` | **Frontend** (React `src/`) — the lead's default working directory |
-| **vhaus-bot** | `C:\Users\USER\Desktop\vhaus-bot` | **Backend + DB** (`server.js`, `lib/`, `migrations/`, `scripts/`) |
+| **vhaus-delivery** | `C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-delivery` | **Frontend** (React `src/`) — the lead's default working directory |
+| **vhaus-bot** | `C:\Users\austi\OneDrive\Desktop\VhausSYS\vhaus-bot` | **Backend + DB** (`server.js`, `lib/`, `migrations/`, `scripts/`) |
 
 Each repo has its own `CLAUDE.md` (kept in sync). Backend Lead and Database Architect work in `vhaus-bot`; Frontend UX Lead works in `vhaus-delivery`; ERP Domain Expert & QA spans both. The frontend calls the backend via `REACT_APP_BOT_API` (default `https://vhaus-bot-production.up.railway.app`). When spawning a teammate, tell it which repo to work in.
 
