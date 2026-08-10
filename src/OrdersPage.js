@@ -1864,6 +1864,13 @@ function OrdersPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Add-item button below the list, so a new item can be added
+                    right after the last one without scrolling back to the top. */}
+                {form.items.length > 0 && (
+                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
+                    className="mt-2 w-full py-2 rounded-xl border border-dashed border-violet-300 text-violet-700 text-sm font-medium hover:bg-violet-50">+ Add Item</button>
+                )}
               </div>
 
               {/* Totals */}
