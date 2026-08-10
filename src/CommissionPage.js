@@ -379,6 +379,21 @@ function CommissionPage() {
   }, [companyId, payoutMonth, toast]);
   useEffect(() => { if (tab === 5) loadDriverComms(); }, [tab, loadDriverComms]);
   const driverCommTotal = useMemo(() => driverComms.filter(d => d.status !== "reversed").reduce((s, d) => s + (Number(d.commission_amt) || 0), 0), [driverComms]);
+  // Group the flat rows per driver so each driver's payout is its own section
+  // with a subtotal, instead of one stacked table. Sorted by subtotal desc.
+  const driverCommGroups = useMemo(() => {
+    const map = new Map();
+    for (const dc of driverComms) {
+      const key = dc.driver_user_id || dc.driver?.name || "—";
+      if (!map.has(key)) map.set(key, { key, name: dc.driver?.name || "Unassigned", rows: [], total: 0 });
+      const g = map.get(key);
+      g.rows.push(dc);
+      if (dc.status !== "reversed") g.total += Number(dc.commission_amt) || 0;
+    }
+    return [...map.values()]
+      .map(g => ({ ...g, total: Math.round(g.total * 100) / 100 }))
+      .sort((a, b) => b.total - a.total);
+  }, [driverComms]);
 
   const saveRule = async () => {
     try {
@@ -554,43 +569,43 @@ function CommissionPage() {
             </div>
           )}
 
-          {!driverCommsLoading && driverComms.length > 0 && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                    <th className="px-4 py-2.5 font-medium">SO</th>
-                    <th className="px-4 py-2.5 font-medium">Driver</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Order Amount</th>
-                    <th className="px-4 py-2.5 font-medium text-center">Rate</th>
-                    <th className="px-4 py-2.5 font-medium text-right">Commission</th>
-                    <th className="px-4 py-2.5 font-medium text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {driverComms.map(dc => (
-                    <tr key={dc.id} className={`border-b border-gray-50 last:border-0 ${dc.status === "reversed" ? "opacity-50" : ""}`}>
-                      <td className="px-4 py-2.5 font-medium text-gray-800">{dc.orders?.so_number || "—"}</td>
-                      <td className="px-4 py-2.5 text-gray-700">{dc.driver?.name || "—"}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{money(dc.base_amount)}</td>
-                      <td className="px-4 py-2.5 text-center text-gray-600">{dc.rate_pct}%</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{money(dc.commission_amt)}</td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[dc.status] || "bg-gray-100 text-gray-500"}`}>{dc.status}</span>
-                      </td>
+          {!driverCommsLoading && driverComms.length > 0 && driverCommGroups.map(g => (
+            <div key={g.key} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-violet-50 border-b border-violet-100">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-gray-800">{g.name}</span>
+                  <span className="text-xs text-gray-500">{g.rows.filter(r => r.status !== "reversed").length} order(s)</span>
+                </div>
+                <span className="text-sm font-bold text-violet-700">{money(g.total)}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                      <th className="px-4 py-2 font-medium">SO</th>
+                      <th className="px-4 py-2 font-medium text-right">Order Amount</th>
+                      <th className="px-4 py-2 font-medium text-center">Rate</th>
+                      <th className="px-4 py-2 font-medium text-right">Commission</th>
+                      <th className="px-4 py-2 font-medium text-center">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-gray-100 bg-gray-50">
-                    <td className="px-4 py-2.5 font-bold text-gray-700" colSpan={4}>Total ({driverComms.filter(d => d.status !== "reversed").length} order(s))</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-gray-900">{money(driverCommTotal)}</td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {g.rows.map(dc => (
+                      <tr key={dc.id} className={`border-b border-gray-50 last:border-0 ${dc.status === "reversed" ? "opacity-50" : ""}`}>
+                        <td className="px-4 py-2 font-medium text-gray-800">{dc.orders?.so_number || "—"}</td>
+                        <td className="px-4 py-2 text-right text-gray-600">{money(dc.base_amount)}</td>
+                        <td className="px-4 py-2 text-center text-gray-600">{dc.rate_pct}%</td>
+                        <td className="px-4 py-2 text-right font-semibold text-gray-800">{money(dc.commission_amt)}</td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[dc.status] || "bg-gray-100 text-gray-500"}`}>{dc.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       )}
 
