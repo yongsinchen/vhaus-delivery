@@ -52,6 +52,10 @@ function CompanySettingsPage() {
   const [driverCommSaving, setDriverCommSaving] = useState(false);
   const [driverCommMsg, setDriverCommMsg] = useState("");
   const canEditComm = ["master", "manager"].includes(user?.role);
+  // Per-driver overrides: [{ id, name, rate (null=inherit), effective }]
+  const [driverRates, setDriverRates] = useState([]);
+  const [driverDrafts, setDriverDrafts] = useState({}); // id -> input string ("" = inherit)
+  const [driverSavingId, setDriverSavingId] = useState(null);
 
   // Branches
   const [branches, setBranches] = useState([]);
@@ -145,6 +149,18 @@ function CompanySettingsPage() {
   }, [companyId]);
   useEffect(() => { loadDriverComm(); }, [loadDriverComm]);
 
+  const loadDriverRates = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/driver-commission-rates`);
+    if (!res.ok) return;
+    const d = await res.json();
+    const list = d.drivers || [];
+    setDriverRates(list);
+    // Draft shows the override only; blank = "inherit company default".
+    setDriverDrafts(Object.fromEntries(list.map(dr => [dr.id, dr.rate == null ? "" : String(dr.rate)])));
+  }, [companyId]);
+  useEffect(() => { loadDriverRates(); }, [loadDriverRates]);
+
   const saveDriverComm = async () => {
     const num = Number(driverComm);
     if (!Number.isFinite(num) || num < 0 || num > 100) { setDriverCommMsg("Enter a number between 0 and 100"); return; }
@@ -157,10 +173,35 @@ function CompanySettingsPage() {
       const v = Number(d.driver_commission_rate) || 0;
       setDriverComm(String(v)); setDriverCommSaved(v);
       setDriverCommMsg("Saved"); setTimeout(() => setDriverCommMsg(""), 2000);
+      loadDriverRates(); // effective (inherited) rates shift with the default
     } else {
       const d = await res.json().catch(() => ({}));
       setDriverCommMsg(d.error || "Failed");
     }
+  };
+
+  // Save one driver's override. `clear` sends null so the driver re-inherits
+  // the company default; otherwise the drafted number is validated + sent.
+  const saveDriverRate = async (driver, clear = false) => {
+    let body;
+    if (clear) {
+      body = { driver_commission_rate: null };
+    } else {
+      const raw = (driverDrafts[driver.id] ?? "").trim();
+      if (raw === "") { body = { driver_commission_rate: null }; }
+      else {
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num < 0 || num > 100) { toast.error(`${driver.name}: enter 0–100, or blank to use the default`); return; }
+        body = { driver_commission_rate: num };
+      }
+    }
+    setDriverSavingId(driver.id);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/driver-commission-rates/${driver.id}`, { method: "PATCH", headers, body: JSON.stringify(body) });
+    setDriverSavingId(null);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || "Failed"); return; }
+    toast.success(`${driver.name} saved`);
+    loadDriverRates();
   };
 
   const saveWarehouse = async () => {
@@ -583,7 +624,7 @@ function CompanySettingsPage() {
           {/* Delivery (Driver) Commission — saved separately from the fields above */}
           <div className="border-t border-gray-100 pt-4 mt-4">
             <h4 className="text-sm font-bold text-gray-700 mb-2">Delivery Commission</h4>
-            <p className="text-xs text-gray-400 mb-3">Percentage of the order amount paid to the driver who completes the delivery. Paid <span className="font-semibold">once per order</span> when the first trip completes. Set to <span className="font-semibold">0</span> to turn it off.</p>
+            <p className="text-xs text-gray-400 mb-3">Percentage of the order amount paid to the driver who completes the delivery. Paid <span className="font-semibold">once per order</span> when the first trip completes. This is the <span className="font-semibold">company default</span> — set a rate per driver below to override it. Set to <span className="font-semibold">0</span> to turn it off.</p>
             <div className="flex items-center gap-3">
               <div className="relative">
                 <input type="number" min="0" max="100" step="0.1" value={driverComm}
@@ -604,6 +645,45 @@ function CompanySettingsPage() {
               <p className="text-xs text-gray-400 mt-2">Example: a RM 5,000 order pays the driver RM {((5000 * Number(driverComm)) / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.</p>
             )}
             {!canEditComm && <p className="text-xs text-gray-400 mt-2">Only a manager or master can change this.</p>}
+
+            {/* Per-driver overrides */}
+            {driverRates.length > 0 && (
+              <div className="mt-4 border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold text-gray-500 mb-2">Per-driver rates <span className="font-normal text-gray-400">— leave blank to use the {Number(driverComm) || 0}% default</span></p>
+                <div className="space-y-1.5">
+                  {driverRates.map(dr => {
+                    const draft = driverDrafts[dr.id] ?? "";
+                    const usingDefault = draft.trim() === "";
+                    return (
+                      <div key={dr.id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm text-gray-700 w-44 truncate">{dr.name}</span>
+                        <div className="relative">
+                          <input type="number" min="0" max="100" step="0.1" value={draft}
+                            disabled={!canEditComm || driverSavingId === dr.id}
+                            placeholder={String(Number(driverComm) || 0)}
+                            onChange={e => setDriverDrafts(p => ({ ...p, [dr.id]: e.target.value }))}
+                            className="w-24 pr-6 pl-2 py-1.5 rounded-lg border border-gray-200 text-right text-sm focus:outline-none focus:border-violet-400 disabled:bg-gray-50" />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">%</span>
+                        </div>
+                        <span className="text-xs text-gray-400 w-20">{usingDefault ? "uses default" : "override"}</span>
+                        {canEditComm && (
+                          <>
+                            <button onClick={() => saveDriverRate(dr)} disabled={driverSavingId === dr.id}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                              {driverSavingId === dr.id ? "…" : "Save"}
+                            </button>
+                            {dr.rate != null && (
+                              <button onClick={() => saveDriverRate(dr, true)} disabled={driverSavingId === dr.id}
+                                className="text-xs text-gray-400 hover:text-red-500">Use default</button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
