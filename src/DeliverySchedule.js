@@ -328,6 +328,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
                 Trip {tripInfo.trip_no}/{tripInfo.total_trips}{tripInfo.trip_no === 1 ? " · comm" : ""}
               </span>
             )}
+            {o.order_amount != null && <span className="text-gray-600 text-[10px] font-bold">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
             {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {o.balance}</span>}
           </div>
           <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
@@ -1510,8 +1511,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                         <div>
                           <span className="text-xs font-bold text-gray-800">{o.so_number}</span>
                           <span className="text-xs text-gray-600 ml-2">{o.customer_name}</span>
+                          {o.order_amount != null && <span className="text-xs text-gray-500 font-semibold ml-2">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
                           {o.time_slot && <span className="text-xs text-violet-600 ml-2">{o.time_slot}</span>}
-                          {o._has_balance && <span className="text-xs text-red-500 ml-2">RM {o.balance}</span>}
+                          {o._has_balance && <span className="text-xs text-red-500 ml-2">Bal RM {o.balance}</span>}
                         </div>
                         <span className="text-xs text-gray-400">{o._item_count} items</span>
                       </div>
@@ -1595,7 +1597,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                               <span className="font-bold text-purple-700 text-xs">{item.so_number}</span>
                               {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
                             </div>
-                            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
+                            <span className="flex items-center gap-1.5">
+                              {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
+                              {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+                            </span>
                           </div>
                           <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
                           <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
@@ -1621,7 +1626,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                         draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
-                          {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {item.balance}</span>}
+                          <span className="flex items-center gap-1.5">
+                            {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
+                            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+                          </span>
                         </div>
                         <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
                         <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
