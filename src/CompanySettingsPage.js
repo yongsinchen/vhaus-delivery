@@ -44,6 +44,15 @@ function CompanySettingsPage() {
   const [settingsMsg, setSettingsMsg] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
 
+  // Delivery (driver) commission rate — lives on companies.driver_commission_rate,
+  // saved via its own auth-gated endpoint (master/manager only), independent of
+  // the company-settings Save below.
+  const [driverComm, setDriverComm] = useState("0");
+  const [driverCommSaved, setDriverCommSaved] = useState(0);
+  const [driverCommSaving, setDriverCommSaving] = useState(false);
+  const [driverCommMsg, setDriverCommMsg] = useState("");
+  const canEditComm = ["master", "manager"].includes(user?.role);
+
   // Branches
   const [branches, setBranches] = useState([]);
   const [branchForm, setBranchForm] = useState({ name: "" });
@@ -124,6 +133,35 @@ function CompanySettingsPage() {
     setPendingOptions(spD.options || []);
   }, [companyId]);
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const loadDriverComm = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/settings/driver-commission-rate`);
+    if (!res.ok) return;
+    const d = await res.json();
+    const val = Number(d.driver_commission_rate) || 0;
+    setDriverComm(String(val));
+    setDriverCommSaved(val);
+  }, [companyId]);
+  useEffect(() => { loadDriverComm(); }, [loadDriverComm]);
+
+  const saveDriverComm = async () => {
+    const num = Number(driverComm);
+    if (!Number.isFinite(num) || num < 0 || num > 100) { setDriverCommMsg("Enter a number between 0 and 100"); return; }
+    setDriverCommSaving(true); setDriverCommMsg("");
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/settings/driver-commission-rate`, { method: "PATCH", headers, body: JSON.stringify({ driver_commission_rate: num }) });
+    setDriverCommSaving(false);
+    if (res.ok) {
+      const d = await res.json();
+      const v = Number(d.driver_commission_rate) || 0;
+      setDriverComm(String(v)); setDriverCommSaved(v);
+      setDriverCommMsg("Saved"); setTimeout(() => setDriverCommMsg(""), 2000);
+    } else {
+      const d = await res.json().catch(() => ({}));
+      setDriverCommMsg(d.error || "Failed");
+    }
+  };
 
   const saveWarehouse = async () => {
     if (!whForm.name.trim()) return;
@@ -540,6 +578,32 @@ function CompanySettingsPage() {
                 );
               })()}
             </div>
+          </div>
+
+          {/* Delivery (Driver) Commission — saved separately from the fields above */}
+          <div className="border-t border-gray-100 pt-4 mt-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-2">Delivery Commission</h4>
+            <p className="text-xs text-gray-400 mb-3">Percentage of the order amount paid to the driver who completes the delivery. Paid <span className="font-semibold">once per order</span> when the first trip completes. Set to <span className="font-semibold">0</span> to turn it off.</p>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <input type="number" min="0" max="100" step="0.1" value={driverComm}
+                  disabled={!canEditComm || driverCommSaving}
+                  onChange={e => { setDriverComm(e.target.value); setDriverCommMsg(""); }}
+                  className="w-28 pr-7 pl-3 py-2 rounded-xl border border-gray-200 text-right text-sm font-semibold focus:outline-none focus:border-violet-400 disabled:bg-gray-50 disabled:text-gray-400" />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-semibold">%</span>
+              </div>
+              {canEditComm && (
+                <button onClick={saveDriverComm} disabled={driverCommSaving || String(driverCommSaved) === driverComm.trim()}
+                  className="px-5 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                  {driverCommSaving ? "Saving…" : "Save"}
+                </button>
+              )}
+              {driverCommMsg && <span className={`text-sm ${driverCommMsg === "Saved" ? "text-emerald-600" : "text-red-600"}`}>{driverCommMsg}</span>}
+            </div>
+            {Number(driverComm) > 0 && (
+              <p className="text-xs text-gray-400 mt-2">Example: a RM 5,000 order pays the driver RM {((5000 * Number(driverComm)) / 100).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.</p>
+            )}
+            {!canEditComm && <p className="text-xs text-gray-400 mt-2">Only a manager or master can change this.</p>}
           </div>
 
           <div className="flex items-center gap-3">
