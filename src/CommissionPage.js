@@ -55,7 +55,7 @@ const SORTS = [
   { key: "orders", label: "Order Count", get: u => u.commissions.length },
 ];
 
-const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds"];
+const ALL_TABS = ["Payout", "All Commissions", "Rules", "Product Incentives", "Holds", "Driver Commission"];
 const STATUS_STYLE = { pending: "bg-gray-100 text-gray-600", eligible: "bg-emerald-100 text-emerald-700", held: "bg-red-100 text-red-600", paid: "bg-blue-100 text-blue-700" };
 
 // A paid commission is never mutated — corrections go through adjustments. The
@@ -264,6 +264,12 @@ function CommissionPage() {
   const [channels, setChannels] = useState(["branch"]);
   const [loading, setLoading] = useState(true);
 
+  // Driver (delivery) commission report — GET /delivery-commissions, month-scoped
+  // by the shared payout-month selector (rows are bucketed by delivery month + 1,
+  // same convention as salesman payout).
+  const [driverComms, setDriverComms] = useState([]);
+  const [driverCommsLoading, setDriverCommsLoading] = useState(false);
+
   // Rule form
   const [showRuleForm, setShowRuleForm] = useState(false);
   const [ruleForm, setRuleForm] = useState({ role_name: "salesman", tier_name: "", min_net: 0, max_net: "", rate_pct: 3, incentive_pct: 0, deposit_gate_pct: 30, payout_day: 25, user_id: "", channel: "branch" });
@@ -360,6 +366,19 @@ function CommissionPage() {
     af(`${API}/company-settings?company_id=${companyId}`).then(r=>r.json()).then(d => { try { const ch = JSON.parse(d.settings?.sales_channels || '["branch"]'); if (Array.isArray(ch)) setChannels(ch); } catch {} });
   } }, [tab, loadRules, companyId]);
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
+
+  const loadDriverComms = useCallback(async () => {
+    if (!companyId) return;
+    setDriverCommsLoading(true);
+    try {
+      const res = await af(`${API}/delivery-commissions?company_id=${companyId}&payout_month=${payoutMonth}`);
+      const d = await readJson(res, "Driver commissions");
+      setDriverComms(d.delivery_commissions || []);
+    } catch (e) { toast.error(e.message); setDriverComms([]); }
+    finally { setDriverCommsLoading(false); }
+  }, [companyId, payoutMonth, toast]);
+  useEffect(() => { if (tab === 5) loadDriverComms(); }, [tab, loadDriverComms]);
+  const driverCommTotal = useMemo(() => driverComms.filter(d => d.status !== "reversed").reduce((s, d) => s + (Number(d.commission_amt) || 0), 0), [driverComms]);
 
   const saveRule = async () => {
     try {
@@ -501,6 +520,75 @@ function CommissionPage() {
                   {s.label}{sortKey === s.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                 </button>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: Driver Commission */}
+      {tab === 5 && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPayoutMonth(m => shiftMonth(m, -1))} title="Previous month"
+                className="w-9 h-9 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50">‹</button>
+              <input type="month" value={payoutMonth.slice(0, 7)}
+                onChange={e => { if (e.target.value) setPayoutMonth(e.target.value + "-01"); }}
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
+              <button onClick={() => setPayoutMonth(m => shiftMonth(m, 1))} disabled={atCurrentMonth}
+                title={atCurrentMonth ? "Already at the latest payout month" : "Next month"}
+                className="w-9 h-9 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+              {!atCurrentMonth && <button onClick={() => setPayoutMonth(currentMonth())} className="ml-1 px-3 py-2 rounded-xl text-xs font-medium bg-violet-50 text-violet-700 hover:bg-violet-100">This month</button>}
+            </div>
+            <p className="text-xs text-gray-500">Payout <b className="text-gray-700">{monthLabel(payoutMonth)}</b> · delivered {orderMonthLabel(payoutMonth)}</p>
+            <div className="flex-1" />
+            <span className="text-sm font-bold text-gray-700">Total: {money(driverCommTotal)}</span>
+          </div>
+
+          {driverCommsLoading && <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
+
+          {!driverCommsLoading && driverComms.length === 0 && (
+            <div className="text-center py-10">
+              <p className="text-gray-500 font-medium">No driver commissions for {monthLabel(payoutMonth)}</p>
+              <p className="text-xs text-gray-400 mt-1">A driver earns commission when the first delivery trip of an order completes. Set a rate under Company Settings → Operations to enable it.</p>
+            </div>
+          )}
+
+          {!driverCommsLoading && driverComms.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+                    <th className="px-4 py-2.5 font-medium">SO</th>
+                    <th className="px-4 py-2.5 font-medium">Driver</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Order Amount</th>
+                    <th className="px-4 py-2.5 font-medium text-center">Rate</th>
+                    <th className="px-4 py-2.5 font-medium text-right">Commission</th>
+                    <th className="px-4 py-2.5 font-medium text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {driverComms.map(dc => (
+                    <tr key={dc.id} className={`border-b border-gray-50 last:border-0 ${dc.status === "reversed" ? "opacity-50" : ""}`}>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">{dc.orders?.so_number || "—"}</td>
+                      <td className="px-4 py-2.5 text-gray-700">{dc.driver?.name || "—"}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-600">{money(dc.base_amount)}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-600">{dc.rate_pct}%</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{money(dc.commission_amt)}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[dc.status] || "bg-gray-100 text-gray-500"}`}>{dc.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-gray-100 bg-gray-50">
+                    <td className="px-4 py-2.5 font-bold text-gray-700" colSpan={4}>Total ({driverComms.filter(d => d.status !== "reversed").length} order(s))</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-gray-900">{money(driverCommTotal)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           )}
         </div>
