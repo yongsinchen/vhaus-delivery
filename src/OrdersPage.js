@@ -1777,10 +1777,8 @@ function OrdersPage() {
 
               {/* Line items */}
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-2">
                   <label className="text-sm font-medium text-gray-700">Items</label>
-                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Product</button>
                 </div>
 
                 {form.items.length === 0 && <p className="text-sm text-gray-400 py-3 text-center border border-dashed border-gray-200 rounded-xl">No items added</p>}
@@ -1865,12 +1863,11 @@ function OrdersPage() {
                   ))}
                 </div>
 
-                {/* Add-item button below the list, so a new item can be added
-                    right after the last one without scrolling back to the top. */}
-                {form.items.length > 0 && (
-                  <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
-                    className="mt-2 w-full py-2 rounded-xl border border-dashed border-violet-300 text-violet-700 text-sm font-medium hover:bg-violet-50">+ Add Item</button>
-                )}
+                {/* The only add-item button now lives below the list, so a new
+                    item is always added right after the last one (no scroll to
+                    top). Always shown — it adds the first item too. */}
+                <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
+                  className="mt-2 w-full py-2 rounded-xl border border-dashed border-violet-300 text-violet-700 text-sm font-medium hover:bg-violet-50">+ Add Item</button>
               </div>
 
               {/* Totals */}
