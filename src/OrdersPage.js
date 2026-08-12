@@ -854,6 +854,19 @@ function OrdersPage() {
     setDrawerOpen(true);
   };
 
+  // Pick a branch and auto-fill its next running number (new orders only;
+  // the salesman can still edit the number afterwards).
+  const applyBranch = async (branchId) => {
+    setForm(f => ({ ...f, branch_id: branchId }));
+    if (editId || !branchId) return;
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`${API}/next-order-number?branch_id=${branchId}`, { headers });
+      const d = await res.json();
+      if (d.order_number) setForm(f => ({ ...f, order_number: d.order_number }));
+    } catch { /* leave the number blank on failure — it auto-generates on save */ }
+  };
+
   // Wizard step guards — validate the current phase before advancing.
   const nextFromCustomer = () => {
     const miss = [];
@@ -1645,7 +1658,7 @@ function OrdersPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Branch *</label>
-                  <select value={form.branch_id} onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+                  <select value={form.branch_id} onChange={e => applyBranch(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
                     <option value="">Select branch</option>
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
