@@ -8,7 +8,7 @@ const af = async (url, opts = {}) => { const token = await getToken(); const cid
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 
 const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current (0-30d)" }, "30_60": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", label: "30-60 days" }, "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "60-90 days" }, "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "90+ days" } };
-const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque", "Instalment"];
+const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque", "Instalment", "Cash Rebate"];
 
 function CustomerPage() {
   const { user, activeCompanyId } = useAuth();
@@ -122,6 +122,7 @@ function CustomerPage() {
     if (paySavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
+    if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
     paySavingRef.current = true;
     setPaySaving(true);
@@ -420,6 +421,13 @@ function CustomerPage() {
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Reference</label>
                   <input value={payRef} onChange={e => setPayRef(e.target.value)} placeholder="Transfer reference"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              )}
+              {payMethod === "Cash Rebate" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Reason <span className="text-red-500">*</span></label>
+                  <textarea value={payRef} onChange={e => setPayRef(e.target.value)} rows={2} placeholder="Why is this cash rebate being given?"
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
                 </div>
               )}
