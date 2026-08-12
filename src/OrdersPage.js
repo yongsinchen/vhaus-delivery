@@ -971,7 +971,9 @@ function OrdersPage() {
   // (business rule since Jul 2026 — previously GST was on subtotal − discount).
   const gstAmount = Math.round(subtotal * gstRate) / 100;
   const totalAfterDiscount = subtotal + gstAmount - discountVal;
-  const balanceVal = totalAfterDiscount - depositVal;
+  // Instalment admin charges add to what the customer owes (not to order_amount).
+  const adminChargeVal = form.payment_method === "Instalment" ? (Number(form.admin_charges) || 0) : 0;
+  const balanceVal = totalAfterDiscount + adminChargeVal - depositVal;
 
   const saveOrder = async () => {
     // ── Base validation (all statuses) ──
