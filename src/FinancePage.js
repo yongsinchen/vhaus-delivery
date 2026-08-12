@@ -27,6 +27,7 @@ function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [methodFilter, setMethodFilter] = useState(""); // Payments tab: filter by payment method
 
   // Reconciliation
   const [uploads, setUploads] = useState([]);
@@ -141,6 +142,10 @@ function FinancePage() {
   });
 
   const totalCollected = filteredPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  // Payments tab: method dropdown options (all methods seen) + the method-filtered rows/total.
+  const paymentMethods = [...new Set(payments.map(p => p.payment_method || "Cash"))].sort();
+  const methodRows = filteredPayments.filter(p => !methodFilter || (p.payment_method || "Cash") === methodFilter);
+  const methodTotal = methodRows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const byMethod = {};
   filteredPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
 
@@ -269,14 +274,19 @@ function FinancePage() {
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
             <span className="text-gray-400">to</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
-            <span className="text-xs text-gray-500">{filteredPayments.length} payments · {money(totalCollected)}</span>
+            <select value={methodFilter} onChange={e => setMethodFilter(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="">All methods</option>
+              {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            {methodFilter && <button onClick={() => setMethodFilter("")} className="text-xs text-violet-600 hover:underline">Clear</button>}
+            <span className="text-xs text-gray-500">{methodRows.length} transaction{methodRows.length !== 1 ? "s" : ""} · {money(methodTotal)}</span>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {filteredPayments.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No transactions in this period</td></tr>}
-                {filteredPayments.map((p, idx) => (
+                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter ? ` paid by ${methodFilter}` : ""} in this period</td></tr>}
+                {methodRows.map((p, idx) => (
                   <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
                     className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
