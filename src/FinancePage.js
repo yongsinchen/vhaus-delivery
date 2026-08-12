@@ -41,7 +41,7 @@ function FinancePage() {
     setLoading(true);
     const [agingRes, payRes] = await Promise.all([
       af(`${API}/aging-report?company_id=${companyId}`),
-      af(`${API}/payments?company_id=${companyId}&limit=500`),
+      af(`${API}/payments?company_id=${companyId}&limit=500&include_deposits=1`),
     ]);
     const [agingData, payData] = await Promise.all([agingRes.json(), payRes.json()]);
     setAging(agingData);
@@ -57,6 +57,7 @@ function FinancePage() {
   // in sync. We reload after so the Finance figures reflect the reversal.
   const isMaster = user?.role === "master";
   const [deletingId, setDeletingId] = useState(null);
+  const [detailTxn, setDetailTxn] = useState(null); // transaction shown in the detail modal
   const deletePayment = async (p) => {
     if (deletingId) return;
     if (!window.confirm(`Delete this ${money(p.amount)} payment?\n\nThis restores the order's outstanding balance and updates the customer's payment records. This cannot be undone.`)) return;
@@ -273,19 +274,27 @@ function FinancePage() {
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {filteredPayments.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No payments in this period</td></tr>}
-                {filteredPayments.map(p => (
-                  <tr key={p.id} className="border-t border-gray-50">
+                {filteredPayments.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No transactions in this period</td></tr>}
+                {filteredPayments.map((p, idx) => (
+                  <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
+                    className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
-                    <td className="px-4 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method || "Cash"}</span></td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{p.reference_no || "-"}</td>
-                    <td className="px-4 py-2 text-right font-bold text-emerald-700">{money(p.amount)}</td>
+                    <td className="px-4 py-2">
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method || "Cash"}</span>
+                      {p._deposit && <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-violet-100 text-violet-700 font-medium">Deposit</span>}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{p._deposit ? (p.so_number ? `SO ${p.so_number}` : "-") : (p.reference_no || "-")}</td>
+                    <td className={`px-4 py-2 text-right font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</td>
                     {isMaster && (
-                      <td className="px-4 py-2 text-right">
-                        <button onClick={() => deletePayment(p)} disabled={deletingId === p.id}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                          {deletingId === p.id ? "Deleting…" : "Delete"}
-                        </button>
+                      <td className="px-4 py-2 text-right" onClick={e => e.stopPropagation()}>
+                        {p.id ? (
+                          <button onClick={() => deletePayment(p)} disabled={deletingId === p.id}
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            {deletingId === p.id ? "Deleting…" : "Delete"}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-gray-400" title="Deposit is edited on the order">on order</span>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -449,6 +458,38 @@ function FinancePage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* Transaction detail modal — payments and deposits alike */}
+      {detailTxn && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setDetailTxn(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h3 className="text-base font-bold text-gray-900">{detailTxn._deposit ? "Deposit" : "Payment"} details</h3>
+              <button onClick={() => setDetailTxn(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className={`font-bold ${detailTxn._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(detailTxn.amount)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{detailTxn._deposit ? "Deposit (on order)" : "Collected payment"}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="text-gray-800">{detailTxn.payment_method || "-"}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Date</span><span className="text-gray-800">{detailTxn.paid_at ? new Date(detailTxn.paid_at).toLocaleString("en-MY") : "-"}</span></div>
+              {detailTxn.so_number && <div className="flex justify-between"><span className="text-gray-500">Sales Order</span><span className="text-gray-800">SO {detailTxn.so_number}</span></div>}
+              {detailTxn.customer_name && <div className="flex justify-between"><span className="text-gray-500">Customer</span><span className="text-gray-800">{detailTxn.customer_name}</span></div>}
+              {detailTxn.reference_no && <div className="flex justify-between"><span className="text-gray-500">Reference</span><span className="text-gray-800">{detailTxn.reference_no}</span></div>}
+              {detailTxn.proof_url ? (
+                <div>
+                  <p className="text-gray-500 mb-1">Proof</p>
+                  <div className="flex flex-wrap gap-2">
+                    {detailTxn.proof_url.split(",").map(u => u.trim()).filter(Boolean).map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="text-xs text-violet-600 underline">📎 Proof {i + 1}</a>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between"><span className="text-gray-500">Proof</span><span className="text-gray-400">None</span></div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
