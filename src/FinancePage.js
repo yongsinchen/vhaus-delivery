@@ -60,6 +60,25 @@ function FinancePage() {
   const [deletingId, setDeletingId] = useState(null);
   const [detailTxn, setDetailTxn] = useState(null); // transaction shown in the detail modal
   const [proofView, setProofView] = useState(null); // proof URL shown in the in-app viewer
+  const [custDetail, setCustDetail] = useState(null); // the txn customer's orders/balance
+
+  // When a transaction detail opens, pull that customer's orders + outstanding
+  // balance so Finance can see what the customer has on hand.
+  useEffect(() => {
+    setCustDetail(null);
+    const custId = detailTxn?.customer_id;
+    if (!custId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await af(`${API}/customers/${custId}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        if (alive) setCustDetail(d);
+      } catch { /* leave section hidden on error */ }
+    })();
+    return () => { alive = false; };
+  }, [detailTxn]);
   const deletePayment = async (p) => {
     if (deletingId) return;
     if (!window.confirm(`Delete this ${money(p.amount)} payment?\n\nThis restores the order's outstanding balance and updates the customer's payment records. This cannot be undone.`)) return;
@@ -498,6 +517,33 @@ function FinancePage() {
                 </div>
               ) : (
                 <div className="flex justify-between"><span className="text-gray-500">Proof</span><span className="text-gray-400">None</span></div>
+              )}
+
+              {/* This customer's on-hand sales orders + outstanding balance */}
+              {detailTxn.customer_id && (
+                <div className="border-t border-gray-100 pt-3">
+                  <p className="text-gray-500 mb-1.5 font-medium">Customer's open orders</p>
+                  {!custDetail ? (
+                    <p className="text-xs text-gray-400">Loading…</p>
+                  ) : (() => {
+                    const open = (custDetail.orders || []).filter(o => Number(o.balance) > 0);
+                    if (open.length === 0) return <p className="text-xs text-emerald-600">No outstanding balance 🎉</p>;
+                    return (
+                      <div className="space-y-1">
+                        {open.map(o => (
+                          <div key={o.id} className="flex justify-between text-xs">
+                            <span className="text-gray-700">SO {o.so_number}<span className="text-gray-400"> · {o.status}</span></span>
+                            <span className="font-semibold text-red-600">{money(o.balance)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-sm border-t border-gray-100 pt-1.5 mt-1">
+                          <span className="font-medium text-gray-600">Total outstanding</span>
+                          <span className="font-bold text-red-700">{money(custDetail.summary?.total_balance || 0)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               )}
             </div>
           </div>
