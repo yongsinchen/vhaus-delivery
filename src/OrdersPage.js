@@ -1573,9 +1573,9 @@ function OrdersPage() {
       )}
 
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className={`fixed inset-0 z-50 flex ${editId ? "justify-center items-start p-4 overflow-y-auto" : "justify-end"}`}>
           <div className="absolute inset-0 bg-black/40" onClick={() => !saving && setDrawerOpen(false)} />
-          <div className="relative w-full max-w-2xl bg-white h-full overflow-y-auto shadow-2xl">
+          <div className={`relative w-full bg-white overflow-y-auto shadow-2xl ${editId ? "max-w-5xl rounded-2xl my-4 max-h-[92vh]" : "max-w-2xl h-full"}`}>
             <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-lg font-bold text-gray-900">{editId ? "Edit Order" : "New Order"}</h2>
               <div className="flex items-center gap-2">
@@ -1618,7 +1618,8 @@ function OrdersPage() {
             <div className="px-6 py-4 space-y-4">
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
 
-              {/* Wizard step indicator */}
+              {/* Wizard step indicator — new orders only; editing shows the full form */}
+              {!editId && (
               <div className="flex items-center gap-2 text-xs font-medium">
                 {["Customer", "Items", "Payment"].map((label, i) => {
                   const n = i + 1;
@@ -1633,9 +1634,10 @@ function OrdersPage() {
                   );
                 })}
               </div>
+              )}
 
               {/* ── Phase 1: Customer details ── */}
-              {step === 1 && (<>
+              {(editId || step === 1) && (<>
               {/* Branch & Salesman */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1815,7 +1817,7 @@ function OrdersPage() {
               </>)}
 
               {/* ── Phase 2: Items & discount ── */}
-              {step === 2 && (<>
+              {(editId || step === 2) && (<>
               {/* Line items */}
               <div>
                 <div className="mb-2">
@@ -1932,13 +1934,15 @@ function OrdersPage() {
               </>)}
 
               {/* ── Phase 3: Payment ── */}
-              {step === 3 && (<>
+              {(editId || step === 3) && (<>
               {/* Total recap + deposit / payment collected + balance */}
               <div className="border-t border-gray-100 pt-3 space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
-                  <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
+                {!editId && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
+                    <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
                 <div className="flex items-center justify-between border-t border-gray-100 pt-2">
                   <span className="text-sm font-medium text-gray-500">Balance</span>
@@ -2031,21 +2035,21 @@ function OrdersPage() {
 
               </>)}
 
-              {/* Wizard navigation */}
+              {/* Navigation — editing is a single view (just Save); new orders step through */}
               <div className="flex items-center gap-2 border-t border-gray-100 pt-4">
-                {step > 1 && (
+                {!editId && step > 1 && (
                   <button type="button" onClick={() => { setFormError(""); setStep(s => s - 1); }}
                     className="px-4 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">← Back</button>
                 )}
-                {step === 1 && (
+                {!editId && step === 1 && (
                   <button type="button" onClick={nextFromCustomer}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Next: Items →</button>
                 )}
-                {step === 2 && (
+                {!editId && step === 2 && (
                   <button type="button" onClick={nextFromItems}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Confirm → Payment</button>
                 )}
-                {step === 3 && (
+                {(editId || step === 3) && (
                   <button onClick={saveOrder} disabled={saving}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                     {saving ? "Saving…" : editId ? "Update Order" : "Create Order"}
