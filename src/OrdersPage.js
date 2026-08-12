@@ -466,6 +466,7 @@ function OrdersPage() {
 
   // Order builder drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [step, setStep] = useState(1); // Add-order wizard: 1 customer · 2 items+discount · 3 payment
   const [editId, setEditId] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [arrivalItems, setArrivalItems] = useState(null);
@@ -790,6 +791,7 @@ function OrdersPage() {
       setDeliverElsewhere(false);
     }
     setFormError("");
+    setStep(1);
     setDrawerOpen(true);
   };
 
@@ -848,7 +850,25 @@ function OrdersPage() {
     });
     setDeliverElsewhere(!!f.delivery_address);
     setFormError("");
+    setStep(1);
     setDrawerOpen(true);
+  };
+
+  // Wizard step guards — validate the current phase before advancing.
+  const nextFromCustomer = () => {
+    const miss = [];
+    if (!form.branch_id) miss.push("Branch");
+    if (!form.customer_name?.trim()) miss.push("Full name");
+    if (!form.customer_contact?.trim()) miss.push("Phone number");
+    if (!form.customer_address?.trim()) miss.push("Billing address");
+    if (miss.length) { setFormError("Please fill: " + miss.join(", ")); return; }
+    setFormError(""); setStep(2);
+  };
+  const nextFromItems = () => {
+    if ((form.items || []).length === 0 && form.delivery_type !== "Service") {
+      setFormError("Add at least one item before confirming."); return;
+    }
+    setFormError(""); setStep(3);
   };
 
   const addLineItem = (p) => {
@@ -1598,6 +1618,24 @@ function OrdersPage() {
             <div className="px-6 py-4 space-y-4">
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
 
+              {/* Wizard step indicator */}
+              <div className="flex items-center gap-2 text-xs font-medium">
+                {["Customer", "Items", "Payment"].map((label, i) => {
+                  const n = i + 1;
+                  return (
+                    <React.Fragment key={label}>
+                      <div className={`flex items-center gap-1.5 ${step === n ? "text-violet-700" : step > n ? "text-emerald-600" : "text-gray-400"}`}>
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${step === n ? "bg-violet-600 text-white" : step > n ? "bg-emerald-500 text-white" : "bg-gray-200 text-gray-500"}`}>{step > n ? "✓" : n}</span>
+                        {label}
+                      </div>
+                      {n < 3 && <div className={`flex-1 h-px ${step > n ? "bg-emerald-400" : "bg-gray-200"}`} />}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+
+              {/* ── Phase 1: Customer details ── */}
+              {step === 1 && (<>
               {/* Branch & Salesman */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1774,7 +1812,10 @@ function OrdersPage() {
                   </div>
                 )}
               </div>
+              </>)}
 
+              {/* ── Phase 2: Items & discount ── */}
+              {step === 2 && (<>
               {/* Line items */}
               <div>
                 <div className="mb-2">
@@ -1870,7 +1911,7 @@ function OrdersPage() {
                   className="mt-2 w-full py-2 rounded-xl border border-dashed border-violet-300 text-violet-700 text-sm font-medium hover:bg-violet-50">+ Add Item</button>
               </div>
 
-              {/* Totals */}
+              {/* Totals — Phase 2 shows subtotal, GST, discount, total */}
               <div className="border-t border-gray-100 pt-3 space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-500">Subtotal</span>
@@ -1882,14 +1923,23 @@ function OrdersPage() {
                     <span className="text-gray-700">{gstAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
-                  <NumField label="Deposit (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
+                <NumField label="Discount (RM)" value={form.discount} onChange={v => setForm(f => ({ ...f, discount: v }))} />
+                <div className="flex items-center justify-between text-sm border-t border-gray-100 pt-2">
+                  <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
+                  <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
+              </div>
+              </>)}
+
+              {/* ── Phase 3: Payment ── */}
+              {step === 3 && (<>
+              {/* Total recap + deposit / payment collected + balance */}
+              <div className="border-t border-gray-100 pt-3 space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
                   <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
+                <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
                 <div className="flex items-center justify-between border-t border-gray-100 pt-2">
                   <span className="text-sm font-medium text-gray-500">Balance</span>
                   <span className="text-lg font-bold text-violet-700">RM {balanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -1979,10 +2029,29 @@ function OrdersPage() {
                 </div>
               )}
 
-              <button onClick={saveOrder} disabled={saving}
-                className="w-full py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                {saving ? "Saving…" : editId ? "Update Order" : "Create Order"}
-              </button>
+              </>)}
+
+              {/* Wizard navigation */}
+              <div className="flex items-center gap-2 border-t border-gray-100 pt-4">
+                {step > 1 && (
+                  <button type="button" onClick={() => { setFormError(""); setStep(s => s - 1); }}
+                    className="px-4 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">← Back</button>
+                )}
+                {step === 1 && (
+                  <button type="button" onClick={nextFromCustomer}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Next: Items →</button>
+                )}
+                {step === 2 && (
+                  <button type="button" onClick={nextFromItems}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Confirm → Payment</button>
+                )}
+                {step === 3 && (
+                  <button onClick={saveOrder} disabled={saving}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                    {saving ? "Saving…" : editId ? "Update Order" : "Create Order"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
