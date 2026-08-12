@@ -58,6 +58,7 @@ function FinancePage() {
   const isMaster = user?.role === "master";
   const [deletingId, setDeletingId] = useState(null);
   const [detailTxn, setDetailTxn] = useState(null); // transaction shown in the detail modal
+  const [proofView, setProofView] = useState(null); // proof URL shown in the in-app viewer
   const deletePayment = async (p) => {
     if (deletingId) return;
     if (!window.confirm(`Delete this ${money(p.amount)} payment?\n\nThis restores the order's outstanding balance and updates the customer's payment records. This cannot be undone.`)) return;
@@ -481,7 +482,7 @@ function FinancePage() {
                   <p className="text-gray-500 mb-1">Proof</p>
                   <div className="flex flex-wrap gap-2">
                     {detailTxn.proof_url.split(",").map(u => u.trim()).filter(Boolean).map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="text-xs text-violet-600 underline">📎 Proof {i + 1}</a>
+                      <button type="button" key={i} onClick={() => setProofView(u)} className="text-xs text-violet-600 underline hover:text-violet-800">📎 Proof {i + 1}</button>
                     ))}
                   </div>
                 </div>
@@ -490,6 +491,16 @@ function FinancePage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+      {/* In-app proof viewer — shows the receipt over the current page
+          instead of opening a new browser tab. */}
+      {proofView && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={() => setProofView(null)}>
+          <button onClick={() => setProofView(null)} className="absolute top-4 right-5 text-white/80 hover:text-white text-4xl leading-none">×</button>
+          {/\.pdf(\?|$)/i.test(proofView)
+            ? <iframe title="Payment proof" src={proofView} className="w-full h-full max-w-4xl bg-white rounded-lg" onClick={e => e.stopPropagation()} />
+            : <img src={proofView} alt="Payment proof" className="max-w-full max-h-full object-contain rounded-lg" onClick={e => e.stopPropagation()} />}
         </div>
       )}
     </div>
