@@ -57,7 +57,7 @@ const EMPTY_ORDER = {
   status: "draft", notes: "", items: [],
   order_date: "",
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", delivery_address: "", remark: "",
-  discount: "", deposit: "", payment_method: "", payment_proofs: [],
+  discount: "", deposit: "", payment_method: "", payment_proofs: [], admin_charges: "",
   branch_id: "", salesman_names: "",
   country: "", gst_rate: 0, gst_waived: false,
 };
@@ -818,7 +818,7 @@ function OrdersPage() {
       delivery_time_slot: f.delivery_time_slot || "",
       delivery_address: f.delivery_address || "",
       remark: f.remark || "",
-      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
+      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
       country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
       items: (f.sales_order_items || []).map(it => ({
@@ -1040,6 +1040,7 @@ function OrdersPage() {
       discount: form.discount === "" ? 0 : Number(form.discount),
       deposit: form.deposit === "" ? 0 : Number(form.deposit),
       payment_method: form.payment_method || null, payment_proofs: JSON.stringify(form.payment_proofs || []),
+      admin_charges: form.payment_method === "Instalment" && form.admin_charges !== "" ? Number(form.admin_charges) : null,
       branch_id: form.branch_id || null,
       salesman_names: form.salesman_names || null,
       country: form.country || null,
@@ -1958,6 +1959,10 @@ function OrdersPage() {
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
+
+              {form.payment_method === "Instalment" && (
+                <NumField label="Admin Charges (RM)" value={form.admin_charges} onChange={v => setForm(f => ({ ...f, admin_charges: v }))} />
+              )}
 
               {/* Payment Proofs */}
               <div>

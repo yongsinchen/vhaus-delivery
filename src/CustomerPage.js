@@ -39,6 +39,7 @@ function CustomerPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRef, setPayRef] = useState("");
+  const [payAdmin, setPayAdmin] = useState(""); // instalment admin charges
   const [payAllocations, setPayAllocations] = useState([]);
   const [payProofs, setPayProofs] = useState([]); // uploaded proof URLs
   const [payUploading, setPayUploading] = useState(false);
@@ -128,7 +129,7 @@ function CustomerPage() {
     setPaySaving(true);
     try {
       await withLoading("Recording payment…", async () => {
-        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations }) });
+        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null }) });
         const d = await res.json();
         if (!d.payment) throw new Error(d.error || "Failed");
         toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer);
@@ -429,6 +430,13 @@ function CustomerPage() {
                   <label className="block text-xs font-medium text-gray-500 mb-1">Reason <span className="text-red-500">*</span></label>
                   <textarea value={payRef} onChange={e => setPayRef(e.target.value)} rows={2} placeholder="Why is this cash rebate being given?"
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              )}
+              {payMethod === "Instalment" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Admin Charges (RM)</label>
+                  <input type="number" value={payAdmin} onChange={e => setPayAdmin(e.target.value)} placeholder="0.00"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm text-right focus:outline-none focus:border-violet-400" />
                 </div>
               )}
               {/* Payment Proof upload */}
