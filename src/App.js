@@ -448,7 +448,8 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
         {/* Recent Delivery Updates — admin-gated (manage roles only, hidden
             for salesmen). Backend enforces DELIVERY_ORDER_VIEW server-side;
             this gate just keeps it off a salesman's dashboard. */}
-        {isMaster && <BranchSalesPanel />}
+        {/* Branch Performance hidden from the admin dashboard (BranchSalesPanel
+            kept defined so it can be re-enabled if needed). */}
         {canViewDeliveryActivity && <DeliveryActivityPanel />}
 
         {/* Outstanding balances */}
@@ -596,6 +597,7 @@ function DeliveryActivityPanel() {
 // Self-contained like DeliveryActivityPanel: owns its month + fetch state so
 // OverviewPage's prop surface doesn't grow. Shows each branch's total sales
 // (RM) for the picked month, biggest first, with a share bar.
+// eslint-disable-next-line no-unused-vars -- kept for easy re-enable; hidden from the admin dashboard
 function BranchSalesPanel() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [rows, setRows] = useState([]);
