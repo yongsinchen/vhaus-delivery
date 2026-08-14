@@ -19,6 +19,7 @@ export const ROLES = {
 export const roleLabel = r => ({
   master: "Master", super_admin: "Super Admin",
   director: "Director", manager: "Manager",
+  sales_manager: "Sales Manager", operation_manager: "Operation Manager",
   company_admin: "Company Admin",
   salesman: "Salesman", part_time: "Part-time", finance: "Finance",
   warehouse: "Warehouse", operation: "Warehouse",
@@ -31,37 +32,42 @@ export const can = (user, action) => {
   // permission/UI decision (the stored role stays 'part_time' for labeling).
   const role = user.role === "part_time" ? "salesman" : user.role;
 
+  // Manager was split into Sales Manager (revenue side) and Operation Manager
+  // (fulfilment side). Legacy "manager" keeps full access on both sides.
+  const salesSide = ["master", "manager", "sales_manager"];       // orders / commission / payments / services
+  const opsSide   = ["master", "manager", "operation_manager"];   // deliveries / warehouse / catalogue / DO review
+  const orderCapable = [...salesSide, "company_admin", "salesman"];
+
   const rules = {
     // Tab visibility
     viewSummary:          true,
     viewMonthly:          role !== "finance",
-    viewService:          true,
+    viewService:          role !== "finance",
     viewDaily:            role !== "finance",
     viewSchedule:         true,
     viewFlagged:          role !== "finance",
-    viewServicePending:   ["master","manager"].includes(role),
-    viewDoReview:         ["master","manager"].includes(role),
-    viewAddOrder:         role !== "finance",
-    viewFinance:          ["master","manager","salesman","finance"].includes(role),
+    viewServicePending:   salesSide.includes(role),
+    viewDoReview:         opsSide.includes(role),
+    viewAddOrder:         orderCapable.includes(role),
+    viewFinance:          [...salesSide, "salesman", "finance"].includes(role),
 
-    // Schedule edit
-    editSchedule:         ["master","manager","company_admin"].includes(role),
+    // Schedule edit (fulfilment side + company admin)
+    editSchedule:         [...opsSide, "company_admin"].includes(role),
 
-    // Order actions
-    addOrder:             role !== "finance",
-    editOrder:            ["master","manager","company_admin","salesman"].includes(role),
-    deleteOrder:          ["master","manager"].includes(role),
-    recordPayment:        ["master","manager","salesman"].includes(role),
+    // Order actions (revenue side + company admin + salesman)
+    addOrder:             orderCapable.includes(role),
+    editOrder:            orderCapable.includes(role),
+    deleteOrder:          salesSide.includes(role),
+    recordPayment:        [...salesSide, "salesman"].includes(role),
 
-    // User management
-    manageUsers:          ["master","manager"].includes(role),
+    // User management — Master only (the two new managers cannot; legacy
+    // manager retained until existing managers are reassigned).
+    manageUsers:          ["master", "manager"].includes(role),
     manageCompanies:      role === "master",
 
-    // Service pending
-    convertServicePending: ["master","manager"].includes(role),
-
-    // DO Review
-    resolveDoReview:      ["master","manager"].includes(role),
+    // Service pending (revenue side) / DO review (fulfilment side)
+    convertServicePending: salesSide.includes(role),
+    resolveDoReview:      opsSide.includes(role),
   };
 
   return rules[action] ?? false;

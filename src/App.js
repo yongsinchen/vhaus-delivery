@@ -1405,12 +1405,16 @@ export default function App() {
   const visibleNav = NAV.filter(n => {
     if (n.id === "operations") return !isSalesman && (can("viewServicePending") || can("viewDoReview"));
     if (n.id === "team") return can("manageUsers");
-    if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation"].includes(effectiveRole);
+    if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation","operation_manager"].includes(effectiveRole);
     if (n.id === "company-deliveries") return effectiveRole === "salesman";
-    if (n.id === "balance") return isSalesman;
-    if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation"].includes(effectiveRole);
-    if (n.id === "commission") return ["master","manager","company_admin","salesman"].includes(effectiveRole);
-    if (n.manageOnly) return ["master","manager","company_admin"].includes(effectiveRole);
+    if (n.id === "balance") return isSalesman || effectiveRole === "finance";
+    if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation","operation_manager"].includes(effectiveRole);
+    // Commission + Finance: revenue-side managers, salesman, and Finance —
+    // Company Admin no longer sees either.
+    if (n.id === "commission") return ["master","manager","sales_manager","salesman","finance"].includes(effectiveRole);
+    if (n.id === "finance") return ["master","manager","sales_manager","finance"].includes(effectiveRole);
+    // Catalogue / warehouse / operations config — Company Admin + Operation Manager.
+    if (n.manageOnly) return ["master","manager","company_admin","operation_manager"].includes(effectiveRole);
     if (n.canKey) return can(n.canKey);
     return true;
   });

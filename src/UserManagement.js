@@ -31,8 +31,8 @@ function UserManagement() {
   const [addAccess, setAddAccess] = useState({ company_id: "", role_id: "" });
 
   const availableRoles = isMaster
-    ? ["master", "manager", "company_admin", "salesman", "part_time", "driver", "operation", "finance"]
-    : ["company_admin", "salesman", "part_time", "driver", "operation", "finance"];
+    ? ["master", "sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "driver", "operation", "finance"]
+    : ["sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "driver", "operation", "finance"];
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -322,6 +322,8 @@ function UserManagement() {
   const roleBadge = role => ({
     master: "bg-red-100 text-red-700",
     manager: "bg-purple-100 text-purple-700",
+    sales_manager: "bg-purple-100 text-purple-700",
+    operation_manager: "bg-indigo-100 text-indigo-700",
     company_admin: "bg-blue-100 text-blue-700",
     salesman: "bg-emerald-100 text-emerald-700",
     part_time: "bg-teal-100 text-teal-700",
@@ -438,7 +440,10 @@ function UserManagement() {
                 <label className="text-xs font-medium text-gray-600 block mb-1">Role <span className="text-red-500">*</span></label>
                 <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">
-                  {availableRoles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                  {/* Always keep the user's current role selectable — e.g. a legacy
+                      "manager" that's no longer offered for new users — so editing
+                      never silently reassigns them. */}
+                  {[...new Set([form.role, ...availableRoles].filter(Boolean))].map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                 </select>
               </div>
 
