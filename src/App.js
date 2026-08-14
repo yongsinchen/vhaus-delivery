@@ -203,10 +203,13 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
           <h1 className="text-2xl font-bold text-gray-900">Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, {user?.name?.split(" ")[0]} 👋</h1>
           <p className="text-gray-400 text-sm mt-1">{new Date().toLocaleDateString("en-MY", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</p>
         </div>
-        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-3`}>
+        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-3"} gap-3`}>
           <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage(isSalesman ? "company-deliveries" : "deliveries")} />
           <StatCard label="Ready to Deliver" value={readyOrders.filter(o=>!o.deliveryDate).length} sub="items arrived, no date" onClick={() => setPage("ready")} />
-          <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={isSalesman ? () => setPage("balance") : undefined} />
+          {/* Outstanding balance is a salesman collection metric — hidden for admin. */}
+          {isSalesman && (
+            <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={() => setPage("balance")} />
+          )}
           {isSalesman ? (
             <StatCard label="Pending Service Cases" value={services.filter(s => s.status !== "Serviced").length} sub="open cases" onClick={() => setPage("services")} />
           ) : (
