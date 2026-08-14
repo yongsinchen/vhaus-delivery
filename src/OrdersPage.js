@@ -53,7 +53,7 @@ const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque"
 
 const EMPTY_ORDER = {
   order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
-  customer_id_type: "ic", customer_id_no: "", customer_email: "",
+  customer_id_type: "ic", customer_id_no: "", customer_email: "", einvoice_requested: false,
   status: "draft", notes: "", items: [],
   order_date: "",
   delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", delivery_address: "", remark: "",
@@ -810,6 +810,7 @@ function OrdersPage() {
       customer_id_type: f.customer_id_type || "ic",
       customer_id_no: f.customer_id_no || "",
       customer_email: f.customer_email || "",
+      einvoice_requested: !!f.einvoice_requested,
       status: f.status || "draft", sales_channel: f.sales_channel || "branch",
       notes: f.notes || "",
       order_date: f.order_date || "",
@@ -987,6 +988,8 @@ function OrdersPage() {
   // Instalment admin charges add to what the customer owes (not to order_amount).
   const adminChargeVal = form.payment_method === "Instalment" ? (Number(form.admin_charges) || 0) : 0;
   const balanceVal = totalAfterDiscount + adminChargeVal - depositVal;
+  // E-invoice details required when over RM10,000 OR the customer requested one.
+  const einvNeeded = totalAfterDiscount > 10000 || form.einvoice_requested;
 
   const saveOrder = async () => {
     // ── Base validation (all statuses) ──
@@ -1019,14 +1022,14 @@ function OrdersPage() {
       // decides; manual/legacy SO numbers get no special treatment. Backend
       // enforces the same rule as the source of truth.
       const einvMissing = [];
-      if (totalAfterDiscount > 10000) {
+      if (einvNeeded) {
         if (!form.customer_id_no?.trim()) einvMissing.push(`${form.customer_id_type === "passport" ? "Passport" : "I/C"} number`);
         if (!form.customer_email?.trim()) einvMissing.push("Email address");
       }
       if (missing.length > 0 || einvMissing.length > 0) {
         const parts = [];
         if (missing.length > 0) parts.push("Cannot confirm order. Missing:\n• " + missing.join("\n• "));
-        if (einvMissing.length > 0) parts.push("E-invoice details are required for orders above RM10,000.\n• " + einvMissing.join("\n• "));
+        if (einvMissing.length > 0) parts.push((totalAfterDiscount > 10000 ? "E-invoice details are required for orders above RM10,000." : "E-invoice details are required (customer requested).") + "\n• " + einvMissing.join("\n• "));
         setFormError(parts.join("\n\n"));
         return;
       }
@@ -1045,7 +1048,7 @@ function OrdersPage() {
       customer_name: form.customer_name, customer_contact: form.customer_contact || null,
       customer_address: form.customer_address || null,
       customer_id_type: form.customer_id_type || null, customer_id_no: form.customer_id_no?.trim() || null,
-      customer_email: form.customer_email?.trim() || null,
+      customer_email: form.customer_email?.trim() || null, einvoice_requested: !!form.einvoice_requested,
       status: form.status, notes: form.notes || null,
       order_date: form.order_date || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
@@ -1730,6 +1733,15 @@ function OrdersPage() {
                 <Field label="Full Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
                 <Field label="Phone Number *" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
               </div>
+              {/* E-invoice toggle — force I/C + email even below RM10,000 */}
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                <input type="checkbox" checked={!!form.einvoice_requested}
+                  onChange={e => setForm(f => ({ ...f, einvoice_requested: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-400" />
+                Customer needs e-invoice
+                {form.einvoice_requested && totalAfterDiscount <= 10000 && <span className="text-xs text-amber-600">— I/C & email required</span>}
+              </label>
+
               {/* Customer identity for e-invoicing */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1740,12 +1752,12 @@ function OrdersPage() {
                     <option value="passport">Passport</option>
                   </select>
                 </div>
-                <Field label={`${form.customer_id_type === "passport" ? "Passport Number" : "I/C Number"}${totalAfterDiscount > 10000 ? " *" : ""}`}
+                <Field label={`${form.customer_id_type === "passport" ? "Passport Number" : "I/C Number"}${einvNeeded ? " *" : ""}`}
                   value={form.customer_id_no} onChange={v => setForm(f => ({ ...f, customer_id_no: v }))} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label={`Email Address${totalAfterDiscount > 10000 ? " *" : ""}`} type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
-                {totalAfterDiscount > 10000 && <p className="text-xs text-amber-600 self-end pb-2">E-invoice details required (order above RM10,000)</p>}
+                <Field label={`Email Address${einvNeeded ? " *" : ""}`} type="email" value={form.customer_email} onChange={v => setForm(f => ({ ...f, customer_email: v }))} />
+                {einvNeeded && <p className="text-xs text-amber-600 self-end pb-2">E-invoice details required{totalAfterDiscount > 10000 ? " (order above RM10,000)" : " (customer requested)"}</p>}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Billing Address *" value={form.customer_address} onChange={v => {
