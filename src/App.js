@@ -197,23 +197,35 @@ const NAV = [
 // JSX tree. As a memo child with stable props it only re-renders when the
 // dashboard data itself changes.
 const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity }) {
+  const BAL_PER_PAGE = 30;
+  const [balPage, setBalPage] = useState(0);
+  const balPageCount = Math.max(1, Math.ceil(balanceOrders.length / BAL_PER_PAGE));
+  const balStart = Math.min(balPage, balPageCount - 1) * BAL_PER_PAGE;
+  const balSlice = balanceOrders.slice(balStart, balStart + BAL_PER_PAGE);
+  // Outstanding balances + branch performance are for Master (and salesmen see
+  // their own balances); other admins don't get the money widgets here.
+  const showBalances = isMaster || isSalesman;
   return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, {user?.name?.split(" ")[0]} 👋</h1>
           <p className="text-gray-400 text-sm mt-1">{new Date().toLocaleDateString("en-MY", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}</p>
         </div>
-        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : "lg:grid-cols-3"} gap-3`}>
+        <div className={`grid grid-cols-2 ${isSalesman ? "lg:grid-cols-5" : isMaster ? "lg:grid-cols-3" : "lg:grid-cols-3"} gap-3`}>
           <StatCard label="Today's Deliveries" value={todayOrders.length} sub={`${todayOrders.filter(o=>o.status==="Delivered").length} delivered`} accent onClick={() => setPage(isSalesman ? "company-deliveries" : "deliveries")} />
           <StatCard label="Ready to Deliver" value={readyOrders.filter(o=>!o.deliveryDate).length} sub="items arrived, no date" onClick={() => setPage("ready")} />
           {/* Outstanding balance is a salesman collection metric — hidden for admin. */}
           {isSalesman && (
             <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} onClick={() => setPage("balance")} />
           )}
+          {/* Master's dashboard drops the Flagged tile; other admins keep it, salesmen see Pending Service. */}
           {isSalesman ? (
             <StatCard label="Pending Service Cases" value={services.filter(s => s.status !== "Serviced").length} sub="open cases" onClick={() => setPage("services")} />
-          ) : (
+          ) : !isMaster ? (
             <StatCard label="Flagged Orders" value={flaggedOrders.length} sub="need attention" onClick={() => setPage("orders")} />
+          ) : null}
+          {isMaster && (
+            <StatCard label="Outstanding Balance" value={`RM ${balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}`} sub={`${balanceOrders.length} orders`} />
           )}
           {isSalesman && (
             <StatCard label="Est. Commission This Month" value={estCommission === null ? "…" : `RM ${estCommission.toLocaleString()}`} sub="eligible + pending" onClick={() => setPage("commission")} />
@@ -448,23 +460,26 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
         {/* Recent Delivery Updates — admin-gated (manage roles only, hidden
             for salesmen). Backend enforces DELIVERY_ORDER_VIEW server-side;
             this gate just keeps it off a salesman's dashboard. */}
-        {/* Branch Performance hidden from the admin dashboard (BranchSalesPanel
-            kept defined so it can be re-enabled if needed). */}
+        {/* Branch Performance — Master only. */}
+        {isMaster && <BranchSalesPanel />}
         {canViewDeliveryActivity && <DeliveryActivityPanel />}
 
-        {/* Outstanding balances */}
-        {balanceOrders.length > 0 && (
+        {/* Outstanding balances — Master (all) or a salesman (their own), 30 per page. */}
+        {showBalances && balanceOrders.length > 0 && (
           <div>
-            <h2 className="font-bold text-gray-800 mb-3">Outstanding Balances</h2>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="font-bold text-gray-800">Outstanding Balances</h2>
+              <span className="text-xs text-gray-500">{balanceOrders.length} orders · RM {balanceOrders.reduce((s,o)=>s+parseFloat(o.balance||0),0).toLocaleString()}</span>
+            </div>
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead><tr className="bg-gray-50 border-b border-gray-100">{["SO","Customer","Salesman","Amount","Balance","Delivery","Aging"].map(h=><th key={h} className="px-4 py-2.5 text-left font-semibold text-gray-500">{h}</th>)}</tr></thead>
                   <tbody className="divide-y divide-gray-50">
-                    {balanceOrders.map((o,i) => {
+                    {balSlice.map((o,i) => {
                       const aging = o.deliveryDate ? Math.floor((now-new Date(o.deliveryDate))/(86400000)) : null;
                       return (
-                        <tr key={i} className="hover:bg-violet-50 cursor-pointer" onClick={() => handleView(o)}>
+                        <tr key={o._rowKey || o.id || i} className="hover:bg-violet-50 cursor-pointer" onClick={() => handleView(o)}>
                           <td className="px-4 py-3 font-bold text-violet-700">{o.soNumber}</td>
                           <td className="px-4 py-3 font-medium text-gray-800">{o.customerName}</td>
                           <td className="px-4 py-3 text-gray-500">{o.salesman||"-"}</td>
@@ -478,6 +493,18 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
                   </tbody>
                 </table>
               </div>
+              {balPageCount > 1 && (
+                <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/60">
+                  <span className="text-xs text-gray-500">Showing {balStart + 1}–{Math.min(balStart + BAL_PER_PAGE, balanceOrders.length)} of {balanceOrders.length}</span>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setBalPage(p => Math.max(0, p - 1))} disabled={balPage === 0}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed">‹ Prev</button>
+                    <span className="text-xs text-gray-500 tabular-nums">Page {Math.min(balPage, balPageCount - 1) + 1} / {balPageCount}</span>
+                    <button onClick={() => setBalPage(p => Math.min(balPageCount - 1, p + 1))} disabled={balPage >= balPageCount - 1}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed">Next ›</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -597,7 +624,6 @@ function DeliveryActivityPanel() {
 // Self-contained like DeliveryActivityPanel: owns its month + fetch state so
 // OverviewPage's prop surface doesn't grow. Shows each branch's total sales
 // (RM) for the picked month, biggest first, with a share bar.
-// eslint-disable-next-line no-unused-vars -- kept for easy re-enable; hidden from the admin dashboard
 function BranchSalesPanel() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [rows, setRows] = useState([]);
