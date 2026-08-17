@@ -321,7 +321,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
       </div>
       <div class="titlebar sec">
         <div class="title">SALES ORDER</div>
-        <div class="sono">Document No<br><span class="no">${esc(order.order_number || "")}</span>${order.status ? `<br><span class="st">${esc(order.status)}</span>` : ""}</div>
+        <div class="sono">Document No<br><span class="no">${esc(order.order_number || "")}</span></div>
       </div>
       <div class="sectitle sec">Customer Details</div>
       <div class="cust sec">
