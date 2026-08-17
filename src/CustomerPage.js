@@ -101,19 +101,33 @@ function CustomerPage() {
     setShowForm(true);
   };
 
+  // Allocation rows for the chosen kind. Deposit collection is only offered on
+  // orders that have NO deposit yet (a new order); once an order has a deposit,
+  // only its balance can be collected.
+  const allocsFor = (orders, kind) => (orders || [])
+    .filter(o => (kind === "deposit" ? !o._hasDeposit : o._hasDeposit))
+    .map(o => ({ order_id: o.id, so_number: o.so_number, balance: Number(o.balance), amount: "" }));
+
+  const switchPayKind = (kind) => {
+    setPayKind(kind);
+    setPayAllocations(allocsFor(payModal?.orders, kind));
+    setPayAmount("");
+  };
+
   const openPayment = (customer, orders) => {
-    const withBalance = (orders || []).filter(o => Number(o.balance) > 0);
-    setPayAllocations(withBalance.map(o => ({ order_id: o.id, so_number: o.so_number, balance: Number(o.balance), amount: "" })));
+    // Tag each outstanding order: does it already have a deposit paid? (Anything
+    // paid means balance < the full order amount.) Deposit collection applies to
+    // orders with none yet; balance collection to those that already have one.
+    const withBalance = (orders || []).filter(o => Number(o.balance) > 0)
+      .map(o => ({ ...o, _hasDeposit: Number(o.balance) < (Number(o.order_amount) || 0) }));
+    const hasNewOrder = withBalance.some(o => !o._hasDeposit);
+    const kind = hasNewOrder ? "deposit" : "balance"; // default to deposit only if a no-deposit order exists
+    setPayKind(kind);
+    setPayAllocations(allocsFor(withBalance, kind));
     setPayAmount("");
     setPayMethod("Cash");
     setPayRef("");
     setPayProofs([]);
-    // Default to "deposit" when nothing has been paid yet on these orders
-    // (balance still equals the full order amount) — the new flow confirms
-    // orders with zero deposit, so the first collection is usually the
-    // deposit. Otherwise it's a balance collection. Salesman can override.
-    const nothingPaid = withBalance.length > 0 && withBalance.every(o => Number(o.balance) >= (Number(o.order_amount) || 0));
-    setPayKind(nothingPaid ? "deposit" : "balance");
     setPayModal({ customer, orders: withBalance });
   };
 
@@ -413,14 +427,24 @@ function CustomerPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Collecting</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {[{ k: "deposit", label: "Collect Deposit" }, { k: "balance", label: "Collect Balance" }].map(({ k, label }) => (
-                    <button key={k} type="button" onClick={() => setPayKind(k)}
-                      className={`py-2 rounded-xl text-xs font-semibold border ${payKind === k ? (k === "deposit" ? "bg-violet-600 text-white border-violet-600" : "bg-emerald-600 text-white border-emerald-600") : "bg-white text-gray-700 border-gray-200"}`}>
-                      {label}
-                    </button>
-                  ))}
+                  {[{ k: "deposit", label: "Collect Deposit" }, { k: "balance", label: "Collect Balance" }].map(({ k, label }) => {
+                    // Deposit only when there's an order without a deposit yet;
+                    // balance only when there's an order that already has one.
+                    const available = k === "deposit"
+                      ? (payModal.orders || []).some(o => !o._hasDeposit)
+                      : (payModal.orders || []).some(o => o._hasDeposit);
+                    return (
+                      <button key={k} type="button" disabled={!available} onClick={() => switchPayKind(k)}
+                        title={!available ? (k === "deposit" ? "No new orders awaiting a deposit" : "No orders with an outstanding balance") : ""}
+                        className={`py-2 rounded-xl text-xs font-semibold border transition-colors ${payKind === k ? (k === "deposit" ? "bg-violet-600 text-white border-violet-600" : "bg-emerald-600 text-white border-emerald-600") : "bg-white text-gray-700 border-gray-200"} disabled:opacity-40 disabled:cursor-not-allowed`}>
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
-                {payKind === "deposit" && <p className="text-[11px] text-violet-600 mt-1">Recording a deposit turns this into a confirmed sale.</p>}
+                {payKind === "deposit"
+                  ? <p className="text-[11px] text-violet-600 mt-1">Deposit — for new orders with no deposit yet. Recording it turns the order into a confirmed sale.</p>
+                  : <p className="text-[11px] text-emerald-600 mt-1">Balance — for orders that already have a deposit.</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Total Amount (RM)</label>
