@@ -254,6 +254,9 @@ function CommissionPage() {
   const [detail, setDetail] = useState(null); // commission row shown in the order-details modal
   const [commissions, setCommissions] = useState([]);
   const [rules, setRules] = useState([]);
+  const [branchOverrides, setBranchOverrides] = useState([]); // per-branch override earner rows
+  const [boUsers, setBoUsers] = useState([]); // candidate earners (all active users)
+  const [boSavingId, setBoSavingId] = useState(null); // branch_id being saved
   const [holds, setHolds] = useState([]); // eslint-disable-line
   const [incentives, setIncentives] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
@@ -303,6 +306,31 @@ function CommissionPage() {
     const d = await res.json();
     setRules(d.rules || []);
   }, [companyId]);
+
+  const loadBranchOverrides = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/branch-commission-overrides?company_id=${companyId}`);
+    const d = await res.json();
+    setBranchOverrides((d.branches || []).map(b => ({ ...b, _user: b.override_user_id || "", _rate: b.override_rate_pct != null ? String(b.override_rate_pct) : "" })));
+    setBoUsers(d.users || []);
+  }, [companyId]);
+
+  const saveBranchOverride = async (row) => {
+    setBoSavingId(row.branch_id);
+    try {
+      await withLoading("Saving branch override…", async () => {
+        const res = await af(`${API}/branch-commission-overrides/${row.branch_id}`, {
+          method: "PUT",
+          body: JSON.stringify({ user_id: row._user || null, rate_pct: row._user ? (row._rate === "" ? 0 : Number(row._rate)) : null }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || "Failed");
+        toast.success(row._user ? "Branch override saved" : "Branch override cleared");
+        loadBranchOverrides();
+      });
+    } catch (e) { toast.error(e.message || "Failed to save"); }
+    finally { setBoSavingId(null); }
+  };
 
   const loadIncentives = useCallback(async () => {
     if (!companyId) return;
@@ -362,9 +390,10 @@ function CommissionPage() {
   const atCurrentMonth = payoutMonth >= currentMonth();
   useEffect(() => { if (tab === 2) {
     loadRules();
+    loadBranchOverrides();
     af(`${API}/salesman-names?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen(d.salesmen || []));
     af(`${API}/company-settings?company_id=${companyId}`).then(r=>r.json()).then(d => { try { const ch = JSON.parse(d.settings?.sales_channels || '["branch"]'); if (Array.isArray(ch)) setChannels(ch); } catch {} });
-  } }, [tab, loadRules, companyId]);
+  } }, [tab, loadRules, loadBranchOverrides, companyId]);
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
 
   const loadDriverComms = useCallback(async () => {
@@ -835,6 +864,36 @@ function CommissionPage() {
       {/* TAB 2: Rules */}
       {tab === 2 && (
         <div className="space-y-4">
+          {/* Branch override earner — a specific person earns a flat % of a
+              branch's legit (deposit-paid) sales, on top of the salesmen. */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <h3 className="font-bold text-gray-900">Branch Override Commission</h3>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">Assign one person per branch to earn a flat % of that branch's legit (deposit-paid) sales, at their own rate. Leave the person blank to remove.</p>
+            {branchOverrides.length === 0 && <p className="text-xs text-gray-400">No branches found.</p>}
+            <div className="space-y-2">
+              {branchOverrides.map((b, i) => (
+                <div key={b.branch_id} className="flex flex-wrap items-center gap-2 bg-gray-50 rounded-xl p-2">
+                  <span className="text-sm font-medium text-gray-700 min-w-[110px]">{b.branch_name}</span>
+                  <select value={b._user} onChange={e => setBranchOverrides(prev => prev.map((r, j) => j === i ? { ...r, _user: e.target.value } : r))}
+                    className="flex-1 min-w-[150px] px-3 py-1.5 rounded-lg border border-gray-200 text-sm bg-white">
+                    <option value="">— No override —</option>
+                    {boUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <input type="number" step="0.1" min="0" max="100" value={b._rate} disabled={!b._user}
+                      onChange={e => setBranchOverrides(prev => prev.map((r, j) => j === i ? { ...r, _rate: e.target.value } : r))}
+                      placeholder="Rate" className="w-20 px-2 py-1.5 text-sm text-right rounded-lg border border-gray-200 disabled:bg-gray-100" />
+                    <span className="text-xs text-gray-400">%</span>
+                  </div>
+                  <button onClick={() => saveBranchOverride(b)} disabled={boSavingId === b.branch_id}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                    {boSavingId === b.branch_id ? "Saving…" : "Save"}</button>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">The rate is per person — the same earner uses one rate across every branch they override. Override earns nothing until the order's deposit gate is met.</p>
+          </div>
+
           <button onClick={() => setShowRuleForm(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ Add Rule</button>
           {rules.length === 0 && <div className="text-center py-8 text-gray-400"><p>No commission rules set.</p><p className="text-xs mt-1">Add rules to auto-calculate commissions on orders.</p></div>}
           <div className="space-y-2">
