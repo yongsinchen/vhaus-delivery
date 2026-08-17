@@ -46,6 +46,14 @@ const isOverrideRow = c => OVERRIDE_ROLES.includes(c.role_name);
 const totalSalesOf = u => u.commissions.filter(c => !isOverrideRow(c)).reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
 // The person's override earnings (commission on other people's branch sales).
 const overrideTotalOf = u => u.commissions.filter(isOverrideRow).reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
+// A commission's own business month, from its order's date ("YYYY-MM").
+const orderMonthOf = c => (c.orders?.order_date || "").slice(0, 7);
+// Own (non-override) sales for a specific business month only — the payout view
+// also carries pending commissions from OTHER months, which must not count
+// toward the selected month's sales total.
+const ownSalesInMonth = (u, ym) => u.commissions
+  .filter(c => !isOverrideRow(c) && orderMonthOf(c) === ym)
+  .reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
 
 // --- Remembered filters ------------------------------------------------------
 // Kept per user AND per company: one person's August at Vhaus PG is not their
@@ -379,14 +387,19 @@ function CommissionPage() {
   // Search and sort are applied client-side: /commission-payout already returns the
   // whole month grouped per salesman, so this is instant and needs no round-trip.
   const needle = search.trim().toLowerCase();
+  // The order/business month this payout batch belongs to (payout month − 1).
+  // "Total Sales" is scoped to this month so it reconciles with the month's real
+  // sales; pending from other months is shown but excluded.
+  const batchYM = shiftMonth(payoutMonth, -1).slice(0, 7);
   const visibleUsers = useMemo(() => {
     const sort = SORTS.find(s => s.key === sortKey) || SORTS[2];
+    const getVal = sortKey === "sales" ? (u => ownSalesInMonth(u, batchYM)) : sort.get;
     const dir = sortDir === "asc" ? 1 : -1;
     return (payout?.users || [])
       .filter(u => !needle || (u.name || "").toLowerCase().includes(needle))
       .slice()
-      .sort((a, b) => { const x = sort.get(a), y = sort.get(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
-  }, [payout, needle, sortKey, sortDir]);
+      .sort((a, b) => { const x = getVal(a), y = getVal(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
+  }, [payout, needle, sortKey, sortDir, batchYM]);
 
   // Same keyword narrows the flat commission lists, matched on salesman name.
   const visibleCommissions = useMemo(() => commissions.filter(c => {
@@ -660,8 +673,9 @@ function CommissionPage() {
                   const ownComms = u.commissions.filter(c => !isOverrideRow(c));
                   const overrideComms = u.commissions.filter(isOverrideRow).sort(bySoAsc);
                   const eligible = ownComms.filter(c => c.status === "eligible").sort(bySoAsc);
-                  const pending = ownComms.filter(c => c.status === "pending").sort(bySoAsc);
-                  const totalSales = totalSalesOf(u);
+                  const pending = ownComms.filter(c => c.status === "pending" && orderMonthOf(c) === batchYM).sort(bySoAsc);
+                  const pendingOther = ownComms.filter(c => c.status === "pending" && orderMonthOf(c) !== batchYM).sort(bySoAsc);
+                  const totalSales = ownSalesInMonth(u, batchYM);
                   const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
                   const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
                   return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role}) · Total Sales: ${money(totalSales)}</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
@@ -670,6 +684,7 @@ function CommissionPage() {
                     // can see WHY a row pays less than its rate implies.
                     ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
+                    ...pendingOther.map(c => `<tr style="opacity:0.45"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#888">(${orderMonthOf(c) ? monthLabel(orderMonthOf(c) + "-01") : "—"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#888">Pending (other month)</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
                     ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
@@ -713,11 +728,15 @@ function CommissionPage() {
             const ownComms = u.commissions.filter(c => !isOverrideRow(c));
             const overrideComms = u.commissions.filter(isOverrideRow).sort(bySoAsc);
             const eligible = ownComms.filter(c => c.status === "eligible" || c.status === "paid").sort(bySoAsc);
-            const pending = ownComms.filter(c => c.status === "pending").sort(bySoAsc);
+            // Pending is split by business month: this month's pending counts
+            // toward the month; pending carried from other months is shown apart
+            // and excluded from Total Sales.
+            const pending = ownComms.filter(c => c.status === "pending" && orderMonthOf(c) === batchYM).sort(bySoAsc);
+            const pendingOther = ownComms.filter(c => c.status === "pending" && orderMonthOf(c) !== batchYM).sort(bySoAsc);
             // eslint-disable-next-line no-unused-vars
             const held = u.commissions.filter(c => c.status === "held");
             const pendingTotal = pending.reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
-            const totalSales = totalSalesOf(u);
+            const totalSales = ownSalesInMonth(u, batchYM);
             const overrideTotal = overrideTotalOf(u);
             return (
             <div key={u.user_id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
@@ -778,6 +797,30 @@ function CommissionPage() {
                       </div>
                       <CommissionBreakdown c={c} />
                       <p className="text-amber-600 mt-0.5">{commissionReason(c)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Pending carried from other months — not part of this month's
+                  sales; shown so the pipeline isn't lost, labelled by month. */}
+              {pendingOther.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-bold text-gray-400 mb-1">PENDING FROM OTHER MONTHS ({pendingOther.length}) · not counted in {monthLabel(payoutMonth)} sales</p>
+                  {pendingOther.map(c => (
+                    <div key={c.id} onClick={() => setDetail(c)} title="View order details"
+                      className="text-xs py-1.5 border-t border-gray-50 opacity-70 cursor-pointer hover:bg-gray-50 hover:opacity-100 rounded-lg px-1 -mx-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
+                          <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
+                          <span className="text-[10px] text-gray-400 ml-1">{orderMonthOf(c) ? monthLabel(orderMonthOf(c) + "-01") : "—"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-400">{c.rate_pct}%</span>
+                          <span className="text-gray-400">{money(c.commission_amt)}</span>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
