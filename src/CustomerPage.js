@@ -8,7 +8,7 @@ const af = async (url, opts = {}) => { const token = await getToken(); const cid
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 
 const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current (0-30d)" }, "30_60": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", label: "30-60 days" }, "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "60-90 days" }, "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "90+ days" } };
-const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque", "Instalment", "Cash Rebate"];
+const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate"];
 
 function CustomerPage() {
   const { user, activeCompanyId } = useAuth();
@@ -131,6 +131,7 @@ function CustomerPage() {
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
+    if ((payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && !payRef.trim()) { toast.warning("Please enter the approval code"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
     paySavingRef.current = true;
     setPaySaving(true);
@@ -430,7 +431,7 @@ function CustomerPage() {
                 <label className="block text-xs font-medium text-gray-500 mb-1">Method</label>
                 <div className="grid grid-cols-3 gap-2">
                   {PAYMENT_METHODS.map(m => (
-                    <button key={m} onClick={() => setPayMethod(m)}
+                    <button key={m} onClick={() => { setPayMethod(m); if (!["Bank Transfer", "Cash Rebate", "Credit Card / Debit Card", "Instalment"].includes(m)) setPayRef(""); }}
                       className={`py-2 rounded-xl text-xs font-medium border ${payMethod === m ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-700 border-gray-200"}`}>
                       {m}
                     </button>
@@ -456,6 +457,13 @@ function CustomerPage() {
                   <label className="block text-xs font-medium text-gray-500 mb-1">Admin Charges (RM)</label>
                   <input type="number" value={payAdmin} onChange={e => setPayAdmin(e.target.value)} placeholder="0.00"
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm text-right focus:outline-none focus:border-violet-400" />
+                </div>
+              )}
+              {(payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Approval Code <span className="text-red-500">*</span></label>
+                  <input value={payRef} onChange={e => setPayRef(e.target.value)} placeholder="Card / instalment approval code"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
                 </div>
               )}
               {/* Payment Proof upload */}
