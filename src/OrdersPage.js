@@ -878,12 +878,6 @@ function OrdersPage() {
     if (miss.length) { setFormError("Please fill: " + miss.join(", ")); return; }
     setFormError(""); setStep(2);
   };
-  const nextFromItems = () => {
-    if ((form.items || []).length === 0 && form.delivery_type !== "Service") {
-      setFormError("Add at least one item before confirming."); return;
-    }
-    setFormError(""); setStep(3);
-  };
 
   const addLineItem = (p) => {
     const catId = p.product_categories?.id;
@@ -991,7 +985,11 @@ function OrdersPage() {
   // E-invoice details required when over RM10,000 OR the customer requested one.
   const einvNeeded = totalAfterDiscount > 10000 || form.einvoice_requested;
 
-  const saveOrder = async () => {
+  const saveOrder = async (statusOverride) => {
+    // New-order creation confirms straight from the Items step (no payment
+    // step): the Confirm/Draft buttons pass the status explicitly. Editing
+    // still uses the Status dropdown (form.status).
+    const effectiveStatus = statusOverride || form.status;
     // ── Base validation (all statuses) ──
     if (!form.customer_name.trim()) { setFormError("Customer name is required"); return; }
     if (!form.country) { setFormError("Please select a country"); return; }
@@ -1006,13 +1004,15 @@ function OrdersPage() {
     if (form.items.some(it => (Number(it.quantity) || 0) <= 0)) { setFormError("All items must have quantity > 0"); return; }
 
     // ── Confirmation validation (when setting to confirmed) ──
-    if (form.status === "confirmed") {
+    // Deposit, payment method and payment proof are NO LONGER required to
+    // confirm — an order is confirmed and printable without any deposit, and
+    // payment is collected later on the customer payment screen. (It only
+    // counts as a real sale once a deposit is recorded; commission stays
+    // gated at 30% paid, both enforced by the backend.)
+    if (effectiveStatus === "confirmed") {
       const missing = [];
       const noPriceItems = form.items.filter(it => !it.unit_price && it.unit_price !== 0);
       if (noPriceItems.length > 0) missing.push(`${noPriceItems.length} item(s) have no price`);
-      if (!form.payment_method) missing.push("Payment method");
-      if (!(Number(form.deposit) > 0)) missing.push("Deposit amount (must be > 0)");
-      if ((form.payment_proofs || []).length === 0) missing.push("Payment proof (upload receipt/transfer screenshot)");
       if (!form.customer_contact?.trim()) missing.push("Phone number");
       if (!form.customer_address?.trim()) missing.push("Billing address");
       if (deliverElsewhere && !form.delivery_address?.trim()) missing.push("Delivery address (or untick 'Deliver to a different address')");
@@ -1049,7 +1049,7 @@ function OrdersPage() {
       customer_address: form.customer_address || null,
       customer_id_type: form.customer_id_type || null, customer_id_no: form.customer_id_no?.trim() || null,
       customer_email: form.customer_email?.trim() || null, einvoice_requested: !!form.einvoice_requested,
-      status: form.status, notes: form.notes || null,
+      status: effectiveStatus, notes: form.notes || null,
       order_date: form.order_date || null,
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
       delivery_time_slot: form.delivery_time_slot || null,
@@ -1640,7 +1640,7 @@ function OrdersPage() {
               {/* Wizard step indicator — new orders only; editing shows the full form */}
               {!editId && (
               <div className="flex items-center gap-2 text-xs font-medium">
-                {["Customer", "Items", "Payment"].map((label, i) => {
+                {["Customer", "Items"].map((label, i) => {
                   const n = i + 1;
                   return (
                     <React.Fragment key={label}>
@@ -1648,7 +1648,7 @@ function OrdersPage() {
                         <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] ${step === n ? "bg-violet-600 text-white" : step > n ? "bg-emerald-500 text-white" : "bg-gray-200 text-gray-500"}`}>{step > n ? "✓" : n}</span>
                         {label}
                       </div>
-                      {n < 3 && <div className={`flex-1 h-px ${step > n ? "bg-emerald-400" : "bg-gray-200"}`} />}
+                      {n < 2 && <div className={`flex-1 h-px ${step > n ? "bg-emerald-400" : "bg-gray-200"}`} />}
                     </React.Fragment>
                   );
                 })}
@@ -1961,8 +1961,10 @@ function OrdersPage() {
               </div>
               </>)}
 
-              {/* ── Phase 3: Payment ── */}
-              {(editId || step === 3) && (<>
+              {/* ── Payment fields — EDITING ONLY. New orders confirm without a
+                    deposit; payment is collected later on the customer payment
+                    screen ("Collect Deposit" / "Collect Balance"). ── */}
+              {editId && (<>
               {/* Total recap + deposit / payment collected + balance */}
               <div className="border-t border-gray-100 pt-3 space-y-2">
                 {!editId && (
@@ -2020,8 +2022,14 @@ function OrdersPage() {
                   }} />
                 </label>
               </div>
+              </>)}
 
+              {/* ── Order details shown on the Items step for new orders, and in
+                    the full form when editing. Status here is edit-only — new
+                    orders set status via the Confirm / Save-as-Draft buttons. ── */}
+              {(editId || step === 2) && (<>
               {/* Status + notes */}
+              {editId && (
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
@@ -2029,6 +2037,7 @@ function OrdersPage() {
                   {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
                 </select>
               </div>
+              )}
               <Field label="Order Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
               <Field label="Remark" value={form.remark} onChange={v => setForm(f => ({ ...f, remark: v }))} />
 
@@ -2077,14 +2086,18 @@ function OrdersPage() {
                   <button type="button" onClick={nextFromCustomer}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Next: Items →</button>
                 )}
-                {!editId && step === 2 && (
-                  <button type="button" onClick={nextFromItems}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Confirm → Payment</button>
-                )}
-                {(editId || step === 3) && (
-                  <button onClick={saveOrder} disabled={saving}
+                {!editId && step === 2 && (<>
+                  <button type="button" onClick={() => saveOrder("draft")} disabled={saving}
+                    className="px-4 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
+                    {saving ? "Saving…" : "Save as Draft"}</button>
+                  <button type="button" onClick={() => saveOrder("confirmed")} disabled={saving}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                    {saving ? "Saving…" : editId ? "Update Order" : "Create Order"}
+                    {saving ? "Saving…" : "Confirm Order"}</button>
+                </>)}
+                {editId && (
+                  <button onClick={() => saveOrder()} disabled={saving}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                    {saving ? "Saving…" : "Update Order"}
                   </button>
                 )}
               </div>

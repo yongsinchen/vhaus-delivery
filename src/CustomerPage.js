@@ -38,6 +38,7 @@ function CustomerPage() {
   const [payModal, setPayModal] = useState(null); // { customer, orders }
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
+  const [payKind, setPayKind] = useState("deposit"); // "deposit" | "balance" — descriptive label on the payment
   const [payRef, setPayRef] = useState("");
   const [payAdmin, setPayAdmin] = useState(""); // instalment admin charges
   const [payAllocations, setPayAllocations] = useState([]);
@@ -107,6 +108,12 @@ function CustomerPage() {
     setPayMethod("Cash");
     setPayRef("");
     setPayProofs([]);
+    // Default to "deposit" when nothing has been paid yet on these orders
+    // (balance still equals the full order amount) — the new flow confirms
+    // orders with zero deposit, so the first collection is usually the
+    // deposit. Otherwise it's a balance collection. Salesman can override.
+    const nothingPaid = withBalance.length > 0 && withBalance.every(o => Number(o.balance) >= (Number(o.order_amount) || 0));
+    setPayKind(nothingPaid ? "deposit" : "balance");
     setPayModal({ customer, orders: withBalance });
   };
 
@@ -129,7 +136,7 @@ function CustomerPage() {
     setPaySaving(true);
     try {
       await withLoading("Recording payment…", async () => {
-        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null }) });
+        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
         const d = await res.json();
         if (!d.payment) throw new Error(d.error || "Failed");
         toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer);
@@ -403,6 +410,18 @@ function CustomerPage() {
             </div>
             <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
               <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Collecting</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{ k: "deposit", label: "Collect Deposit" }, { k: "balance", label: "Collect Balance" }].map(({ k, label }) => (
+                    <button key={k} type="button" onClick={() => setPayKind(k)}
+                      className={`py-2 rounded-xl text-xs font-semibold border ${payKind === k ? (k === "deposit" ? "bg-violet-600 text-white border-violet-600" : "bg-emerald-600 text-white border-emerald-600") : "bg-white text-gray-700 border-gray-200"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {payKind === "deposit" && <p className="text-[11px] text-violet-600 mt-1">Recording a deposit turns this into a confirmed sale.</p>}
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Total Amount (RM)</label>
                 <input type="number" value={payAmount} onChange={e => { setPayAmount(e.target.value); autoAllocate(e.target.value); }} autoFocus
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-violet-300" />
@@ -489,7 +508,7 @@ function CustomerPage() {
             <div className="px-6 py-4 border-t">
               <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0}
                 className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                {paySaving ? "Recording…" : `Record ${money(payAmount || 0)} Payment`}
+                {paySaving ? "Recording…" : `Record ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
               </button>
             </div>
           </div>
