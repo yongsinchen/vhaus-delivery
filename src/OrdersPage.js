@@ -194,7 +194,6 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const balance = total - deposit;
   const dateStr = new Date((order.order_date || order.created_at || new Date().toISOString()) + (order.order_date ? "T00:00:00" : "")).toLocaleDateString("en-MY");
 
-  const sig = signatureDataUrl || order.customer_signature || null;
   const branchLine = esc((branchName || order.branch_name || order.sales_channel || "—").toString().toUpperCase());
   const idLabel = order.customer_id_type === "passport" ? "Passport No" : "I/C No";
   const payOptions = PAYMENT_METHODS
@@ -381,7 +380,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
       <div class="sign sec">
         <div class="scol">
           <div class="stitle">Customer Signature</div>
-          <div class="simg">${sig ? `<img src="${sig}" />` : ""}</div>
+          <div class="simg"></div>
           <div class="sline">Signature &amp; Date</div>
         </div>
         <div class="scol">
@@ -504,7 +503,6 @@ function OrdersPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customItemMode, setCustomItemMode] = useState(false);
   const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
-  const [signOrder, setSignOrder] = useState(null);
 
   // Bundle picker (Phase C) — "add bundle" path parallel to normal + custom items.
   // Filtering reuses the picker's existing productSearch input (see render).
@@ -1134,16 +1132,15 @@ function OrdersPage() {
       loadOrders(page);
     }
     if (!editId && d.order) {
-      setSignOrder(d.order);
+      printSO(d.order);
     }
   };
 
-  const saveSignature = async (orderId, sigData) => {
-    if (!sigData || !orderId) return;
-    const headers = await authHeaders();
-    await fetch(`${API}/sales-orders/${orderId}/signature`, {
-      method: "PATCH", headers, body: JSON.stringify({ signature: sigData }),
-    });
+  // Print the sales order directly. Customers no longer sign on screen — the
+  // printed copy carries a blank signature line they sign by hand.
+  const printSO = (order) => {
+    if (!order) return;
+    printSalesOrder(order, null, companyInfo, branches.find(b => b.id === order.branch_id)?.name);
   };
 
   const openSubmitPO = async (order) => await withLoading("Preparing purchase orders…", async () => {
@@ -1301,7 +1298,7 @@ function OrdersPage() {
               <div className="text-right shrink-0">
                 <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                 <div className="flex items-center gap-1 mt-1 justify-end">
-                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); setSignOrder(full); }}
+                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); printSO(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
@@ -1631,7 +1628,7 @@ function OrdersPage() {
                         });
                       } catch (err) { toast.error(err.message); }
                     }} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">🚚 Generate DO</button>
-                    <button onClick={() => setSignOrder({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
+                    <button onClick={() => printSO({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   </>
                 )}
@@ -2256,17 +2253,6 @@ function OrdersPage() {
         </div>
       )}
 
-      {signOrder && (
-        <SignaturePad
-          onDone={async (sig) => {
-            if (sig && signOrder.id) await withLoading("Saving signature…", () => saveSignature(signOrder.id, sig));
-            printSalesOrder(signOrder, sig, companyInfo, branches.find(b => b.id === signOrder.branch_id)?.name);
-            setSignOrder(null);
-            loadOrders();
-          }}
-          onCancel={() => { printSalesOrder(signOrder, null, companyInfo, branches.find(b => b.id === signOrder.branch_id)?.name); setSignOrder(null); }}
-        />
-      )}
 
       {/* Submit PO Modal */}
       {poModal && (
@@ -2316,80 +2302,6 @@ function OrdersPage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function SignaturePad({ onDone, onCancel }) {
-  const canvasRef = useRef(null);
-  const drawing = useRef(false);
-
-  const getPos = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const t = e.touches ? e.touches[0] : e;
-    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-  };
-
-  const start = (e) => {
-    e.preventDefault();
-    drawing.current = true;
-    const ctx = canvasRef.current.getContext("2d");
-    const { x, y } = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
-
-  const move = (e) => {
-    if (!drawing.current) return;
-    e.preventDefault();
-    const ctx = canvasRef.current.getContext("2d");
-    const { x, y } = getPos(e);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-  };
-
-  const end = () => { drawing.current = false; };
-
-  const clear = () => {
-    const c = canvasRef.current;
-    c.getContext("2d").clearRect(0, 0, c.width, c.height);
-  };
-
-  useEffect(() => {
-    const c = canvasRef.current;
-    const ctx = c.getContext("2d");
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-  }, []);
-
-  const confirm = () => {
-    const c = canvasRef.current;
-    const ctx = c.getContext("2d");
-    const pixels = ctx.getImageData(0, 0, c.width, c.height).data;
-    const hasContent = pixels.some((v, i) => i % 4 === 3 && v > 0);
-    onDone(hasContent ? c.toDataURL("image/png") : null);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onCancel} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3">
-        <h3 className="text-lg font-bold text-gray-900">Customer Signature</h3>
-        <p className="text-xs text-gray-500">Sign below with your finger or mouse</p>
-        <canvas
-          ref={canvasRef} width={400} height={160}
-          className="w-full border border-gray-200 rounded-xl bg-gray-50 cursor-crosshair touch-none"
-          onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
-          onTouchStart={start} onTouchMove={move} onTouchEnd={end}
-        />
-        <div className="flex gap-2">
-          <button onClick={clear} className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Clear</button>
-          <button onClick={onCancel} className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
-          <button onClick={confirm} className="flex-1 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Confirm & Print</button>
-        </div>
-      </div>
     </div>
   );
 }
