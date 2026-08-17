@@ -5,6 +5,7 @@ import { FullPageLoader, useLoading, useToast } from "./UIComponents";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
+const DeliveryDateRequestsPage = lazy(() => import("./DeliveryDateRequestsPage"));
 const UserManagement = lazy(() => import("./UserManagement"));
 const ResetPasswordPage = lazy(() => import("./ResetPassword"));
 const ProductsPage = lazy(() => import("./ProductsPage"));
@@ -172,6 +173,7 @@ const NAV = [
   { id: "deliveries", label: "Deliveries",       icon: "⬡",  canKey: "viewSchedule" },
   { id: "company-deliveries", label: "Company Deliveries", icon: "⬡", canKey: null },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
+  { id: "delivery-approvals", label: "Delivery Dates", icon: "📅", canKey: null },
   { id: "balance",    label: "Outstanding Balance", icon: "💰", canKey: null },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
@@ -1433,6 +1435,7 @@ export default function App() {
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation","operation_manager"].includes(effectiveRole);
     if (n.id === "company-deliveries") return effectiveRole === "salesman";
+    if (n.id === "delivery-approvals") return isSalesman || ["master","manager","operation_manager","company_admin"].includes(effectiveRole);
     if (n.id === "balance") return isSalesman || effectiveRole === "finance";
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation","operation_manager"].includes(effectiveRole);
     // Commission + Finance: revenue-side managers, salesman, and Finance —
@@ -1916,6 +1919,7 @@ export default function App() {
     if (page === "organization") return <OrganizationPage />;
 
     // SETTINGS
+    if (page === "delivery-approvals") return <DeliveryDateRequestsPage />;
     if (page === "settings") return <CompanySettingsPage />;
 
     return null;
