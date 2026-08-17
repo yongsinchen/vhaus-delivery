@@ -503,6 +503,8 @@ function OrdersPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customItemMode, setCustomItemMode] = useState(false);
   const [customItem, setCustomItem] = useState({ product_name: "", product_code: "", size: "", color: "", unit_price: "", quantity: 1, save_as_reusable: false });
+  const [billOpen, setBillOpen] = useState(false); // "full bill amount" quick-entry
+  const [billForm, setBillForm] = useState({ desc: "", amount: "" });
 
   // Bundle picker (Phase C) — "add bundle" path parallel to normal + custom items.
   // Filtering reuses the picker's existing productSearch input (see render).
@@ -906,6 +908,29 @@ function OrdersPage() {
     setPickerOpen(false);
     setProductSearch("");
     setCustomItemMode(false);
+  };
+
+  // Quick "full bill amount" — instead of itemising, add one lump-sum line for
+  // the whole bill. It's a normal custom line, so subtotal, GST, totals,
+  // printing and commission all work exactly as with itemised orders.
+  const addBillAmount = () => {
+    const amt = Number(billForm.amount);
+    if (!amt || amt <= 0) { setFormError("Enter a bill amount greater than 0"); return; }
+    setForm(f => ({
+      ...f,
+      items: [...f.items, {
+        product_id: null, product_code: "BILL",
+        product_name: billForm.desc.trim() || "Full Bill Amount",
+        size: "", color: "",
+        is_custom: true, custom_specs: [], custom_dimensions: "",
+        quantity: 1, unit_price: String(amt),
+        unit_cost: "", attachment_url: "", notes: "",
+        requires_product_review: false, save_as_reusable: false,
+      }],
+    }));
+    setBillForm({ desc: "", amount: "" });
+    setBillOpen(false);
+    setFormError("");
   };
 
   const addCustomLineItem = () => {
@@ -1948,6 +1973,25 @@ function OrdersPage() {
                     top). Always shown — it adds the first item too. */}
                 <button onClick={() => { setPickerOpen(true); setProductSearch(""); setCustomItemMode(false); setBundleMode(false); searchProducts(""); }}
                   className="mt-2 w-full py-2 rounded-xl border border-dashed border-violet-300 text-violet-700 text-sm font-medium hover:bg-violet-50">+ Add Item</button>
+
+                {/* Full bill amount — a single lump-sum line for when you don't
+                    want to itemise. */}
+                {!billOpen ? (
+                  <button onClick={() => setBillOpen(true)}
+                    className="mt-2 w-full py-2 rounded-xl border border-dashed border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50">+ Full bill amount (no itemising)</button>
+                ) : (
+                  <div className="mt-2 rounded-xl border border-gray-200 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-gray-600">Full bill amount</p>
+                    <Field label="Description (optional)" value={billForm.desc} onChange={v => setBillForm(f => ({ ...f, desc: v }))} placeholder="e.g. Full Bill / Renovation package" small />
+                    <NumField label="Bill Amount (RM)" value={billForm.amount} onChange={v => setBillForm(f => ({ ...f, amount: v }))} />
+                    <div className="flex gap-2">
+                      <button onClick={() => { setBillOpen(false); setBillForm({ desc: "", amount: "" }); }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
+                      <button onClick={addBillAmount}
+                        className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700">Add bill amount</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Totals — Phase 2 shows subtotal, GST, discount, total */}
