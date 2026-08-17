@@ -933,7 +933,6 @@ function CommissionPage() {
                     <select value={ruleForm.role_name} onChange={e => setRuleForm(f => ({ ...f, role_name: e.target.value }))} className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
                       <option value="salesman">Salesman</option>
                       <option value="part_time">Part-Time</option>
-                      <option value="branch_manager">Branch Manager (Override)</option>
                     </select>
                   </div>
                   {(ruleForm.role_name === "salesman" || ruleForm.role_name === "part_time") && (
