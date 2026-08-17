@@ -15,6 +15,7 @@ function UserManagement() {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState(""); // "" = all roles
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editId, setEditId] = useState(null);
@@ -171,7 +172,14 @@ function UserManagement() {
   // Free-text search by full name (case-insensitive). Filters the already
   // company-scoped list so search never leaks users from another company.
   const q = search.trim().toLowerCase();
-  const displayedUsers = q ? visibleUsers.filter(u => (u.name || "").toLowerCase().includes(q)) : visibleUsers;
+  // Roles actually present in the current (company-scoped) list, for the filter
+  // dropdown — data-driven so it never offers a role nobody has.
+  const roleOptions = [...new Set(visibleUsers.map(u => u.role || "").filter(Boolean))]
+    .sort((a, b) => roleLabel(a).localeCompare(roleLabel(b)));
+  const displayedUsers = visibleUsers.filter(u =>
+    (!q || (u.name || "").toLowerCase().includes(q)) &&
+    (!roleFilter || (u.role || "") === roleFilter)
+  );
 
   // Masters can assign a user to another company; lazily load that company's
   // branches for the dropdown (merged in), since loadData only fetched the
@@ -335,12 +343,17 @@ function UserManagement() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div>
-          <p className="text-sm text-gray-400">{scopeCompanyId ? "Your company" : "All companies"} · {q ? `${displayedUsers.length} of ${visibleUsers.length}` : visibleUsers.length} users</p>
+          <p className="text-sm text-gray-400">{scopeCompanyId ? "Your company" : "All companies"} · {(q || roleFilter) ? `${displayedUsers.length} of ${visibleUsers.length}` : visibleUsers.length} users</p>
         </div>
         <div className="flex gap-2">
           {successMsg && <span className="text-xs text-emerald-600 font-medium self-center">{successMsg}</span>}
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name…"
             className="text-sm border border-gray-200 bg-white px-3 py-1.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300 w-44" />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
+            className="text-sm border border-gray-200 bg-white px-3 py-1.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-300">
+            <option value="">All roles</option>
+            {roleOptions.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          </select>
           <button onClick={loadData} className="text-xs border border-gray-200 bg-white px-3 py-1.5 rounded-xl hover:bg-gray-50">🔄 Refresh</button>
           <button onClick={openCreate} className="text-sm bg-violet-600 text-white px-4 py-2 rounded-xl hover:bg-violet-700 font-medium">+ Add User</button>
         </div>
