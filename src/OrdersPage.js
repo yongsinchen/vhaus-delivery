@@ -21,15 +21,27 @@ const authHeaders = async () => {
   return headers;
 };
 
-const STATUSES = ["draft", "confirmed", "amended", "delivered", "cancelled"];
+const STATUSES = ["draft", "pending_deposit", "confirmed", "amended", "delivered", "cancelled"];
 const STATUS_STYLE = {
   draft: "bg-gray-100 text-gray-600",
+  pending_deposit: "bg-orange-100 text-orange-700",
   confirmed: "bg-violet-100 text-violet-700",
   amended: "bg-amber-100 text-amber-700",
   delivered: "bg-emerald-100 text-emerald-700",
   partially_delivered: "bg-indigo-100 text-indigo-700",
   cancelled: "bg-red-100 text-red-600",
 };
+// Human labels for statuses whose slug isn't just a capitalized word.
+const STATUS_LABEL = {
+  draft: "Draft",
+  pending_deposit: "Pending Deposit",
+  confirmed: "Confirmed",
+  amended: "Amended",
+  delivered: "Delivered",
+  partially_delivered: "Partially Delivered",
+  cancelled: "Cancelled",
+};
+const statusLabel = (s) => STATUS_LABEL[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // Delivery Order (shipment) statuses — Phase 2B
 const DO_STATUS_STYLE = {
@@ -1009,7 +1021,7 @@ function OrdersPage() {
     // payment is collected later on the customer payment screen. (It only
     // counts as a real sale once a deposit is recorded; commission stays
     // gated at 30% paid, both enforced by the backend.)
-    if (effectiveStatus === "confirmed") {
+    if (["confirmed", "pending_deposit"].includes(effectiveStatus)) {
       const missing = [];
       const noPriceItems = form.items.filter(it => !it.unit_price && it.unit_price !== 0);
       if (noPriceItems.length > 0) missing.push(`${noPriceItems.length} item(s) have no price`);
@@ -1252,7 +1264,7 @@ function OrdersPage() {
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="">All Status</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
         </select>
         <select value={sortKey} onChange={e => setSortKey(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
@@ -1275,7 +1287,7 @@ function OrdersPage() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-sm font-medium text-violet-700">{o.order_number}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{o.status}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{statusLabel(o.status)}</span>
                   {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
@@ -1293,7 +1305,7 @@ function OrdersPage() {
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
                   <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                     className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
-                    {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                   </select>
                 </div>
               </div>
@@ -1343,7 +1355,7 @@ function OrdersPage() {
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-lg font-bold text-violet-700">{o.order_number}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100"}`}>{o.status}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100"}`}>{statusLabel(o.status)}</span>
                         {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
                       </div>
                       <p className="text-sm text-gray-600 mt-0.5">{o.customer_name}</p>
@@ -2034,7 +2046,7 @@ function OrdersPage() {
                 <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
-                  {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                  {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                 </select>
               </div>
               )}
@@ -2090,7 +2102,7 @@ function OrdersPage() {
                   <button type="button" onClick={() => saveOrder("draft")} disabled={saving}
                     className="px-4 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50">
                     {saving ? "Saving…" : "Save as Draft"}</button>
-                  <button type="button" onClick={() => saveOrder("confirmed")} disabled={saving}
+                  <button type="button" onClick={() => saveOrder("pending_deposit")} disabled={saving}
                     className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
                     {saving ? "Saving…" : "Confirm Order"}</button>
                 </>)}
