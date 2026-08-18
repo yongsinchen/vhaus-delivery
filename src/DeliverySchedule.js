@@ -115,59 +115,94 @@ async function toDataUrl(url) {
   } catch { return null; }
 }
 
-// Export one Delivery Order as an Excel file that mirrors the printed PDF —
-// company logo + info header, DO/customer details, item table, signature
-// footer. Uses an HTML table saved with an .xls extension + Excel MIME, so
-// Excel opens it natively with no library. The logo is embedded as a data URI.
+// Export one Delivery Order as a real .xlsx (ExcelJS) that mirrors the printed
+// PDF — embedded company logo + info header, DO/customer details, bordered item
+// table, and signature footer. ExcelJS is imported lazily so it only loads when
+// someone actually exports.
 async function exportDeliveryOrderExcel(o, company = {}) {
+  const ExcelJS = (await import("exceljs")).default;
   const so = o.sales_orders || {};
   const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
-  const logo = await toDataUrl(company.logo);
-  const rows = items.map((it, i) => {
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Delivery Order", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } } });
+  ws.columns = [{ width: 6 }, { width: 20 }, { width: 46 }, { width: 12 }];
+
+  const thin = { style: "thin", color: { argb: "FF000000" } };
+  const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
+  const grayFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
+
+  // Header — logo (left) + company info, DO# on the right.
+  ws.mergeCells("A1:B3");
+  const logoUrl = company.logo ? await toDataUrl(company.logo) : null;
+  if (logoUrl) {
+    const m = /^data:image\/(png|jpe?g|gif)/i.exec(logoUrl);
+    const ext = m ? (m[1].toLowerCase() === "jpg" ? "jpeg" : m[1].toLowerCase()) : "png";
+    const imageId = wb.addImage({ base64: logoUrl, extension: ext });
+    ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 150, height: 54 } });
+  }
+  ws.mergeCells("C1:D1"); ws.getCell("C1").value = company.name || "";
+  ws.getCell("C1").font = { bold: true, size: 13 };
+  ws.mergeCells("C2:D2"); ws.getCell("C2").value = company.address || "";
+  ws.getCell("C2").font = { size: 9 }; ws.getCell("C2").alignment = { wrapText: true };
+  ws.getCell("C3").value = company.hotline ? `Tel: ${company.hotline}` : "";
+  ws.getCell("C3").font = { size: 9 };
+  ws.getCell("D3").value = `DO#: ${o.do_number || ""}`;
+  ws.getCell("D3").font = { bold: true }; ws.getCell("D3").alignment = { horizontal: "right" };
+
+  // Title
+  ws.mergeCells("A4:D4");
+  const title = ws.getCell("A4");
+  title.value = "DELIVERY ORDER"; title.font = { bold: true, size: 15 };
+  title.alignment = { horizontal: "center" }; title.fill = grayFill;
+
+  // Info block
+  const info = (row, l1, v1, l2, v2) => {
+    ws.getCell(`A${row}`).value = l1; ws.getCell(`A${row}`).font = { bold: true };
+    ws.getCell(`B${row}`).value = v1;
+    ws.getCell(`C${row}`).value = l2; ws.getCell(`C${row}`).font = { bold: true };
+    ws.getCell(`D${row}`).value = v2;
+  };
+  info(5, "Customer", so.customer_name || "", "SO#", so.order_number || "");
+  info(6, "Address", o.delivery_address || so.customer_address || "", "Date", o.delivery_date || "");
+  info(7, "Contact", so.customer_contact || "", "Salesman", so.salesman_name || "");
+  ws.getCell("B6").alignment = { wrapText: true };
+
+  // Item table header
+  const headRow = 9;
+  const heads = ["NO", "CODE", "DESCRIPTION", "QTY"];
+  heads.forEach((h, i) => {
+    const c = ws.getCell(headRow, i + 1);
+    c.value = h; c.font = { bold: true }; c.fill = grayFill; c.border = boxAll;
+    c.alignment = { horizontal: i === 0 || i === 3 ? "center" : "left" };
+  });
+  items.forEach((it, i) => {
+    const r = headRow + 1 + i;
     const spec = [it.size, it.color].filter(Boolean).join(" · ");
-    return `<tr>
-      <td class="b" style="text-align:center">${i + 1}</td>
-      <td class="b">${esc(it.product_code || "")}</td>
-      <td class="b">${esc(it.product_name || "")}${spec ? ` — ${esc(spec)}` : ""}</td>
-      <td class="b" style="text-align:center">${Number(it.quantity) || 1}</td>
-    </tr>`;
-  }).join("");
-  const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">
-  <style>
-    table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11pt; }
-    td, th { padding: 4px 8px; }
-    .b { border: 1px solid #000; }
-    .title { font-size: 16pt; font-weight: bold; text-align: center; background: #f2f2f2; letter-spacing: 2px; }
-    .lbl { font-weight: bold; }
-    th.b { background: #f2f2f2; }
-  </style></head><body>
-    <table>
-      <tr>
-        <td colspan="2" style="vertical-align:top">
-          ${logo ? `<img src="${logo}" height="52"><br>` : ""}
-          <span style="font-size:13pt;font-weight:bold">${esc(company.name || "")}</span><br>
-          ${esc(company.address || "")}<br>
-          ${company.hotline ? "Tel: " + esc(company.hotline) : ""}
-        </td>
-        <td colspan="2" style="text-align:right;vertical-align:top;font-weight:bold">DO#: ${esc(o.do_number || "")}</td>
-      </tr>
-      <tr><td colspan="4" class="title">DELIVERY ORDER</td></tr>
-      <tr><td class="lbl">Customer</td><td>${esc(so.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(so.order_number || "")}</td></tr>
-      <tr><td class="lbl">Address</td><td>${esc(o.delivery_address || so.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(o.delivery_date || "")}</td></tr>
-      <tr><td class="lbl">Contact</td><td>${esc(so.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
-      <tr><td colspan="4"></td></tr>
-      <tr><th class="b" style="width:40px">NO</th><th class="b">CODE</th><th class="b">DESCRIPTION</th><th class="b" style="width:50px">QTY</th></tr>
-      ${rows}
-      <tr><td colspan="4"></td></tr>
-      <tr><td class="lbl">Remarks</td><td colspan="3">${esc(o.remark || "")}</td></tr>
-      <tr><td colspan="4"></td></tr>
-      <tr><td colspan="2">Received By (Customer)</td><td colspan="2">Delivered By</td></tr>
-    </table>
-  </body></html>`;
-  const blob = new Blob(["﻿", html], { type: "application/vnd.ms-excel" });
+    const vals = [i + 1, it.product_code || "", (it.product_name || "") + (spec ? ` — ${spec}` : ""), Number(it.quantity) || 1];
+    vals.forEach((v, ci) => {
+      const c = ws.getCell(r, ci + 1);
+      c.value = v; c.border = boxAll;
+      if (ci === 0 || ci === 3) c.alignment = { horizontal: "center" };
+      if (ci === 2) c.alignment = { wrapText: true };
+    });
+  });
+
+  // Footer — remarks + signatures
+  let fr = headRow + 1 + items.length + 1;
+  ws.getCell(`A${fr}`).value = "Remarks:"; ws.getCell(`A${fr}`).font = { bold: true };
+  ws.mergeCells(`B${fr}:D${fr}`); ws.getCell(`B${fr}`).value = o.remark || "";
+  fr += 2;
+  ws.mergeCells(`A${fr}:B${fr}`); ws.getCell(`A${fr}`).value = "Received By (Customer)";
+  ws.mergeCells(`C${fr}:D${fr}`); ws.getCell(`C${fr}`).value = "Delivered By";
+  ws.getCell(`A${fr}`).alignment = ws.getCell(`C${fr}`).alignment = { vertical: "bottom" };
+  ws.getRow(fr).height = 44;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `DO-${(o.do_number || "export").replace(/[^\w.-]/g, "_")}.xls`;
+  a.href = url; a.download = `DO-${(o.do_number || "export").replace(/[^\w.-]/g, "_")}.xlsx`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
