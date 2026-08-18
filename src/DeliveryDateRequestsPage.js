@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
+import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -25,6 +26,7 @@ function DeliveryDateRequestsPage() {
   const [rows, setRows] = useState([]);
   const [isApprover, setIsApprover] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [doFor, setDoFor] = useState(null); // { salesOrderId, orderNumber, date } — Create DO after approval
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,7 +82,16 @@ function DeliveryDateRequestsPage() {
   const approve = async (r) => {
     const res = await af(`${API}/delivery-date-requests/${r.id}/approve`, { method: "PATCH", body: JSON.stringify({}) });
     const d = await res.json();
-    if (res.ok) { toast.success(`Approved — SO ${r.so_number} set to ${fmt(r.requested_date)}`); load(); } else toast.error(d.error || "Failed");
+    if (res.ok) {
+      toast.success(`Approved — SO ${r.so_number} set to ${fmt(r.requested_date)}`);
+      load();
+      // Straight after approving, open the Create Delivery Order picker so the
+      // admin can build a DO from the SO's items (arrived or not) — same flow
+      // as the Orders page. Needs the sales_order id; legacy requests without
+      // one just approve as before.
+      const soId = d.request?.sales_order_id || r.sales_order_id;
+      if (soId) setDoFor({ salesOrderId: soId, orderNumber: `SO ${r.so_number}`, date: r.requested_date });
+    } else toast.error(d.error || "Failed");
   };
   const reject = async (r) => {
     const note = window.prompt("Reason for rejecting (optional):") ?? null;
@@ -232,6 +243,16 @@ function DeliveryDateRequestsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {doFor && (
+        <CreateDeliveryOrderModal
+          salesOrderId={doFor.salesOrderId}
+          orderNumber={doFor.orderNumber}
+          defaultDate={doFor.date}
+          onClose={() => setDoFor(null)}
+          onCreated={() => { setDoFor(null); load(); }}
+        />
       )}
     </div>
   );
