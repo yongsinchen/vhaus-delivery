@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback , memo } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
+import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -1307,6 +1308,12 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
   // Open on the date passed in (e.g. clicked from the overview calendar).
   useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
+  // Company header/logo for printing a Delivery Order from the board.
+  useEffect(() => {
+    af(`${API}/company-settings`).then(r => r.json()).then(d => {
+      if (d.settings) setCompany({ name: d.settings.company_name || "", address: d.settings.address || "", hotline: d.settings.hotline || "", logo: d.settings.logo_url || "" });
+    }).catch(() => {});
+  }, []);
   const [viewMode, setViewMode] = useState("schedule"); // "schedule" board | "orders" Delivery Orders tab
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
@@ -1321,6 +1328,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
   const [serviceOrders, setServiceOrders] = useState([]);
+  const [doModal, setDoModal] = useState(null);   // { salesOrderId, orderNumber, date } — Generate DO from the board
+  const [company, setCompany] = useState({});     // header/logo for printed DOs
   const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
   const [readiness, setReadiness] = useState(null);
@@ -1634,6 +1643,15 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       {showBlockedDates && <BlockedDatesModal blockedDates={blockedDates} onClose={() => setShowBlockedDates(false)} onRefresh={loadBlockedDates} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
+      {doModal && (
+        <CreateDeliveryOrderModal
+          salesOrderId={doModal.salesOrderId}
+          orderNumber={doModal.orderNumber}
+          defaultDate={doModal.date}
+          onClose={() => setDoModal(null)}
+          onCreated={() => { setDoModal(null); loadData(); }}
+        />
+      )}
       {showAutoScheduler && (
         <AutoSchedulerModal date={date} companyId={companyId}
           onClose={() => setShowAutoScheduler(false)}
@@ -1783,6 +1801,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
                           {item.delivery_date && <p className="text-xs text-indigo-600 font-medium">target {item.delivery_date}</p>}
                           <p className="text-xs text-gray-400 mt-1 truncate">{doItems.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</p>
+                          <div className="flex items-center gap-1 mt-1.5">
+                            <button onClick={() => printDeliveryOrder(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Print / Save as PDF">📄 PDF</button>
+                            <button onClick={() => exportDeliveryOrderExcel(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Download as Excel">📊 Excel</button>
+                          </div>
                           {!readOnly && teams.length > 0 && (
                             <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "do"); }}
                               className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
@@ -1850,6 +1872,13 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                         <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
                         {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
                         <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+                        {/* Generate a Delivery Order for this sales order. Once
+                            created, the SO drops from the pool (it schedules per
+                            DO) and appears as a DO card that can be printed. */}
+                        {!readOnly && item.sales_order_id && (
+                          <button onClick={() => setDoModal({ salesOrderId: item.sales_order_id, orderNumber: item.so_number, date })}
+                            className="mt-2 w-full text-xs bg-violet-600 text-white rounded px-1 py-1 hover:bg-violet-700 font-medium">🚚 Generate DO</button>
+                        )}
                         {!readOnly && teams.length > 0 && (
                           <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
                             className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
