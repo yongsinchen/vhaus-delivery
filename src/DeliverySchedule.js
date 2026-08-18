@@ -214,7 +214,7 @@ async function exportDeliveryOrderExcel(o, company = {}) {
   // Fit columns to their content so nothing is clipped when opened in Excel.
   const longest = arr => arr.reduce((m, s) => Math.max(m, String(s ?? "").length), 0);
   const clamp = (min, val, max) => Math.max(min, Math.min(max, val));
-  ws.getColumn(1).width = 6;                                                             // NO
+  ws.getColumn(1).width = clamp(9, longest(["Customer", "Address", "Contact", "Remarks:"]) + 2, 16); // NO / info labels
   ws.getColumn(2).width = clamp(14, longest([so.customer_name, o.delivery_address || so.customer_address, so.customer_contact, ...codeTexts]) + 2, 40); // CODE / values
   ws.getColumn(3).width = clamp(30, longest([company.name, company.address, ...descTexts]) + 2, 60);                                                    // DESCRIPTION
   ws.getColumn(4).width = clamp(12, longest([so.order_number, o.delivery_date, so.salesman_name, "Salesman"]) + 2, 22);                                 // QTY / values
