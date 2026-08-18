@@ -100,6 +100,36 @@ function printDeliveryOrder(o, company = {}) {
   w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
+// Export one Delivery Order as an Excel file. Uses an HTML table saved with an
+// .xls extension + Excel MIME — Excel opens it natively, no library needed.
+function exportDeliveryOrderExcel(o, company = {}) {
+  const so = o.sales_orders || {};
+  const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
+  const rows = items.map((it, i) => `<tr>
+      <td>${i + 1}</td><td>${esc(it.product_code || "")}</td><td>${esc(it.product_name || "")}</td>
+      <td>${esc([it.size, it.color].filter(Boolean).join(" · "))}</td><td>${Number(it.quantity) || 1}</td>
+    </tr>`).join("");
+  const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
+    <table border="1">
+      <tr><td colspan="5"><b>${esc(company.name || "")}</b></td></tr>
+      <tr><td colspan="5">DELIVERY ORDER</td></tr>
+      <tr><td>DO#</td><td>${esc(o.do_number || "")}</td><td></td><td>SO#</td><td>${esc(so.order_number || "")}</td></tr>
+      <tr><td>Customer</td><td colspan="4">${esc(so.customer_name || "")}</td></tr>
+      <tr><td>Address</td><td colspan="4">${esc(o.delivery_address || so.customer_address || "")}</td></tr>
+      <tr><td>Contact</td><td>${esc(so.customer_contact || "")}</td><td></td><td>Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
+      <tr><td>Delivery date</td><td>${esc(o.delivery_date || "")}</td><td></td><td>Status</td><td>${esc(o.status || "")}</td></tr>
+      <tr></tr>
+      <tr><th>No</th><th>Code</th><th>Description</th><th>Spec</th><th>Qty</th></tr>
+      ${rows}
+    </table></body></html>`;
+  const blob = new Blob(["﻿", html], { type: "application/vnd.ms-excel" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `DO-${(o.do_number || "export").replace(/[^\w.-]/g, "_")}.xls`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // ── Item arrival status (drives the per-row chip and per-stop readiness) ──
 // Derived from the three legacy date fields the warehouse Excel sheet used:
 // arrival > supplier sent > ordered > nothing.
@@ -1158,7 +1188,8 @@ function DeliveryOrdersTab({ onChanged }) {
                               {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
                             </>
                           )}
-                          <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Print Delivery Order">🖨 Print</button>
+                          <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Print / Save as PDF">📄 PDF</button>
+                          <button onClick={() => exportDeliveryOrderExcel(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Download as Excel">📊 Excel</button>
                         </div>
                       </td>
                     </tr>
