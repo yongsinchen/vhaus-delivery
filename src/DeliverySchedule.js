@@ -176,10 +176,14 @@ async function exportDeliveryOrderExcel(o, company = {}) {
     c.value = h; c.font = { bold: true }; c.fill = grayFill; c.border = boxAll;
     c.alignment = { horizontal: i === 0 || i === 3 ? "center" : "left" };
   });
+  const descTexts = [];
+  const codeTexts = [];
   items.forEach((it, i) => {
     const r = headRow + 1 + i;
     const spec = [it.size, it.color].filter(Boolean).join(" · ");
-    const vals = [i + 1, it.product_code || "", (it.product_name || "") + (spec ? ` — ${spec}` : ""), Number(it.quantity) || 1];
+    const desc = (it.product_name || "") + (spec ? ` — ${spec}` : "");
+    descTexts.push(desc); codeTexts.push(it.product_code || "");
+    const vals = [i + 1, it.product_code || "", desc, Number(it.quantity) || 1];
     vals.forEach((v, ci) => {
       const c = ws.getCell(r, ci + 1);
       c.value = v; c.border = boxAll;
@@ -187,9 +191,18 @@ async function exportDeliveryOrderExcel(o, company = {}) {
       if (ci === 2) c.alignment = { wrapText: true };
     });
   });
+  // Extra fixed line at the end of the item table.
+  const totalRow = headRow + 1 + items.length;
+  ["", "", "Total Amount", ""].forEach((v, ci) => {
+    const c = ws.getCell(totalRow, ci + 1);
+    c.value = v; c.border = boxAll;
+    if (ci === 2) c.font = { bold: true };
+    if (ci === 0 || ci === 3) c.alignment = { horizontal: "center" };
+  });
+  descTexts.push("Total Amount");
 
-  // Footer — remarks + signatures
-  let fr = headRow + 1 + items.length + 1;
+  // Footer — remarks + signatures (below the Total Amount line).
+  let fr = totalRow + 2;
   ws.getCell(`A${fr}`).value = "Remarks:"; ws.getCell(`A${fr}`).font = { bold: true };
   ws.mergeCells(`B${fr}:D${fr}`); ws.getCell(`B${fr}`).value = o.remark || "";
   fr += 2;
@@ -197,6 +210,14 @@ async function exportDeliveryOrderExcel(o, company = {}) {
   ws.mergeCells(`C${fr}:D${fr}`); ws.getCell(`C${fr}`).value = "Delivered By";
   ws.getCell(`A${fr}`).alignment = ws.getCell(`C${fr}`).alignment = { vertical: "bottom" };
   ws.getRow(fr).height = 44;
+
+  // Fit columns to their content so nothing is clipped when opened in Excel.
+  const longest = arr => arr.reduce((m, s) => Math.max(m, String(s ?? "").length), 0);
+  const clamp = (min, val, max) => Math.max(min, Math.min(max, val));
+  ws.getColumn(1).width = 6;                                                             // NO
+  ws.getColumn(2).width = clamp(14, longest([so.customer_name, o.delivery_address || so.customer_address, so.customer_contact, ...codeTexts]) + 2, 40); // CODE / values
+  ws.getColumn(3).width = clamp(30, longest([company.name, company.address, ...descTexts]) + 2, 60);                                                    // DESCRIPTION
+  ws.getColumn(4).width = clamp(12, longest([so.order_number, o.delivery_date, so.salesman_name, "Salesman"]) + 2, 22);                                 // QTY / values
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
