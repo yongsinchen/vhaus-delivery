@@ -27,6 +27,10 @@ function DeliveryDateRequestsPage() {
   const [isApprover, setIsApprover] = useState(false);
   const [loading, setLoading] = useState(true);
   const [doFor, setDoFor] = useState(null); // { salesOrderId, orderNumber, date } — Create DO after approval
+  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | needs_reschedule | approved | rejected
+  const [filterText, setFilterText] = useState("");        // match SO number / customer
+  const [page, setPage] = useState(0);
+  const PER_PAGE = 10;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,7 +87,7 @@ function DeliveryDateRequestsPage() {
     const res = await af(`${API}/delivery-date-requests/${r.id}/approve`, { method: "PATCH", body: JSON.stringify({}) });
     const d = await res.json();
     if (res.ok) {
-      toast.success(`Approved — SO ${r.so_number} set to ${fmt(r.requested_date)}`);
+      toast.success(`Approved — now create the delivery order for SO ${r.so_number}`);
       load();
       // Straight after approving, open the Create Delivery Order picker so the
       // admin can build a DO from the SO's items (arrived or not) — same flow
@@ -110,6 +114,21 @@ function DeliveryDateRequestsPage() {
   const open = rows.filter(r => r.status === "pending" || r.status === "needs_reschedule");
   const done = rows.filter(r => r.status === "approved" || r.status === "rejected");
 
+  // "Awaiting DO" = approved (date agreed) but no Delivery Order created yet.
+  const awaitingDo = r => r.status === "approved" && !r.has_delivery_order;
+  const matchStatus = (r, k) => k === "all" ? true : k === "awaiting_do" ? awaitingDo(r) : r.status === k;
+
+  // Filter (status + text) then paginate — applies to the approver's full queue.
+  const ft = filterText.trim().toLowerCase();
+  const filtered = rows.filter(r =>
+    matchStatus(r, statusFilter) &&
+    (!ft || String(r.so_number || "").toLowerCase().includes(ft) || String(r.customer_name || "").toLowerCase().includes(ft))
+  );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const curPage = Math.min(page, totalPages - 1);
+  const pageRows = filtered.slice(curPage * PER_PAGE, curPage * PER_PAGE + PER_PAGE);
+  const FILTERS = [["all", "All"], ["pending", "Pending"], ["needs_reschedule", "Needs reschedule"], ["awaiting_do", "Awaiting DO"], ["approved", "Approved"], ["rejected", "Rejected"]];
+
   const Badge = ({ s }) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS[s]?.cls || "bg-gray-100 text-gray-500"}`}>{STATUS[s]?.label || s}</span>;
 
   const Card = ({ r }) => (
@@ -119,6 +138,11 @@ function DeliveryDateRequestsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-violet-700">SO {r.so_number}</span>
             <Badge s={r.status} />
+            {r.status === "approved" && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.has_delivery_order ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>
+                {r.has_delivery_order ? "DO created" : "Awaiting DO"}
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
           <p className="text-sm mt-1"><span className="text-gray-400">Requested date:</span> <b className="text-gray-900">{fmt(r.requested_date)}</b></p>
@@ -131,6 +155,12 @@ function DeliveryDateRequestsPage() {
             <button onClick={() => { setProposeFor(r); setAltDates(["", "", ""]); setAltNote(""); }} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600">Propose dates</button>
             <button onClick={() => reject(r)} className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50">Reject</button>
           </div>
+        )}
+        {/* Approved (incl. a salesman-picked date) — the order is waiting for a
+            Delivery Order. The approver creates it here. */}
+        {isApprover && r.status === "approved" && r.sales_order_id && (
+          <button onClick={() => setDoFor({ salesOrderId: r.sales_order_id, orderNumber: `SO ${r.so_number}`, date: r.requested_date })}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 shrink-0">🚚 Create DO</button>
         )}
       </div>
 
@@ -207,11 +237,11 @@ function DeliveryDateRequestsPage() {
 
       {loading ? (
         <div className="space-y-3">{[1,2].map(i => <div key={i} className="h-24 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>
-      ) : (
+      ) : !isApprover ? (
         <>
           <div>
-            <h2 className="text-sm font-bold text-gray-700 mb-2">{isApprover ? `Awaiting review (${open.length})` : `Open (${open.length})`}</h2>
-            {open.length === 0 ? <p className="text-sm text-gray-400">Nothing awaiting {isApprover ? "your review" : "approval"}.</p>
+            <h2 className="text-sm font-bold text-gray-700 mb-2">{`Open (${open.length})`}</h2>
+            {open.length === 0 ? <p className="text-sm text-gray-400">Nothing awaiting approval.</p>
               : <div className="space-y-3">{open.map(r => <Card key={r.id} r={r} />)}</div>}
           </div>
           {done.length > 0 && (
@@ -219,6 +249,48 @@ function DeliveryDateRequestsPage() {
               <h2 className="text-sm font-bold text-gray-700 mb-2">Recent decisions</h2>
               <div className="space-y-3">{done.slice(0, 30).map(r => <Card key={r.id} r={r} />)}</div>
             </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Filter bar */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              {FILTERS.map(([k, label]) => {
+                const n = rows.filter(r => matchStatus(r, k)).length;
+                return (
+                  <button key={k} onClick={() => { setStatusFilter(k); setPage(0); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium ${statusFilter === k ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+                    {label} <span className={statusFilter === k ? "opacity-80" : "text-gray-400"}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <input value={filterText} onChange={e => { setFilterText(e.target.value); setPage(0); }} placeholder="Search SO number or customer…"
+              className="sm:ml-auto w-full sm:w-64 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+          </div>
+
+          {/* Paginated list */}
+          {filtered.length === 0 ? (
+            <p className="text-sm text-gray-400">No requests match this filter.</p>
+          ) : (
+            <>
+              <div className="space-y-3">{pageRows.map(r => <Card key={r.id} r={r} />)}</div>
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">
+                  {filtered.length} request{filtered.length === 1 ? "" : "s"} · showing {curPage * PER_PAGE + 1}–{Math.min(filtered.length, (curPage + 1) * PER_PAGE)}
+                </p>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button disabled={curPage === 0} onClick={() => setPage(p => Math.max(0, p - 1))}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40">← Prev</button>
+                    <span className="text-xs text-gray-500">Page {curPage + 1} of {totalPages}</span>
+                    <button disabled={curPage >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40">Next →</button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </>
       )}
