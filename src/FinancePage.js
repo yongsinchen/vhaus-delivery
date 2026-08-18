@@ -28,6 +28,7 @@ function FinancePage() {
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
   const [methodFilter, setMethodFilter] = useState(""); // Payments tab: filter by payment method
+  const [typeFilter, setTypeFilter] = useState("");     // Payments tab: filter by type (Deposit / Balance)
 
   // Reconciliation
   const [uploads, setUploads] = useState([]);
@@ -161,9 +162,18 @@ function FinancePage() {
   });
 
   const totalCollected = filteredPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  // Payments tab: method dropdown options (all methods seen) + the method-filtered rows/total.
-  const paymentMethods = [...new Set(payments.map(p => p.payment_method || "Cash"))].sort();
-  const methodRows = filteredPayments.filter(p => !methodFilter || (p.payment_method || "Cash") === methodFilter);
+  // Payment TYPE (deposit vs balance) is separate from the payment METHOD
+  // (cash / card / …). "Deposit" is a type, not a method, so it never appears
+  // in the method dropdown.
+  const txnType = (p) => (p._deposit || p.kind === "deposit") ? "Deposit" : (p.kind === "balance" ? "Balance" : "Other");
+  const TYPE_ORDER = ["Deposit", "Balance", "Other"];
+  const paymentTypes = TYPE_ORDER.filter(t => payments.some(p => txnType(p) === t));
+  // Payments tab: method dropdown options (real methods only — "Deposit" is a type).
+  const paymentMethods = [...new Set(payments.map(p => p.payment_method || "Cash").filter(m => m && m !== "Deposit"))].sort();
+  const methodRows = filteredPayments.filter(p =>
+    (!methodFilter || (p.payment_method || "Cash") === methodFilter) &&
+    (!typeFilter || txnType(p) === typeFilter)
+  );
   const methodTotal = methodRows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const byMethod = {};
   filteredPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
@@ -293,26 +303,32 @@ function FinancePage() {
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
             <span className="text-gray-400">to</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm" />
+            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="">All types</option>
+              {paymentTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
             <select value={methodFilter} onChange={e => setMethodFilter(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
               <option value="">All methods</option>
               {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
-            {methodFilter && <button onClick={() => setMethodFilter("")} className="text-xs text-violet-600 hover:underline">Clear</button>}
+            {(methodFilter || typeFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
             <span className="text-xs text-gray-500">{methodRows.length} transaction{methodRows.length !== 1 ? "s" : ""} · {money(methodTotal)}</span>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
+              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Type</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 6 : 5} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter ? ` paid by ${methodFilter}` : ""} in this period</td></tr>}
+                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 7 : 6} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter || typeFilter ? " matching the filter" : ""} in this period</td></tr>}
                 {methodRows.map((p, idx) => (
                   <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
                     className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
                     <td className="px-4 py-2 font-medium text-gray-700">{p.or_number != null ? `#${p.or_number}` : "-"}</td>
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
                     <td className="px-4 py-2">
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method || "Cash"}</span>
-                      {p._deposit && <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-violet-100 text-violet-700 font-medium">Deposit</span>}
+                      {(() => { const t = txnType(p); return t === "Other" ? <span className="text-xs text-gray-400">Payment</span> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t === "Deposit" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>{t}</span>; })()}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method && p.payment_method !== "Deposit" ? p.payment_method : "—"}</span>
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{p._deposit ? (p.so_number ? `SO ${p.so_number}` : "-") : (p.reference_no || "-")}</td>
                     <td className={`px-4 py-2 text-right font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</td>
@@ -502,7 +518,7 @@ function FinancePage() {
             <div className="px-5 py-4 space-y-3 text-sm">
               {detailTxn.or_number != null && <div className="flex justify-between"><span className="text-gray-500">Official Receipt No.</span><span className="font-bold text-gray-900">#{detailTxn.or_number}</span></div>}
               <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className={`font-bold ${detailTxn._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(detailTxn.amount)}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{detailTxn._deposit ? "Deposit (on order)" : "Collected payment"}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{txnType(detailTxn)}{detailTxn._deposit ? " (on order)" : ""}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="text-gray-800">{detailTxn.payment_method || "-"}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Date</span><span className="text-gray-800">{detailTxn.paid_at ? new Date(detailTxn.paid_at).toLocaleString("en-MY") : "-"}</span></div>
               {detailTxn.so_number && <div className="flex justify-between"><span className="text-gray-500">Sales Order</span><span className="text-gray-800">SO {detailTxn.so_number}</span></div>}
