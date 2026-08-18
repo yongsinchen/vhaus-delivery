@@ -83,7 +83,7 @@ function DeliveryDateRequestsPage() {
     const res = await af(`${API}/delivery-date-requests/${r.id}/approve`, { method: "PATCH", body: JSON.stringify({}) });
     const d = await res.json();
     if (res.ok) {
-      toast.success(`Approved — SO ${r.so_number} set to ${fmt(r.requested_date)}`);
+      toast.success(`Approved — now create the delivery order for SO ${r.so_number}`);
       load();
       // Straight after approving, open the Create Delivery Order picker so the
       // admin can build a DO from the SO's items (arrived or not) — same flow
