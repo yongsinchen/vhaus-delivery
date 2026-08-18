@@ -6,8 +6,8 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
-const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement" };
-const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄" };
+const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement", 4: "Delivery (Missing Item)" };
+const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚" };
 const STATUS_STYLE = {
   open: "bg-gray-100 text-gray-700", scheduled: "bg-blue-100 text-blue-700",
   in_progress: "bg-amber-100 text-amber-700", claiming: "bg-violet-100 text-violet-700",
