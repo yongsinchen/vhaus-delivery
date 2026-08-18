@@ -150,6 +150,24 @@ function SupplierDOPage() {
   const toast = useToast();
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
+  const canManageDO = ["master", "manager", "company_admin", "operation_manager"].includes((user?.role || "").toLowerCase());
+
+  // Delete a supplier DO — even after review. Removes its review lines and
+  // reverses any stock it added (handled server-side). Master/Manager only.
+  const deleteDO = async () => {
+    if (!detail?.delivery?.id) return;
+    if (!window.confirm(`Delete DO #${detail.delivery.do_number || ""} (${detail.delivery.supplier || "-"})?\n\nThis removes its review items and reverses any stock it added. This cannot be undone.`)) return;
+    try {
+      await withLoading("Deleting DO…", async () => {
+        const res = await fetch(`${API}/supplier-deliveries/${detail.delivery.id}`, { method: "DELETE", headers: await authHeaders() });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || "Failed to delete DO");
+        toast.success("DO deleted" + (d.reversed ? ` · ${d.reversed} stock movement(s) reversed` : ""));
+        setDetail(null);
+        loadDOs();
+      });
+    } catch (e) { toast.error(e.message || "Failed to delete DO"); }
+  };
 
   const [dos, setDos] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -440,6 +458,7 @@ function SupplierDOPage() {
               </div>
               <div className="flex items-center gap-2">
                 {detail.delivery.photo_url && <button onClick={() => setViewPhoto(detail.delivery.photo_url)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100">📷 Photo</button>}
+                {canManageDO && <button onClick={deleteDO} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">🗑 Delete DO</button>}
                 <button onClick={() => setDetail(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
               </div>
             </div>
