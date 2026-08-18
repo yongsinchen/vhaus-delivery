@@ -302,12 +302,13 @@ function FinancePage() {
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
+              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 5 : 4} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter ? ` paid by ${methodFilter}` : ""} in this period</td></tr>}
+                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 6 : 5} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter ? ` paid by ${methodFilter}` : ""} in this period</td></tr>}
                 {methodRows.map((p, idx) => (
                   <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
                     className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
+                    <td className="px-4 py-2 font-medium text-gray-700">{p.or_number != null ? `#${p.or_number}` : "-"}</td>
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
                     <td className="px-4 py-2">
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method || "Cash"}</span>
@@ -499,6 +500,7 @@ function FinancePage() {
               <button onClick={() => setDetailTxn(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
+              {detailTxn.or_number != null && <div className="flex justify-between"><span className="text-gray-500">Official Receipt No.</span><span className="font-bold text-gray-900">#{detailTxn.or_number}</span></div>}
               <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className={`font-bold ${detailTxn._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(detailTxn.amount)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{detailTxn._deposit ? "Deposit (on order)" : "Collected payment"}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="text-gray-800">{detailTxn.payment_method || "-"}</span></div>
