@@ -177,9 +177,10 @@ function DeliveryDateRequestsPage() {
             <button onClick={() => reject(r)} className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50">Reject</button>
           </div>
         )}
-        {/* Approved (incl. a salesman-picked date) — the order is waiting for a
-            Delivery Order. The approver creates it here. */}
-        {isApprover && r.status === "approved" && r.sales_order_id && (
+        {/* Approved (incl. a salesman-picked date) and no DO yet — the approver
+            creates it here. Once a DO exists, the button is gone (the "DO
+            created" badge shows instead) so a second DO can't be made here. */}
+        {isApprover && r.status === "approved" && r.sales_order_id && !r.has_delivery_order && (
           <button onClick={() => setDoFor({ salesOrderId: r.sales_order_id, orderNumber: `SO ${r.so_number}`, date: r.requested_date })}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700 shrink-0">🚚 Create DO</button>
         )}
