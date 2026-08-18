@@ -146,6 +146,9 @@ function DeliveryDateRequestsPage() {
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
           <p className="text-sm mt-1"><span className="text-gray-400">Requested date:</span> <b className="text-gray-900">{fmt(r.requested_date)}</b></p>
+          <p className="text-sm mt-0.5"><span className="text-gray-400">Currently scheduled:</span> {r.current_delivery_date && r.current_delivery_date !== "TBC"
+            ? <b className="text-gray-900">{fmt(r.current_delivery_date)}</b>
+            : <span className="text-gray-400">{r.current_delivery_date === "TBC" ? "TBC" : "not scheduled"}</span>}</p>
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
         </div>
