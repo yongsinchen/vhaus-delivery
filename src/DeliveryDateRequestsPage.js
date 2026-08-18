@@ -114,16 +114,20 @@ function DeliveryDateRequestsPage() {
   const open = rows.filter(r => r.status === "pending" || r.status === "needs_reschedule");
   const done = rows.filter(r => r.status === "approved" || r.status === "rejected");
 
+  // "Awaiting DO" = approved (date agreed) but no Delivery Order created yet.
+  const awaitingDo = r => r.status === "approved" && !r.has_delivery_order;
+  const matchStatus = (r, k) => k === "all" ? true : k === "awaiting_do" ? awaitingDo(r) : r.status === k;
+
   // Filter (status + text) then paginate — applies to the approver's full queue.
   const ft = filterText.trim().toLowerCase();
   const filtered = rows.filter(r =>
-    (statusFilter === "all" || r.status === statusFilter) &&
+    matchStatus(r, statusFilter) &&
     (!ft || String(r.so_number || "").toLowerCase().includes(ft) || String(r.customer_name || "").toLowerCase().includes(ft))
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const curPage = Math.min(page, totalPages - 1);
   const pageRows = filtered.slice(curPage * PER_PAGE, curPage * PER_PAGE + PER_PAGE);
-  const FILTERS = [["all", "All"], ["pending", "Pending"], ["needs_reschedule", "Needs reschedule"], ["approved", "Approved"], ["rejected", "Rejected"]];
+  const FILTERS = [["all", "All"], ["pending", "Pending"], ["needs_reschedule", "Needs reschedule"], ["awaiting_do", "Awaiting DO"], ["approved", "Approved"], ["rejected", "Rejected"]];
 
   const Badge = ({ s }) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS[s]?.cls || "bg-gray-100 text-gray-500"}`}>{STATUS[s]?.label || s}</span>;
 
@@ -134,6 +138,11 @@ function DeliveryDateRequestsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-violet-700">SO {r.so_number}</span>
             <Badge s={r.status} />
+            {r.status === "approved" && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.has_delivery_order ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>
+                {r.has_delivery_order ? "DO created" : "Awaiting DO"}
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
           <p className="text-sm mt-1"><span className="text-gray-400">Requested date:</span> <b className="text-gray-900">{fmt(r.requested_date)}</b></p>
@@ -248,7 +257,7 @@ function DeliveryDateRequestsPage() {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex flex-wrap gap-1.5">
               {FILTERS.map(([k, label]) => {
-                const n = k === "all" ? rows.length : rows.filter(r => r.status === k).length;
+                const n = rows.filter(r => matchStatus(r, k)).length;
                 return (
                   <button key={k} onClick={() => { setStatusFilter(k); setPage(0); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium ${statusFilter === k ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
