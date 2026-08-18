@@ -175,7 +175,31 @@ function SupplierDOPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [detail, setDetail] = useState(null);       // { delivery, items }
+  const [hdr, setHdr] = useState(null);             // editable header fields for the open DO
+  const [savingHdr, setSavingHdr] = useState(false);
   const [viewPhoto, setViewPhoto] = useState(null);
+
+  const seedHdr = (d) => setHdr({
+    supplier: d?.supplier || "", do_number: d?.do_number || "",
+    do_date: d?.do_date || "", supplier_reference: d?.supplier_reference || "",
+  });
+
+  // Correct a mislabeled DO (e.g. OCR read the wrong supplier name).
+  const saveHeader = async () => {
+    if (!detail?.delivery?.id || !hdr) return;
+    setSavingHdr(true);
+    try {
+      const res = await fetch(`${API}/supplier-deliveries/${detail.delivery.id}`, {
+        method: "PUT", headers: await authHeaders(),
+        body: JSON.stringify(hdr),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Failed to save");
+      toast.success("DO details updated");
+      reloadDetail();
+    } catch (e) { toast.error(e.message || "Failed to save DO details"); }
+    finally { setSavingHdr(false); }
+  };
 
   // Upload → preview → confirm flow
   const [uploading, setUploading] = useState(false);
@@ -205,7 +229,7 @@ function SupplierDOPage() {
         const res = await fetch(`${API}/supplier-dos/${d.id}`, { headers: await authHeaders(false) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed");
-        setDetail(data);
+        setDetail(data); seedHdr(data.delivery);
       });
     } catch (e) { toast.error("Failed to load DO: " + e.message); }
   };
@@ -463,6 +487,40 @@ function SupplierDOPage() {
               </div>
             </div>
             <div className="px-6 py-4 space-y-4">
+              {/* Edit DO header — correct a mislabeled supplier (e.g. OCR read
+                  the wrong name), DO number, date, or reference. */}
+              {canManageDO && hdr && (
+                <div className="border border-gray-100 rounded-xl p-3">
+                  <p className="text-xs font-bold text-gray-500 mb-2">EDIT DO DETAILS</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-[11px] text-gray-400 mb-0.5">Supplier</label>
+                      <input value={hdr.supplier} onChange={e => setHdr(h => ({ ...h, supplier: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-0.5">DO Number</label>
+                      <input value={hdr.do_number} onChange={e => setHdr(h => ({ ...h, do_number: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-0.5">DO Date</label>
+                      <input type="date" value={(hdr.do_date || "").slice(0, 10)} onChange={e => setHdr(h => ({ ...h, do_date: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] text-gray-400 mb-0.5">Reference</label>
+                      <input value={hdr.supplier_reference} onChange={e => setHdr(h => ({ ...h, supplier_reference: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end mt-2">
+                    <button onClick={saveHeader} disabled={savingHdr}
+                      className="px-4 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                      {savingHdr ? "Saving…" : "Save details"}</button>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-3 text-sm">
                 {[["Status", detail.delivery.status], ["Reference", detail.delivery.supplier_reference || "-"], ["Logged", detail.delivery.created_at ? fmt(detail.delivery.created_at) : "-"]].map(([l, v]) => (
                   <div key={l} className="bg-gray-50 rounded-xl p-3"><p className="text-xs text-gray-400 mb-0.5">{l}</p><p className="font-semibold">{v}</p></div>
