@@ -649,6 +649,21 @@ function OrdersPage() {
     return { orderId: legacyOrder.id, items: Array.isArray(items) ? items : [] };
   };
 
+  // Received-so-far vs ordered for an arrival line. arrivedQty accumulates as
+  // supplier DOs land; legacy rows that arrived before qty tracking have only
+  // arrivalDate, which counts as fully arrived.
+  const orderedQtyOf = (it) => { const n = parseInt(it?.unit, 10); return Number.isFinite(n) && n > 0 ? n : 1; };
+  const arrivedQtyOf = (it) => {
+    if (it?.arrivedQty != null) return Math.min(Number(it.arrivedQty) || 0, orderedQtyOf(it));
+    return it?.arrivalDate ? orderedQtyOf(it) : 0;
+  };
+  // Small chip showing 2/2 (full), 1/2 (partial), or 0/2 (none).
+  const ArrivalQtyChip = ({ it }) => {
+    const ordered = orderedQtyOf(it), got = arrivedQtyOf(it);
+    const cls = got >= ordered ? "bg-emerald-100 text-emerald-700" : got > 0 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600";
+    return <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${cls}`}>{got}/{ordered}{got > 0 && got < ordered ? " partial" : ""}</span>;
+  };
+
   // ── Delivery Orders (Phase 2B) ──────────────────────────────────
   // Loads DOs + per-item allocation summary for the viewed order. 403
   // (no DELIVERY_ORDER_VIEW) hides the section rather than erroring.
@@ -1499,6 +1514,8 @@ function OrdersPage() {
                               <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                               <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                             </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <ArrivalQtyChip it={it} />
                             <ArrivalDateInput value={it.arrivalDate} disabled={arrivalSavingIdx !== null}
                               className={`text-xs border rounded px-1.5 py-1 w-[105px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`}
                               onChange={async val => {
@@ -1506,9 +1523,10 @@ function OrdersPage() {
                                 try {
                                   const token = await getToken();
                                   await fetch(`${API}/orders/${viewArrival.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                                  setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                                  setViewArrival(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val, arrivedQty: val ? orderedQtyOf(it2) : 0 } : it2) }));
                                 } finally { setArrivalSavingIdx(null); }
                               }} />
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -2112,6 +2130,8 @@ function OrdersPage() {
                         <span className="text-xs text-gray-800">{it.itemCode ? `[${it.itemCode}] ` : ""}{it.itemName || "-"}</span>
                         <span className="text-xs text-gray-400 ml-1">×{it.unit || 1}</span>
                       </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <ArrivalQtyChip it={it} />
                       <ArrivalDateInput value={it.arrivalDate} disabled={arrivalSavingIdx !== null}
                         className={`text-xs border rounded px-1.5 py-0.5 w-[100px] ${arrivalSavingIdx === i ? "opacity-50 animate-pulse" : ""} ${it.arrivalDate ? "border-emerald-300 bg-emerald-50 text-emerald-700 font-semibold" : "border-red-300 bg-red-50 text-red-500"}`}
                         onChange={async val => {
@@ -2119,9 +2139,10 @@ function OrdersPage() {
                           try {
                             const token = await getToken();
                             await fetch(`${API}/orders/${arrivalItems.orderId}/item-arrival`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ item_index: i, arrival_date: val }) });
-                            setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val } : it2) }));
+                            setArrivalItems(prev => ({ ...prev, items: prev.items.map((it2, j) => j === i ? { ...it2, arrivalDate: val, arrivedQty: val ? orderedQtyOf(it2) : 0 } : it2) }));
                           } finally { setArrivalSavingIdx(null); }
                         }} />
+                      </div>
                     </div>
                   ))}
                 </div>
