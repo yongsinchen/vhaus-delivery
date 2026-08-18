@@ -33,6 +33,73 @@ const parseItems = items => {
   catch { return []; }
 };
 
+const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+
+// Print one Delivery Order — its OWN shipment lines (delivery_order_items), not
+// the whole sales order. `company` supplies the printed header/logo.
+function printDeliveryOrder(o, company = {}) {
+  const so = o.sales_orders || {};
+  const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
+  const itemRows = items.map((it, i) => {
+    const spec = [it.size, it.color].filter(Boolean).join(" · ");
+    return `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${esc(it.product_code || "")}</td>
+      <td>${esc(it.product_name || "")}${spec ? `<div style="font-size:9px;color:#555">${esc(spec)}</div>` : ""}</td>
+      <td class="c">${Number(it.quantity) || 1}</td>
+    </tr>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>DO ${esc(o.do_number || "")}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 10mm; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
+    .sheet { border: 1px solid #111; }
+    .pad { padding: 8px 12px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #111; }
+    .logo { height: 42px; max-width: 180px; object-fit: contain; }
+    .title { font-size: 18px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; letter-spacing: 2px; }
+    .info td { padding: 3px 12px; font-size: 11px; vertical-align: top; }
+    .info .lbl { font-weight: 700; width: 80px; }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th { border: 1px solid #111; background: #f5f5f5; padding: 5px; font-size: 10px; }
+    table.items td { border: 1px solid #ddd; padding: 5px 8px; }
+    .c { text-align: center; }
+    .foot { display: flex; border-top: 1px solid #111; }
+    .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
+    .foot .col + .col { border-left: 1px solid #111; }
+    .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+  </style></head><body>
+  <div class="sheet">
+    <div class="head pad">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
+        <div><b>${esc(company.name || "")}</b><br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
+      </div>
+      <div style="text-align:right"><b>DO#: ${esc(o.do_number || "")}</b></div>
+    </div>
+    <div class="title">DELIVERY ORDER</div>
+    <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
+      <tr><td class="lbl">Customer</td><td>${esc(so.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(so.order_number || "")}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(o.delivery_address || so.delivery_address || so.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(o.delivery_date || "")}</td></tr>
+      <tr><td class="lbl">Contact</td><td>${esc(so.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
+    </table>
+    <table class="items">
+      <thead><tr><th style="width:30px">NO</th><th style="width:80px">CODE</th><th>DESCRIPTION</th><th style="width:50px">QTY</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="foot">
+      <div class="col"><b>Remarks:</b><br>${esc(o.remark || "")}</div>
+      <div class="col"><div class="sigline">Received By (Customer)</div></div>
+      <div class="col"><div class="sigline">Delivered By</div></div>
+    </div>
+  </div>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Allow pop-ups to print"); return; }
+  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+}
+
 // ── Item arrival status (drives the per-row chip and per-stop readiness) ──
 // Derived from the three legacy date fields the warehouse Excel sheet used:
 // arrival > supplier sent > ordered > nothing.
@@ -993,7 +1060,18 @@ function DeliveryOrdersTab({ onChanged }) {
   const [showDone, setShowDone] = useState(false);
   const [edit, setEdit] = useState({});      // do id -> date string being edited
   const [savingId, setSavingId] = useState(null);
+  const [dateFilter, setDateFilter] = useState(""); // filter list by delivery date
+  const [company, setCompany] = useState({});       // header/logo for the printed DO
   const TERMINAL = ["completed", "cancelled"];
+
+  useEffect(() => {
+    af(`${API}/company-settings`).then(r => r.json()).then(d => {
+      if (d.settings) setCompany({
+        name: d.settings.company_name || "", address: d.settings.address || "",
+        hotline: d.settings.hotline || "", logo: d.settings.logo_url || "",
+      });
+    }).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1025,6 +1103,7 @@ function DeliveryOrdersTab({ onChanged }) {
 
   const rows = dos
     .filter(o => showDone || !TERMINAL.includes(String(o.status || "").toLowerCase()))
+    .filter(o => !dateFilter || o.delivery_date === dateFilter)
     .sort((a, b) => {
       const ad = a.delivery_date || "", bd = b.delivery_date || "";  // TBC (no date) first
       if (!ad && bd) return -1;
@@ -1036,7 +1115,11 @@ function DeliveryOrdersTab({ onChanged }) {
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
       <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span></h3>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="text-xs text-gray-500 flex items-center gap-1">Date
+            <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded px-2 py-1 text-xs" />
+          </label>
+          {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-gray-400 hover:text-red-500">clear</button>}
           <label className="text-xs text-gray-500 flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show completed/cancelled</label>
           <button onClick={load} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
         </div>
@@ -1068,12 +1151,15 @@ function DeliveryOrdersTab({ onChanged }) {
                               {!o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        {!terminal && (
-                          <div className="flex items-center gap-1">
-                            <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
-                            {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {!terminal && (
+                            <>
+                              <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
+                              {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
+                            </>
+                          )}
+                          <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Print Delivery Order">🖨 Print</button>
+                        </div>
                       </td>
                     </tr>
                   );
