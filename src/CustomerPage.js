@@ -6,6 +6,77 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
+
+// Official Receipt — printed after a deposit/balance collection. Mirrors the
+// company's pre-printed receipt book and uses the uploaded company logo.
+function printOfficialReceipt({ company = {}, receiptNo, customer = {}, date, rows = [], totalReceived, creditBalance, kindLabel }) {
+  const MIN_ROWS = 4;
+  const bodyRows = rows.map(r => `<tr>
+      <td>${esc(r.so_number || "")}</td>
+      <td>${esc(r.date || "")}</td>
+      <td>${esc(r.payment_method || "")}</td>
+      <td class="r">${r.amount != null ? money(r.amount) : ""}</td>
+      <td class="r">${r.paid != null ? money(r.paid) : ""}</td>
+      <td class="r">${r.balance != null ? money(r.balance) : ""}</td>
+    </tr>`);
+  for (let i = rows.length; i < MIN_ROWS; i++) bodyRows.push(`<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`);
+  const contactLine = [company.hotline && `HOTLINE: ${company.hotline}`, company.email && `EMAIL: ${company.email}`, company.website && `WEBSITE: ${company.website}`].filter(Boolean).join(" · ");
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Official Receipt ${esc(receiptNo || "")}</title>
+<style>
+  @page { size: A5; margin: 10mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; font-size: 12px; padding: 6px; }
+  .head { display: flex; align-items: flex-start; gap: 12px; border-bottom: 2px solid #111; padding-bottom: 8px; }
+  .logo { height: 46px; max-width: 200px; object-fit: contain; }
+  .cn { font-size: 15px; font-weight: 800; letter-spacing: .3px; }
+  .cmeta { font-size: 10px; color: #374151; line-height: 1.4; margin-top: 2px; }
+  .title { text-align: center; font-size: 18px; font-weight: 800; letter-spacing: 3px; margin: 12px 0 2px; }
+  .no { text-align: center; color: #dc2626; font-weight: 700; font-size: 13px; margin-bottom: 10px; }
+  .fields { font-size: 12px; line-height: 1.9; margin-bottom: 8px; }
+  .fields b { display: inline-block; min-width: 120px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { border: 0.8px solid #6b7280; padding: 5px 6px; font-size: 11px; }
+  th { background: #f3f4f6; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+  td.r, th.r { text-align: right; }
+  .totals { margin-top: 10px; width: 60%; margin-left: auto; }
+  .totals .row { display: flex; justify-content: space-between; border-bottom: 0.8px solid #9ca3af; padding: 5px 2px; }
+  .totals .row b { font-weight: 700; }
+  .foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 34px; font-size: 11px; }
+  .sig { text-align: center; }
+  .sig .line { border-top: 0.8px solid #111; width: 190px; padding-top: 3px; margin-top: 30px; }
+</style></head><body>
+  <div class="head">
+    ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
+    <div>
+      <div class="cn">${esc(company.name || "")}</div>
+      <div class="cmeta">${company.reg ? esc(company.reg) + "<br>" : ""}${company.address ? esc(company.address) + "<br>" : ""}${contactLine}</div>
+    </div>
+  </div>
+  <div class="title">OFFICIAL RECEIPT</div>
+  <div class="no">No: ${esc(receiptNo || "")}${kindLabel ? ` · ${esc(kindLabel)}` : ""}</div>
+  <div class="fields">
+    <div><b>RECEIVED FROM:</b> ${esc(customer.name || "")}</div>
+    <div><b>PHONE NO:</b> ${esc(customer.phone || "")}</div>
+    <div><b>DATE:</b> ${esc(date || "")}</div>
+  </div>
+  <table>
+    <thead><tr><th>Sales Order No.</th><th>Date</th><th>Payment Method</th><th class="r">Amount (RM)</th><th class="r">Paid (RM)</th><th class="r">Balance (RM)</th></tr></thead>
+    <tbody>${bodyRows.join("")}</tbody>
+  </table>
+  <div class="totals">
+    <div class="row"><b>Total Amount Received (RM)</b><b>${money(totalReceived)}</b></div>
+    <div class="row"><span>Credit Balance (RM, if any)</span><span>${creditBalance ? money(creditBalance) : "-"}</span></div>
+  </div>
+  <div class="foot">
+    <div>for ${esc(company.name || "")}</div>
+    <div class="sig"><div class="line">Company Chop &amp; Signature</div></div>
+  </div>
+</body></html>`;
+  const w = window.open("", "_blank"); if (!w) return;
+  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 600);
+}
 
 const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current (0-30d)" }, "30_60": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", label: "30-60 days" }, "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "60-90 days" }, "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "90+ days" } };
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate"];
@@ -17,6 +88,20 @@ function CustomerPage() {
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0); // 0=customers, 1=aging
   const TABS = ["Customers", "Aging Report"];
+
+  // Company header + logo for the Official Receipt.
+  const [company, setCompany] = useState({});
+  useEffect(() => {
+    if (!companyId) return;
+    af(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
+      if (d.settings) setCompany({
+        name: d.settings.company_name || "", reg: d.settings.registration_no || "",
+        address: d.settings.address || "", hotline: d.settings.hotline || "",
+        email: d.settings.email || "", website: d.settings.website || "",
+        logo: d.settings.logo_url || "",
+      });
+    }).catch(() => {});
+  }, [companyId]);
 
   // Customer list
   const [customers, setCustomers] = useState([]);
@@ -147,6 +232,20 @@ function CustomerPage() {
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
     if ((payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && !payRef.trim()) { toast.warning("Please enter the approval code"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
+    // Snapshot the receipt data now, before the modal state is cleared.
+    const receiptCustomer = { name: payModal.customer.name, phone: payModal.customer.phone };
+    const paidAllocs = payAllocations.filter(a => Number(a.amount) > 0);
+    const todayStr = new Date().toLocaleDateString("en-MY");
+    const receiptRows = paidAllocs.map(a => {
+      const ord = (payModal.orders || []).find(o => o.id === a.order_id) || {};
+      const orderAmount = ord.order_amount != null ? Number(ord.order_amount) : null;
+      const paid = Number(a.amount) || 0;
+      const oldBal = Number(a.balance) || 0;
+      return { so_number: a.so_number, date: dmy(ord.order_date) || todayStr, payment_method: payMethod, amount: orderAmount, paid, balance: Math.max(0, oldBal - paid) };
+    });
+    const sumOldBal = paidAllocs.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+    const receiptCredit = Math.max(0, total - sumOldBal);
+    const receiptKind = payKind === "deposit" ? "Deposit" : "Balance";
     paySavingRef.current = true;
     setPaySaving(true);
     try {
@@ -154,7 +253,15 @@ function CustomerPage() {
         const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
         const d = await res.json();
         if (!d.payment) throw new Error(d.error || "Failed");
-        toast.success(`${money(total)} recorded`); setPayModal(null); if (detail) openDetail(detail.customer);
+        toast.success(`${money(total)} recorded`);
+        setPayModal(null); if (detail) openDetail(detail.customer);
+        // Generate the Official Receipt for this collection.
+        printOfficialReceipt({
+          company,
+          receiptNo: String(d.payment.id || "").replace(/-/g, "").slice(0, 6).toUpperCase(),
+          customer: receiptCustomer, date: todayStr, rows: receiptRows,
+          totalReceived: total, creditBalance: receiptCredit, kindLabel: receiptKind,
+        });
       });
     } catch (err) {
       toast.error(err.message || "Failed to record payment");
