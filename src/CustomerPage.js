@@ -258,7 +258,7 @@ function CustomerPage() {
         // Generate the Official Receipt for this collection.
         printOfficialReceipt({
           company,
-          receiptNo: String(d.payment.id || "").replace(/-/g, "").slice(0, 6).toUpperCase(),
+          receiptNo: d.payment.or_number != null ? String(d.payment.or_number) : String(d.payment.id || "").replace(/-/g, "").slice(0, 6).toUpperCase(),
           customer: receiptCustomer, date: todayStr, rows: receiptRows,
           totalReceived: total, creditBalance: receiptCredit, kindLabel: receiptKind,
         });
@@ -269,6 +269,27 @@ function CustomerPage() {
       paySavingRef.current = false;
       setPaySaving(false);
     }
+  };
+
+  // Reprint the Official Receipt for any past payment or order deposit.
+  const reprintReceipt = (p) => {
+    const ord = (detail?.orders || []).find(o => o.id === p.order_id) || {};
+    const row = {
+      so_number: p.so_number || ord.so_number || "",
+      date: dmy(p.paid_at),
+      payment_method: p.payment_method || (p._deposit ? "Deposit" : ""),
+      amount: ord.order_amount != null ? Number(ord.order_amount) : null,
+      paid: Number(p.amount) || 0,
+      balance: ord.balance != null ? Number(ord.balance) : null,
+    };
+    printOfficialReceipt({
+      company,
+      receiptNo: p.or_number != null ? String(p.or_number) : "",
+      customer: { name: detail?.customer?.name, phone: detail?.customer?.phone },
+      date: dmy(p.paid_at) || new Date().toLocaleDateString("en-MY"),
+      rows: [row], totalReceived: Number(p.amount) || 0, creditBalance: 0,
+      kindLabel: (p._deposit || p.kind === "deposit") ? "Deposit" : (p.kind === "balance" ? "Balance" : ""),
+    });
   };
 
   const deletePayment = async (p) => {
@@ -502,12 +523,17 @@ function CustomerPage() {
                               </div>
                             )}
                           </div>
-                          {p.id ? (
-                            <button onClick={() => deletePayment(p)} title="Remove payment"
-                              className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>
-                          ) : (
-                            <span className="text-[10px] text-gray-400" title="Edit the deposit on the order">on order</span>
-                          )}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
+                            <button onClick={() => reprintReceipt(p)} title="Print Official Receipt"
+                              className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 Receipt</button>
+                            {p.id ? (
+                              <button onClick={() => deletePayment(p)} title="Remove payment"
+                                className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>
+                            ) : (
+                              <span className="text-[10px] text-gray-400" title="Edit the deposit on the order">on order</span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
