@@ -1333,7 +1333,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
   const [readiness, setReadiness] = useState(null);
-  const [suggestions, setSuggestions] = useState(null);
+  const [smartPlan, setSmartPlan] = useState(null); // Smart Assign proposal: area clusters of unassigned DOs
   const [assignTeam, setAssignTeam] = useState({}); // Smart Assign: area -> chosen team id (override)
   const [showReadiness, setShowReadiness] = useState(false);
   const [showSuggest, setShowSuggest] = useState(false);
@@ -1440,16 +1440,62 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } catch (e) { toast.error("Failed to load readiness: " + e.message); }
   };
 
-  const loadSuggestions = async () => {
-    if (!companyId) return;
+  // Address → coarse area. Postcode first (Malaysian 5-digit), then keyword.
+  const extractArea = (address) => {
+    const lower = (address || "").toLowerCase();
+    const pc = lower.match(/\b(\d{5})\b/);
+    if (pc) {
+      const c = pc[1];
+      if (c.startsWith("14")) return "BM/SA";
+      if (c.startsWith("13")) return "BW/PR/SJ";
+      if (c.startsWith("11")) return "PG Island";
+      if (c.startsWith("10")) return "GT/PG";
+      if (c.startsWith("08") || c.startsWith("09")) return "SP/KL";
+    }
+    for (const [code, kws] of Object.entries(AREA_SYNONYMS)) {
+      if (kws.some(kw => lower.includes(kw))) return code;
+    }
+    return "Other";
+  };
+
+  // Smart Assign (DO-based): cluster the board's unassigned Delivery Orders by
+  // area, sequence each cluster by postcode (rough proximity), match a best-fit
+  // team — a PROPOSAL only, applied per group when the user confirms.
+  const buildSmartPlan = () => {
+    const dos = unassignedDos.filter(d => d.status === "failed" || d.delivery_date === date);
+    if (dos.length === 0) { toast.warning("No unassigned delivery orders to route for this date."); return; }
+    const groups = {};
+    for (const d of dos) {
+      const addr = d.delivery_address || d.sales_orders?.customer_address || "";
+      const area = extractArea(addr);
+      const seq = (addr.match(/\b(\d{5})\b/)?.[1]) || "99999";
+      (groups[area] = groups[area] || []).push({ ...d, _addr: addr, _seq: seq });
+    }
+    const plan = Object.entries(groups).map(([area, list]) => ({
+      area,
+      do_count: list.length,
+      item_count: list.reduce((s, d) => s + (d.delivery_order_items || []).filter(i => i.status !== "cancelled").length, 0),
+      dos: list.sort((a, b) => a._seq.localeCompare(b._seq)),
+    })).sort((a, b) => b.do_count - a.do_count);
+    setSmartPlan(plan);
+    setShowSuggest(true);
+  };
+
+  // Assign one proposed cluster's DOs to a team, in the proposed sequence.
+  const assignDoGroup = async (group, teamId) => {
+    if (!teamId) { alert("Create or pick a team first"); return; }
     try {
-      await withLoading("Analyzing unassigned orders…", async () => {
-        const res = await af(`${API}/scheduling-suggest?company_id=${companyId}&date=${date}`);
-        const d = await res.json();
-        setSuggestions(d);
-        setShowSuggest(true);
+      await withLoading(`Assigning ${group.dos.length} delivery order(s)…`, async () => {
+        const team = teams.find(t => String(t.id) === String(teamId));
+        let sort = (team?.schedules?.length || 0) + 1;
+        for (const d of group.dos) {
+          const data = await postWithBlockRetry(`${API}/delivery-schedules`, { delivery_order_id: d.id, team_id: teamId, scheduled_date: date, sort_order: sort++ });
+          if (data.error && !data.cancelled) { toast.error(data.error); break; }
+        }
+        loadData();
       });
-    } catch (e) { toast.error("Failed to load suggestions: " + e.message); }
+      setSmartPlan(prev => (prev || []).filter(g => g.area !== group.area));
+    } catch (e) { toast.error("Failed to assign: " + e.message); }
   };
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
@@ -1663,7 +1709,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           )}
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
           <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
-          {!readOnly && <button onClick={loadSuggestions} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
+          {!readOnly && <button onClick={buildSmartPlan} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
           {!readOnly && <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>}
@@ -1735,62 +1781,54 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         </div>
       )}
 
-      {/* Smart Assign Modal */}
-      {showSuggest && suggestions && (
+      {/* Smart Assign Modal — proposed routing of unassigned Delivery Orders */}
+      {showSuggest && smartPlan && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-8 px-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mb-8">
             <div className="flex items-center justify-between px-6 py-4 border-b">
               <div>
                 <h3 className="font-bold text-gray-900">🧠 Smart Assign — {date}</h3>
-                <p className="text-xs text-gray-500">{suggestions.unassigned_count} unassigned orders grouped by area</p>
+                <p className="text-xs text-gray-500">{smartPlan.reduce((s, g) => s + g.do_count, 0)} unassigned delivery orders, clustered by area and routed by postcode. Review, then confirm each cluster.</p>
               </div>
               <button onClick={() => setShowSuggest(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
             </div>
             <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
-              {suggestions.unassigned_count === 0 && <p className="text-center text-gray-400 py-8">All orders already assigned!</p>}
-              {(suggestions.suggestions || []).map(sg => (
-                <div key={sg.area} className="rounded-xl border border-gray-200 overflow-hidden">
+              {smartPlan.length === 0 && <p className="text-center text-gray-400 py-8">All delivery orders are assigned. 🎉</p>}
+              {smartPlan.map(g => (
+                <div key={g.area} className="rounded-xl border border-gray-200 overflow-hidden">
                   <div className="bg-violet-50 px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-violet-700">📍 {sg.area}</span>
-                      <span className="text-xs text-gray-500">{sg.order_count} orders · {sg.item_count} items</span>
-                      {bestTeamFor(sg.area) && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">auto-matched</span>}
+                      <span className="text-sm font-bold text-violet-700">📍 {g.area}</span>
+                      <span className="text-xs text-gray-500">{g.do_count} DO{g.do_count !== 1 ? "s" : ""} · {g.item_count} items</span>
+                      {bestTeamFor(g.area) && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">auto-matched</span>}
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <select value={chosenTeamFor(sg.area)} onChange={e => setAssignTeam(p => ({ ...p, [sg.area]: e.target.value }))}
+                      <select value={chosenTeamFor(g.area)} onChange={e => setAssignTeam(p => ({ ...p, [g.area]: e.target.value }))}
                         className="text-xs border rounded px-1.5 py-1 text-gray-700 bg-white max-w-[180px]">
                         {assignableTeams.length === 0 && <option value="">No team available</option>}
                         {assignableTeams.map(t => <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name}{t.area ? ` · ${t.area}` : ""}</option>)}
                       </select>
-                      <button onClick={async () => {
-                        const teamId = chosenTeamFor(sg.area);
-                        if (!teamId) { alert("Create a team first"); return; }
-                        try {
-                          await withLoading(`Assigning ${sg.orders.length} order(s)…`, async () => {
-                            const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
-                            for (const o of sg.orders) {
-                              await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
-                            }
-                            loadData();
-                          });
-                          loadSuggestions();
-                        } catch (e) { toast.error("Failed to assign: " + e.message); }
-                      }} className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 whitespace-nowrap">Assign All</button>
+                      <button onClick={() => assignDoGroup(g, chosenTeamFor(g.area))}
+                        className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 whitespace-nowrap">Confirm &amp; assign</button>
                     </div>
                   </div>
                   <div className="divide-y divide-gray-50">
-                    {sg.orders.map(o => (
-                      <div key={o.id} className="px-4 py-2 flex items-center justify-between">
-                        <div>
-                          <span className="text-xs font-bold text-gray-800">{o.so_number}</span>
-                          <span className="text-xs text-gray-600 ml-2">{o.customer_name}</span>
-                          {o.order_amount != null && <span className="text-xs text-gray-500 font-semibold ml-2">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-                          {o.time_slot && <span className="text-xs text-violet-600 ml-2">{o.time_slot}</span>}
-                          {o._has_balance && <span className="text-xs text-red-500 ml-2">Bal RM {o.balance}</span>}
+                    {g.dos.map((d, i) => {
+                      const so = d.sales_orders || {};
+                      const n = (d.delivery_order_items || []).filter(it => it.status !== "cancelled").length;
+                      return (
+                        <div key={d.id} className="px-4 py-2 flex items-center justify-between">
+                          <div className="min-w-0">
+                            <span className="text-xs text-gray-400 mr-1">{i + 1}.</span>
+                            <span className="text-xs font-bold text-violet-700">{d.do_number}</span>
+                            <span className="text-xs text-gray-400 ml-1">{so.order_number}</span>
+                            <span className="text-xs text-gray-600 ml-2">{so.customer_name}</span>
+                            <div className="text-[11px] text-gray-400 truncate">{d._addr}</div>
+                          </div>
+                          <span className="text-xs text-gray-400 whitespace-nowrap ml-2">{n} item{n !== 1 ? "s" : ""}</span>
                         </div>
-                        <span className="text-xs text-gray-400">{o._item_count} items</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
