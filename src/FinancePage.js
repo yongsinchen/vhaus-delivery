@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
+import { printOfficialReceipt } from "./officialReceipt";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -52,6 +53,42 @@ function FinancePage() {
   }, [companyId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Company header + logo for the Official Receipt reprint.
+  const [company, setCompany] = useState({});
+  useEffect(() => {
+    if (!companyId) return;
+    af(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
+      if (d.settings) setCompany({
+        name: d.settings.company_name || "", reg: d.settings.registration_no || "",
+        address: d.settings.address || "", hotline: d.settings.hotline || "",
+        email: d.settings.email || "", website: d.settings.website || "",
+        logo: d.settings.logo_url || "",
+      });
+    }).catch(() => {});
+  }, [companyId]);
+
+  // Reprint the Official Receipt for a payment or an order-upfront deposit.
+  const printReceipt = (p) => {
+    if (!p) return;
+    const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
+    const kindLabel = (p._deposit || p.kind === "deposit") ? "Deposit" : (p.kind === "balance" ? "Balance" : "");
+    const row = {
+      so_number: p.so_number || "",
+      date: dmy(p.paid_at),
+      payment_method: p.payment_method || (p._deposit ? "Deposit" : ""),
+      amount: null,
+      paid: Number(p.amount) || 0,
+      balance: null,
+    };
+    printOfficialReceipt({
+      company,
+      receiptNo: p.or_number != null ? String(p.or_number) : "",
+      customer: { name: p.customer_name || "", phone: p.customer_contact || "" },
+      date: dmy(p.paid_at) || new Date().toLocaleDateString("en-MY"),
+      rows: [row], totalReceived: Number(p.amount) || 0, creditBalance: 0, kindLabel,
+    });
+  };
 
   // Master-only: delete a recorded payment. The server reverses every effect —
   // restores the order balance, rolls back the sales-order paid total, and
@@ -563,6 +600,10 @@ function FinancePage() {
                   })()}
                 </div>
               )}
+            </div>
+            <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-100">
+              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : "No OR number"}</span>
+              <button onClick={() => printReceipt(detailTxn)} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium">🧾 Print Official Receipt</button>
             </div>
           </div>
         </div>
