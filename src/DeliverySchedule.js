@@ -1334,6 +1334,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
   const [readiness, setReadiness] = useState(null);
   const [suggestions, setSuggestions] = useState(null);
+  const [assignTeam, setAssignTeam] = useState({}); // Smart Assign: area -> chosen team id (override)
   const [showReadiness, setShowReadiness] = useState(false);
   const [showSuggest, setShowSuggest] = useState(false);
 
@@ -1454,6 +1455,38 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
 
   const activeVehicles = vehicles.filter(v => v.status === "Active");
+
+  // ── Smart Assign: match an area group to the best-fit team ──────────────
+  // Teams a group can be assigned to (not locked/out for delivery).
+  const assignableTeams = teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; });
+  // Area code → its address keywords, so a group tagged "BM" matches a team
+  // whose area is "Bukit Mertajam". Mirrors the backend's area extraction.
+  const AREA_SYNONYMS = {
+    BM: ["bukit mertajam", "alma", "bm"], SA: ["simpang ampat", "eco meadows", "sa"], SJ: ["seberang jaya", "sj"],
+    BW: ["butterworth", "bw"], PR: ["perai", "pr"], PG: ["penang", "pg"], GT: ["georgetown", "gurney", "gt"],
+    BK: ["batu kawan", "bandar cassia", "ideal venice", "bk"], NT: ["nibong tebal", "nt"], JW: ["jawi", "jw"],
+    SP: ["sungai petani", "sp"], KL: ["kulim", "kl"], BL: ["bayan lepas", "bl"], JL: ["jelutong", "jl"],
+    AI: ["air itam", "ai"], TB: ["tanjung bungah", "tb"], PT: ["pulau tikus", "pt"],
+  };
+  const areaTokens = (a) => {
+    const low = (a || "").toLowerCase().trim();
+    const set = new Set(low.split(/[^a-z0-9]+/).filter(Boolean));
+    if (low) set.add(low);
+    for (const tok of [...set]) { const syn = AREA_SYNONYMS[tok.toUpperCase()]; if (syn) syn.forEach(k => set.add(k)); }
+    return set;
+  };
+  const bestTeamFor = (groupArea) => {
+    const gset = areaTokens(groupArea);
+    let best = null, score = 0;
+    for (const t of assignableTeams) {
+      const tset = areaTokens(t.area);
+      let s = 0;
+      for (const g of gset) for (const tt of tset) { if (g === tt) s += 3; else if (tt.includes(g) || g.includes(tt)) s += 1; }
+      if (s > score) { score = s; best = t; }
+    }
+    return best; // null when nothing matches → caller falls back to the first team
+  };
+  const chosenTeamFor = (groupArea) => assignTeam[groupArea] || bestTeamFor(groupArea)?.id || assignableTeams[0]?.id || "";
 
   // Combined unassigned list: regular orders + service orders + trips + DOs.
   // Orders whose SO has active Delivery Orders are removed from the
@@ -1717,26 +1750,33 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               {suggestions.unassigned_count === 0 && <p className="text-center text-gray-400 py-8">All orders already assigned!</p>}
               {(suggestions.suggestions || []).map(sg => (
                 <div key={sg.area} className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="bg-violet-50 px-4 py-2 flex items-center justify-between">
+                  <div className="bg-violet-50 px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-violet-700">📍 {sg.area}</span>
                       <span className="text-xs text-gray-500">{sg.order_count} orders · {sg.item_count} items</span>
+                      {bestTeamFor(sg.area) && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-medium">auto-matched</span>}
                     </div>
-                    <button onClick={async () => {
-                      if (teams.length === 0) { alert("Create a team first"); return; }
-                      const teamId = teams[0]?.id;
-                      if (!teamId) return;
-                      try {
-                        await withLoading(`Assigning ${sg.orders.length} order(s)…`, async () => {
-                          const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
-                          for (const o of sg.orders) {
-                            await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
-                          }
-                          loadData();
-                        });
-                        loadSuggestions();
-                      } catch (e) { toast.error("Failed to assign: " + e.message); }
-                    }} className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Assign All to First Team</button>
+                    <div className="flex items-center gap-1.5">
+                      <select value={chosenTeamFor(sg.area)} onChange={e => setAssignTeam(p => ({ ...p, [sg.area]: e.target.value }))}
+                        className="text-xs border rounded px-1.5 py-1 text-gray-700 bg-white max-w-[180px]">
+                        {assignableTeams.length === 0 && <option value="">No team available</option>}
+                        {assignableTeams.map(t => <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name}{t.area ? ` · ${t.area}` : ""}</option>)}
+                      </select>
+                      <button onClick={async () => {
+                        const teamId = chosenTeamFor(sg.area);
+                        if (!teamId) { alert("Create a team first"); return; }
+                        try {
+                          await withLoading(`Assigning ${sg.orders.length} order(s)…`, async () => {
+                            const headers = { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` };
+                            for (const o of sg.orders) {
+                              await fetch(`${API}/delivery-schedules`, { method: "POST", headers, body: JSON.stringify({ order_id: o.id, team_id: teamId, scheduled_date: date, area: sg.area, sort_order: 0 }) });
+                            }
+                            loadData();
+                          });
+                          loadSuggestions();
+                        } catch (e) { toast.error("Failed to assign: " + e.message); }
+                      }} className="text-xs px-3 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 whitespace-nowrap">Assign All</button>
+                    </div>
                   </div>
                   <div className="divide-y divide-gray-50">
                     {sg.orders.map(o => (
