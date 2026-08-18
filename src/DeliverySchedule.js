@@ -100,28 +100,70 @@ function printDeliveryOrder(o, company = {}) {
   w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
 }
 
-// Export one Delivery Order as an Excel file. Uses an HTML table saved with an
-// .xls extension + Excel MIME — Excel opens it natively, no library needed.
-function exportDeliveryOrderExcel(o, company = {}) {
+// Fetch an image URL as a base64 data URI so it embeds in the Excel/HTML file
+// (external URLs are not reliably loaded by Excel). Best-effort — null on fail.
+async function toDataUrl(url) {
+  if (!url) return null;
+  try {
+    const blob = await (await fetch(url)).blob();
+    return await new Promise(resolve => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => resolve(null);
+      fr.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
+
+// Export one Delivery Order as an Excel file that mirrors the printed PDF —
+// company logo + info header, DO/customer details, item table, signature
+// footer. Uses an HTML table saved with an .xls extension + Excel MIME, so
+// Excel opens it natively with no library. The logo is embedded as a data URI.
+async function exportDeliveryOrderExcel(o, company = {}) {
   const so = o.sales_orders || {};
   const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
-  const rows = items.map((it, i) => `<tr>
-      <td>${i + 1}</td><td>${esc(it.product_code || "")}</td><td>${esc(it.product_name || "")}</td>
-      <td>${esc([it.size, it.color].filter(Boolean).join(" · "))}</td><td>${Number(it.quantity) || 1}</td>
-    </tr>`).join("");
-  const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
-    <table border="1">
-      <tr><td colspan="5"><b>${esc(company.name || "")}</b></td></tr>
-      <tr><td colspan="5">DELIVERY ORDER</td></tr>
-      <tr><td>DO#</td><td>${esc(o.do_number || "")}</td><td></td><td>SO#</td><td>${esc(so.order_number || "")}</td></tr>
-      <tr><td>Customer</td><td colspan="4">${esc(so.customer_name || "")}</td></tr>
-      <tr><td>Address</td><td colspan="4">${esc(o.delivery_address || so.customer_address || "")}</td></tr>
-      <tr><td>Contact</td><td>${esc(so.customer_contact || "")}</td><td></td><td>Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
-      <tr><td>Delivery date</td><td>${esc(o.delivery_date || "")}</td><td></td><td>Status</td><td>${esc(o.status || "")}</td></tr>
-      <tr></tr>
-      <tr><th>No</th><th>Code</th><th>Description</th><th>Spec</th><th>Qty</th></tr>
+  const logo = await toDataUrl(company.logo);
+  const rows = items.map((it, i) => {
+    const spec = [it.size, it.color].filter(Boolean).join(" · ");
+    return `<tr>
+      <td class="b" style="text-align:center">${i + 1}</td>
+      <td class="b">${esc(it.product_code || "")}</td>
+      <td class="b">${esc(it.product_name || "")}${spec ? ` — ${esc(spec)}` : ""}</td>
+      <td class="b" style="text-align:center">${Number(it.quantity) || 1}</td>
+    </tr>`;
+  }).join("");
+  const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">
+  <style>
+    table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 11pt; }
+    td, th { padding: 4px 8px; }
+    .b { border: 1px solid #000; }
+    .title { font-size: 16pt; font-weight: bold; text-align: center; background: #f2f2f2; letter-spacing: 2px; }
+    .lbl { font-weight: bold; }
+    th.b { background: #f2f2f2; }
+  </style></head><body>
+    <table>
+      <tr>
+        <td colspan="2" style="vertical-align:top">
+          ${logo ? `<img src="${logo}" height="52"><br>` : ""}
+          <span style="font-size:13pt;font-weight:bold">${esc(company.name || "")}</span><br>
+          ${esc(company.address || "")}<br>
+          ${company.hotline ? "Tel: " + esc(company.hotline) : ""}
+        </td>
+        <td colspan="2" style="text-align:right;vertical-align:top;font-weight:bold">DO#: ${esc(o.do_number || "")}</td>
+      </tr>
+      <tr><td colspan="4" class="title">DELIVERY ORDER</td></tr>
+      <tr><td class="lbl">Customer</td><td>${esc(so.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(so.order_number || "")}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(o.delivery_address || so.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(o.delivery_date || "")}</td></tr>
+      <tr><td class="lbl">Contact</td><td>${esc(so.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
+      <tr><td colspan="4"></td></tr>
+      <tr><th class="b" style="width:40px">NO</th><th class="b">CODE</th><th class="b">DESCRIPTION</th><th class="b" style="width:50px">QTY</th></tr>
       ${rows}
-    </table></body></html>`;
+      <tr><td colspan="4"></td></tr>
+      <tr><td class="lbl">Remarks</td><td colspan="3">${esc(o.remark || "")}</td></tr>
+      <tr><td colspan="4"></td></tr>
+      <tr><td colspan="2">Received By (Customer)</td><td colspan="2">Delivered By</td></tr>
+    </table>
+  </body></html>`;
   const blob = new Blob(["﻿", html], { type: "application/vnd.ms-excel" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
