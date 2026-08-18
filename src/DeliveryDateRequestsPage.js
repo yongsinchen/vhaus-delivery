@@ -131,6 +131,26 @@ function DeliveryDateRequestsPage() {
 
   const Badge = ({ s }) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS[s]?.cls || "bg-gray-100 text-gray-500"}`}>{STATUS[s]?.label || s}</span>;
 
+  // How busy the requested day already is, so the approver can judge the date
+  // in place. Green (open) / amber (filling) / red (busy) against the company's
+  // busy-day threshold; a blocked date shows its reason.
+  const Availability = ({ load }) => {
+    if (!load) return null;
+    if (load.blocked_reason) {
+      return <p className="text-xs mt-1 inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 text-red-700 font-medium">⛔ Date blocked{load.blocked_reason ? ` — ${load.blocked_reason}` : ""}</p>;
+    }
+    const t = load.total, thr = load.busy_threshold || 8;
+    const level = t >= thr ? "busy" : t >= Math.ceil(thr / 2) ? "filling" : "open";
+    const cls = { busy: "bg-red-50 text-red-700", filling: "bg-amber-50 text-amber-700", open: "bg-emerald-50 text-emerald-700" }[level];
+    const dot = { busy: "🔴", filling: "🟡", open: "🟢" }[level];
+    const word = { busy: "Busy", filling: "Filling up", open: "Open" }[level];
+    return (
+      <p className={`text-xs mt-1 inline-flex items-center gap-1.5 px-2 py-1 rounded-lg font-medium ${cls}`}>
+        {dot} {word} · {t} booked{load.unassigned > 0 ? ` · ${load.unassigned} unassigned` : ""}{load.teams > 0 ? ` · ${load.teams} team${load.teams === 1 ? "" : "s"}` : ""}
+      </p>
+    );
+  };
+
   const Card = ({ r }) => (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -146,9 +166,7 @@ function DeliveryDateRequestsPage() {
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
           <p className="text-sm mt-1"><span className="text-gray-400">Requested date:</span> <b className="text-gray-900">{fmt(r.requested_date)}</b></p>
-          <p className="text-sm mt-0.5"><span className="text-gray-400">Currently scheduled:</span> {r.current_delivery_date && r.current_delivery_date !== "TBC"
-            ? <b className="text-gray-900">{fmt(r.current_delivery_date)}</b>
-            : <span className="text-gray-400">{r.current_delivery_date === "TBC" ? "TBC" : "not scheduled"}</span>}</p>
+          <Availability load={r.requested_date_load} />
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
         </div>
