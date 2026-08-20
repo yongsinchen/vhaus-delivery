@@ -21,7 +21,8 @@ export const roleLabel = r => ({
   director: "Director", manager: "Manager",
   sales_manager: "Sales Manager", operation_manager: "Operation Manager",
   company_admin: "Company Admin",
-  salesman: "Salesman", part_time: "Part-time", finance: "Finance",
+  salesman: "Salesman", part_time: "Part-time",
+  short_term_part_time: "Short-Term Part-time", finance: "Finance",
   warehouse: "Warehouse", operation: "Warehouse",
   driver: "Driver", viewer: "Viewer",
 }[r] || r);
@@ -36,7 +37,10 @@ export const can = (user, action) => {
   // (fulfilment side). Legacy "manager" keeps full access on both sides.
   const salesSide = ["master", "manager", "sales_manager"];       // orders / commission / payments / services
   const opsSide   = ["master", "manager", "operation_manager"];   // deliveries / warehouse / catalogue / DO review
-  const orderCapable = [...salesSide, "company_admin", "salesman"];
+  // short_term_part_time can CREATE/EDIT orders (like a salesman) but nothing
+  // else — no payment recording, no delete, no other tabs. It is intentionally
+  // NOT aliased to salesman above; App.js narrows its nav to Orders + Commission.
+  const orderCapable = [...salesSide, "company_admin", "salesman", "short_term_part_time"];
 
   const rules = {
     // Tab visibility
@@ -77,7 +81,7 @@ export const can = (user, action) => {
 export const canSeeOrder = (user, order) => {
   if (!user) return false;
   if (["master","manager","company_admin","finance"].includes(user.role)) return true;
-  if (user.role === "salesman" || user.role === "part_time") {
+  if (["salesman", "part_time", "short_term_part_time"].includes(user.role)) {
     const salesmen = (order.salesman || order.salesman_name || "")
       .split("/").map(s => s.trim().toLowerCase());
     return salesmen.includes((user.salesman_name || "").toLowerCase());
