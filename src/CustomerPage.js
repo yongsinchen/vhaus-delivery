@@ -18,7 +18,9 @@ function CustomerPage() {
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
   const [tab, setTab] = useState(0); // 0=customers, 1=aging
-  const TABS = ["Customers", "Aging Report"];
+  // Branch Operation Admin collects payment but must not see the aging report.
+  const hideAging = (user?.base_role || user?.role) === "branch_operation_admin";
+  const TABS = hideAging ? ["Customers"] : ["Customers", "Aging Report"];
 
   // Company header + logo for the Official Receipt.
   const [company, setCompany] = useState({});
