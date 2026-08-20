@@ -90,6 +90,22 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
         </div>
         <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+          {!loading && openItems.length > 0 && (() => {
+            // Tick-all covers items that can actually be picked (arrived, or
+            // arrival overridden). Toggles between selecting all and clearing.
+            const selectable = openItems.filter(it => it.arrived || override);
+            const allPicked = selectable.length > 0 && selectable.every(it => Number(pick[it.sales_order_item_id]) > 0);
+            return (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-400">{selectable.length} of {openItems.length} item{openItems.length !== 1 ? "s" : ""} selectable</span>
+                <button type="button" disabled={selectable.length === 0}
+                  onClick={() => setPick(p => { const next = { ...p }; selectable.forEach(it => { next[it.sales_order_item_id] = allPicked ? "" : String(it.remaining_qty); }); return next; })}
+                  className="text-xs font-medium text-violet-700 hover:text-violet-900 disabled:text-gray-300">
+                  {allPicked ? "Clear all" : "✓ Tick all"}
+                </button>
+              </div>
+            );
+          })()}
           {loading ? (
             <p className="text-sm text-gray-400 py-6 text-center">Loading items…</p>
           ) : openItems.length === 0 ? (
