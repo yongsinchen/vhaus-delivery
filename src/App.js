@@ -21,6 +21,7 @@ const ServicePage = lazy(() => import("./ServicePage"));
 const CustomerPage = lazy(() => import("./CustomerPage"));
 const FinancePage = lazy(() => import("./FinancePage"));
 const CommissionPage = lazy(() => import("./CommissionPage"));
+const PerformancePage = lazy(() => import("./PerformancePage"));
 const UserPermissionsPage = lazy(() => import("./UserPermissionsPage"));
 const OutstandingBalancePage = lazy(() => import("./OutstandingBalancePage"));
 const SupplierDOPage = lazy(() => import("./SupplierDOPage"));
@@ -186,6 +187,7 @@ const NAV = [
   { id: "customers",  label: "Customers",        icon: "👥", canKey: null, manageOnly: false },
   { id: "finance",    label: "Finance",          icon: "💰", canKey: null, manageOnly: true },
   { id: "commission", label: "Commission",       icon: "📊", canKey: null, manageOnly: true },
+  { id: "performance", label: "Performance",     icon: "📈", canKey: null },
   { id: "suppliers",  label: "Suppliers",        icon: "🏷", canKey: null, manageOnly: true },
   { id: "organization", label: "Organization",   icon: "🏢", canKey: "manageCompanies" },
   { id: "team",       label: "Team",             icon: "◉",  canKey: "manageUsers" },
@@ -1440,6 +1442,7 @@ export default function App() {
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation","operation_manager"].includes(effectiveRole);
     // Commission + Finance: revenue-side managers, salesman, and Finance —
     // Company Admin no longer sees either.
+    if (n.id === "performance") return ["master","manager","company_admin","branch_manager"].includes(effectiveRole);
     if (n.id === "commission") return ["master","manager","sales_manager","salesman","finance"].includes(effectiveRole);
     if (n.id === "finance") return ["master","manager","sales_manager","finance"].includes(effectiveRole);
     // Catalogue / warehouse / operations config — Company Admin + Operation Manager.
@@ -1913,6 +1916,7 @@ export default function App() {
 
     // COMMISSION
     if (page === "commission") return <CommissionPage />;
+    if (page === "performance") return <PerformancePage />;
 
     // SUPPLIERS
     if (page === "suppliers") return <SuppliersPage />;
