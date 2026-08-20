@@ -37,6 +37,20 @@ function ServicePage() {
   const [convertModal, setConvertModal] = useState(null);
   const [convertRemark, setConvertRemark] = useState("");
 
+  // Edit form for an existing case's header (null = not editing).
+  const [editForm, setEditForm] = useState(null);
+  const saveEdit = async () => {
+    if (!editForm) return;
+    await updateService(editForm.id, {
+      service_type: Number(editForm.service_type),
+      customer_name: editForm.customer_name || null,
+      customer_phone: editForm.customer_phone || null,
+      customer_address: editForm.customer_address || null,
+      description: editForm.description || null,
+    });
+    setEditForm(null);
+  };
+
   // Create form
   const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" });
   const [orderSearch, setOrderSearch] = useState("");
@@ -516,9 +530,41 @@ function ServicePage() {
                       className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
                       {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
+                    <button onClick={() => setEditForm({ id: detail.service.id, service_type: detail.service.service_type || 1, customer_name: detail.service.customer_name || detail.order?.customer_name || "", customer_phone: detail.service.customer_phone || "", customer_address: detail.service.customer_address || "", description: detail.service.description || "" })}
+                      className="ml-auto text-xs px-3 py-1 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50">✏️ Edit</button>
                     <button onClick={() => deleteService(detail.service.id)}
-                      className="ml-auto text-xs px-3 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Delete</button>
+                      className="text-xs px-3 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Delete</button>
                   </div>
+
+                  {/* Edit header form */}
+                  {editForm && editForm.id === detail.service?.id && (
+                    <div className="border border-violet-200 bg-violet-50/40 rounded-xl p-3 space-y-2.5">
+                      <p className="text-xs font-bold text-violet-700">EDIT SERVICE</p>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-500 mb-1">Type</label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {Object.entries(SERVICE_TYPES).map(([k, v]) => (
+                            <button key={k} type="button" onClick={() => setEditForm(f => ({ ...f, service_type: Number(k) }))}
+                              className={`py-1.5 rounded-lg text-[11px] font-medium border ${Number(editForm.service_type) === Number(k) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-700 border-gray-200"}`}>{v}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Customer name</label>
+                          <input value={editForm.customer_name} onChange={e => setEditForm(f => ({ ...f, customer_name: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                        <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Phone</label>
+                          <input value={editForm.customer_phone} onChange={e => setEditForm(f => ({ ...f, customer_phone: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                      </div>
+                      <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Address</label>
+                        <input value={editForm.customer_address} onChange={e => setEditForm(f => ({ ...f, customer_address: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                      <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Description</label>
+                        <textarea rows={2} value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                      <div className="flex items-center gap-2 justify-end">
+                        <button onClick={() => setEditForm(null)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
+                        <button onClick={saveEdit} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-medium">Save</button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Dates: creation + schedule */}
                   <div className="grid grid-cols-2 gap-3">
