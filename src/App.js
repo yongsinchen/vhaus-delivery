@@ -1998,8 +1998,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Delivery assistant chat — same roles the backend accepts (ORDER_ROLES) */}
-        {["master", "manager", "company_admin", "salesman"].includes(user?.role) && (
+        {/* Delivery assistant chat — order-capable roles plus Branch Operation Admin */}
+        {["master", "manager", "company_admin", "salesman", "branch_operation_admin"].includes(user?.role) && (
           <Suspense fallback={null}><AssistantChat /></Suspense>
         )}
 
