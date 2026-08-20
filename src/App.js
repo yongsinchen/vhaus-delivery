@@ -1442,7 +1442,7 @@ export default function App() {
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation","operation_manager"].includes(effectiveRole);
     // Commission + Finance: revenue-side managers, salesman, and Finance —
     // Company Admin no longer sees either.
-    if (n.id === "performance") return ["master","manager","company_admin","branch_manager"].includes(effectiveRole);
+    if (n.id === "performance") return ["master","manager","branch_manager"].includes(effectiveRole);
     if (n.id === "commission") return ["master","manager","sales_manager","salesman","finance"].includes(effectiveRole);
     if (n.id === "finance") return ["master","manager","sales_manager","finance"].includes(effectiveRole);
     // Catalogue / warehouse / operations config — Company Admin + Operation Manager.
