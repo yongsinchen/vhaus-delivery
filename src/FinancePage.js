@@ -137,7 +137,7 @@ function FinancePage() {
 
   // Finance approval of collected payments. The backend authorizes; the UI
   // shows the buttons to roles that can decide.
-  const canApprove = ["master", "manager", "company_admin", "finance"].includes(user?.role);
+  const canApprove = ["master", "finance"].includes(user?.role);
   const [decidingId, setDecidingId] = useState(null);
   const decidePayment = async (p, action) => {
     if (!p?.id || decidingId) return;
