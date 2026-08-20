@@ -31,6 +31,7 @@ function FinancePage() {
   const [methodFilter, setMethodFilter] = useState(""); // Payments tab: filter by payment method
   const [typeFilter, setTypeFilter] = useState("");     // Payments tab: filter by type (Deposit / Balance)
   const [refFilter, setRefFilter] = useState("");       // Payments tab: filter by approval code (reference_no)
+  const [apprFilter, setApprFilter] = useState("");     // Payments tab: filter by approval state
 
   // Reconciliation
   const [uploads, setUploads] = useState([]);
@@ -134,6 +135,26 @@ function FinancePage() {
     }
   };
 
+  // Finance approval of collected payments. The backend authorizes; the UI
+  // shows the buttons to roles that can decide.
+  const canApprove = ["master", "manager", "company_admin", "finance"].includes(user?.role);
+  const [decidingId, setDecidingId] = useState(null);
+  const decidePayment = async (p, action) => {
+    if (!p?.id || decidingId) return;
+    let note = null;
+    if (action === "reject") { note = window.prompt("Reason for rejecting this payment:") ?? null; if (note === null) return; }
+    setDecidingId(p.id);
+    try {
+      const res = await af(`${API}/payments/${p.id}/${action}`, { method: "PATCH", body: JSON.stringify({ note }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Failed");
+      toast.success(action === "approve" ? `Approved · OR #${d.payment?.or_number ?? "—"}` : "Payment rejected");
+      setDetailTxn(null);
+      await loadData();
+    } catch (err) { toast.error(err.message || "Failed"); }
+    finally { setDecidingId(null); }
+  };
+
   const loadUploads = useCallback(async () => {
     if (!companyId) return;
     const res = await af(`${API}/statements?company_id=${companyId}`);
@@ -199,7 +220,12 @@ function FinancePage() {
     return d >= dateFrom && d <= dateTo;
   });
 
-  const totalCollected = filteredPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  // Money totals count only APPROVED payments — pending (awaiting Finance) and
+  // rejected money is never "collected". The transaction table still lists all
+  // statuses (with badges) so Finance can see and act on pending ones.
+  const apprState = p => p.approval_status || "approved"; // legacy/deposit lines = approved
+  const approvedPayments = filteredPayments.filter(p => apprState(p) === "approved");
+  const totalCollected = approvedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   // Payment TYPE (deposit vs balance) is separate from the payment METHOD
   // (cash / card / …). "Deposit" is a type, not a method, so it never appears
   // in the method dropdown.
@@ -209,18 +235,21 @@ function FinancePage() {
   // Payments tab: method dropdown options (real methods only — "Deposit" is a type).
   const paymentMethods = [...new Set(payments.map(p => p.payment_method || "Cash").filter(m => m && m !== "Deposit"))].sort();
   const rf = refFilter.trim().toLowerCase();
+  const apprOf = apprState;
+  const pendingCount = filteredPayments.filter(p => apprOf(p) === "pending").length;
   const methodRows = filteredPayments.filter(p =>
     (!methodFilter || (p.payment_method || "Cash") === methodFilter) &&
     (!typeFilter || txnType(p) === typeFilter) &&
+    (!apprFilter || apprOf(p) === apprFilter) &&
     (!rf || String(p.reference_no || "").toLowerCase().includes(rf))
   );
   const methodTotal = methodRows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const byMethod = {};
-  filteredPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
+  approvedPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
 
-  // Daily collection summary
+  // Daily collection summary (approved money only)
   const byDate = {};
-  filteredPayments.forEach(p => { const d = (p.paid_at || "").slice(0, 10); if (!byDate[d]) byDate[d] = { total: 0, count: 0 }; byDate[d].total += Number(p.amount) || 0; byDate[d].count++; });
+  approvedPayments.forEach(p => { const d = (p.paid_at || "").slice(0, 10); if (!byDate[d]) byDate[d] = { total: 0, count: 0 }; byDate[d].total += Number(p.amount) || 0; byDate[d].count++; });
   const dailySorted = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0]));
 
   const printAging = () => {
@@ -352,7 +381,13 @@ function FinancePage() {
               {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <input value={refFilter} onChange={e => setRefFilter(e.target.value)} placeholder="Approval code…" className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-40" />
-            {(methodFilter || typeFilter || refFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); setRefFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
+            <select value={apprFilter} onChange={e => setApprFilter(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+              <option value="">All statuses</option>
+              <option value="pending">Pending{pendingCount > 0 ? ` (${pendingCount})` : ""}</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            {(methodFilter || typeFilter || refFilter || apprFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); setRefFilter(""); setApprFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
             <span className="text-xs text-gray-500">{methodRows.length} transaction{methodRows.length !== 1 ? "s" : ""} · {money(methodTotal)}</span>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -367,6 +402,8 @@ function FinancePage() {
                     <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
                     <td className="px-4 py-2">
                       {(() => { const t = txnType(p); return t === "Other" ? <span className="text-xs text-gray-400">Payment</span> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t === "Deposit" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>{t}</span>; })()}
+                      {apprOf(p) === "pending" && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">Pending</span>}
+                      {apprOf(p) === "rejected" && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">Rejected</span>}
                     </td>
                     <td className="px-4 py-2">
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method && p.payment_method !== "Deposit" ? p.payment_method : "—"}</span>
@@ -605,9 +642,19 @@ function FinancePage() {
                 </div>
               )}
             </div>
+            {/* Approval decision — pending payments await Finance sign-off. */}
+            {detailTxn.id && apprOf(detailTxn) === "pending" && canApprove && (
+              <div className="flex items-center gap-2 px-5 py-3 border-t border-gray-100 bg-amber-50">
+                <span className="text-xs text-amber-700 font-medium flex-1">This payment is pending your approval.</span>
+                <button disabled={decidingId === detailTxn.id} onClick={() => decidePayment(detailTxn, "reject")} className="px-3 py-1.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium disabled:opacity-50">Reject</button>
+                <button disabled={decidingId === detailTxn.id} onClick={() => decidePayment(detailTxn, "approve")} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-50">{decidingId === detailTxn.id ? "…" : "Approve"}</button>
+              </div>
+            )}
+            {detailTxn.approval_note && <div className="px-5 pt-2 text-xs text-gray-500">Note: {detailTxn.approval_note}</div>}
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-100">
-              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : "No OR number"}</span>
-              <button onClick={() => printReceipt(detailTxn)} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium">🧾 Print Official Receipt</button>
+              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : (apprOf(detailTxn) === "pending" ? "OR issued on approval" : "No OR number")}</span>
+              {apprOf(detailTxn) !== "pending" && apprOf(detailTxn) !== "rejected" &&
+                <button onClick={() => printReceipt(detailTxn)} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium">🧾 Print Official Receipt</button>}
             </div>
           </div>
         </div>

@@ -163,20 +163,6 @@ function CustomerPage() {
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
     if ((payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && !payRef.trim()) { toast.warning("Please enter the approval code"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
-    // Snapshot the receipt data now, before the modal state is cleared.
-    const receiptCustomer = { name: payModal.customer.name, phone: payModal.customer.phone };
-    const paidAllocs = payAllocations.filter(a => Number(a.amount) > 0);
-    const todayStr = new Date().toLocaleDateString("en-MY");
-    const receiptRows = paidAllocs.map(a => {
-      const ord = (payModal.orders || []).find(o => o.id === a.order_id) || {};
-      const orderAmount = ord.order_amount != null ? Number(ord.order_amount) : null;
-      const paid = Number(a.amount) || 0;
-      const oldBal = Number(a.balance) || 0;
-      return { so_number: a.so_number, date: dmy(ord.order_date) || todayStr, payment_method: payMethod, amount: orderAmount, paid, balance: Math.max(0, oldBal - paid) };
-    });
-    const sumOldBal = paidAllocs.reduce((s, a) => s + (Number(a.balance) || 0), 0);
-    const receiptCredit = Math.max(0, total - sumOldBal);
-    const receiptKind = payKind === "deposit" ? "Deposit" : "Balance";
     paySavingRef.current = true;
     setPaySaving(true);
     try {
@@ -184,15 +170,10 @@ function CustomerPage() {
         const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
         const d = await res.json();
         if (!d.payment) throw new Error(d.error || "Failed");
-        toast.success(`${money(total)} recorded`);
+        // Payment is now PENDING Finance approval — the Official Receipt (and OR
+        // number) is generated when Finance approves, so nothing prints here.
+        toast.success(`${money(total)} recorded — sent to Finance for approval`);
         setPayModal(null); if (detail) openDetail(detail.customer);
-        // Generate the Official Receipt for this collection.
-        printOfficialReceipt({
-          company,
-          receiptNo: d.payment.or_number != null ? String(d.payment.or_number) : String(d.payment.id || "").replace(/-/g, "").slice(0, 6).toUpperCase(),
-          customer: receiptCustomer, date: todayStr, rows: receiptRows,
-          totalReceived: total, creditBalance: receiptCredit, kindLabel: receiptKind,
-        });
       });
     } catch (err) {
       toast.error(err.message || "Failed to record payment");
@@ -455,9 +436,13 @@ function CustomerPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            {p.approval_status === "pending" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending approval</span>}
+                            {p.approval_status === "rejected" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Rejected</span>}
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
-                            <button onClick={() => reprintReceipt(p)} title="Print Official Receipt"
-                              className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 Receipt</button>
+                            {p.approval_status !== "pending" && p.approval_status !== "rejected" && (
+                              <button onClick={() => reprintReceipt(p)} title="Print Official Receipt"
+                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 Receipt</button>
+                            )}
                             {p.id ? (
                               <button onClick={() => deletePayment(p)} title="Remove payment"
                                 className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>
