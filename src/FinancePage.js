@@ -89,6 +89,7 @@ function FinancePage() {
       customer: { name: p.customer_name || "", phone: p.customer_contact || "" },
       date: dmy(p.paid_at) || new Date().toLocaleDateString("en-MY"),
       rows: [row], totalReceived: Number(p.amount) || 0, creditBalance: 0, kindLabel,
+      voided: (p.approval_status || "") === "rejected",
     });
   };
 
@@ -220,12 +221,12 @@ function FinancePage() {
     return d >= dateFrom && d <= dateTo;
   });
 
-  // Money totals count only APPROVED payments — pending (awaiting Finance) and
-  // rejected money is never "collected". The transaction table still lists all
-  // statuses (with badges) so Finance can see and act on pending ones.
+  // Money counts as soon as it's recorded ("count now, verify later"); only a
+  // REJECTED payment is excluded. The table still badges Pending so Finance can
+  // see what still needs verifying.
   const apprState = p => p.approval_status || "approved"; // legacy/deposit lines = approved
-  const approvedPayments = filteredPayments.filter(p => apprState(p) === "approved");
-  const totalCollected = approvedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const countedPayments = filteredPayments.filter(p => apprState(p) !== "rejected");
+  const totalCollected = countedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   // Payment TYPE (deposit vs balance) is separate from the payment METHOD
   // (cash / card / …). "Deposit" is a type, not a method, so it never appears
   // in the method dropdown.
@@ -245,11 +246,11 @@ function FinancePage() {
   );
   const methodTotal = methodRows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const byMethod = {};
-  approvedPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
+  countedPayments.forEach(p => { const m = p.payment_method || "Other"; byMethod[m] = (byMethod[m] || 0) + (Number(p.amount) || 0); });
 
-  // Daily collection summary (approved money only)
+  // Daily collection summary (excludes rejected)
   const byDate = {};
-  approvedPayments.forEach(p => { const d = (p.paid_at || "").slice(0, 10); if (!byDate[d]) byDate[d] = { total: 0, count: 0 }; byDate[d].total += Number(p.amount) || 0; byDate[d].count++; });
+  countedPayments.forEach(p => { const d = (p.paid_at || "").slice(0, 10); if (!byDate[d]) byDate[d] = { total: 0, count: 0 }; byDate[d].total += Number(p.amount) || 0; byDate[d].count++; });
   const dailySorted = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0]));
 
   const printAging = () => {
@@ -653,8 +654,7 @@ function FinancePage() {
             {detailTxn.approval_note && <div className="px-5 pt-2 text-xs text-gray-500">Note: {detailTxn.approval_note}</div>}
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-100">
               <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : "No OR number"}</span>
-              {apprOf(detailTxn) !== "rejected" &&
-                <button onClick={() => printReceipt(detailTxn)} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium">🧾 Print Official Receipt</button>}
+              <button onClick={() => printReceipt(detailTxn)} className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${apprOf(detailTxn) === "rejected" ? "bg-gray-500 hover:bg-gray-600" : "bg-violet-600 hover:bg-violet-700"}`}>🧾 {apprOf(detailTxn) === "rejected" ? "Print VOID copy" : "Print Official Receipt"}</button>
             </div>
           </div>
         </div>

@@ -172,7 +172,7 @@ function CustomerPage() {
         if (!d.payment) throw new Error(d.error || "Failed");
         // Payment is PENDING Finance approval, but the OR is assigned at
         // collection so the salesman can print it now for the customer.
-        toast.success(`${money(total)} recorded — pending Finance approval`);
+        toast.success(`${money(total)} recorded — pending Finance verification`);
         const rows = payAllocations.filter(a => Number(a.amount) > 0).map(a => {
           const ord = (payModal.orders || []).find(o => o.id === a.order_id) || {};
           const oldBal = Number(a.balance) || 0, paid = Number(a.amount) || 0;
@@ -213,6 +213,7 @@ function CustomerPage() {
       date: dmy(p.paid_at) || new Date().toLocaleDateString("en-MY"),
       rows: [row], totalReceived: Number(p.amount) || 0, creditBalance: 0,
       kindLabel: (p._deposit || p.kind === "deposit") ? "Deposit" : (p.kind === "balance" ? "Balance" : ""),
+      voided: p.approval_status === "rejected",
     });
   };
 
@@ -451,10 +452,8 @@ function CustomerPage() {
                             {p.approval_status === "pending" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending approval</span>}
                             {p.approval_status === "rejected" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Rejected</span>}
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
-                            {p.approval_status !== "rejected" && (
-                              <button onClick={() => reprintReceipt(p)} title="Print Official Receipt"
-                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 Receipt</button>
-                            )}
+                            <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Official Receipt"}
+                              className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 {p.approval_status === "rejected" ? "Void copy" : "Receipt"}</button>
                             {p.id ? (
                               <button onClick={() => deletePayment(p)} title="Remove payment"
                                 className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>

@@ -6,7 +6,7 @@
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
-export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, date, rows = [], totalReceived, creditBalance, kindLabel }) {
+export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, date, rows = [], totalReceived, creditBalance, kindLabel, voided = false }) {
   const MIN_ROWS = 4;
   const bodyRows = rows.map(r => `<tr>
       <td>${esc(r.so_number || "")}</td>
@@ -42,6 +42,7 @@ export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, d
   .sig { text-align: center; }
   .sig .line { border-top: 0.8px solid #111; width: 190px; padding-top: 3px; margin-top: 30px; }
 </style></head><body>
+  ${voided ? `<div style="position:fixed;top:40%;left:0;right:0;text-align:center;font-size:90px;font-weight:900;color:rgba(220,38,38,.18);transform:rotate(-24deg);letter-spacing:8px;pointer-events:none;z-index:9">VOID</div>` : ""}
   <div class="head">
     ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
     <div>
