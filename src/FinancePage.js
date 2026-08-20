@@ -30,6 +30,7 @@ function FinancePage() {
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
   const [methodFilter, setMethodFilter] = useState(""); // Payments tab: filter by payment method
   const [typeFilter, setTypeFilter] = useState("");     // Payments tab: filter by type (Deposit / Balance)
+  const [refFilter, setRefFilter] = useState("");       // Payments tab: filter by approval code (reference_no)
 
   // Reconciliation
   const [uploads, setUploads] = useState([]);
@@ -207,9 +208,11 @@ function FinancePage() {
   const paymentTypes = TYPE_ORDER.filter(t => payments.some(p => txnType(p) === t));
   // Payments tab: method dropdown options (real methods only — "Deposit" is a type).
   const paymentMethods = [...new Set(payments.map(p => p.payment_method || "Cash").filter(m => m && m !== "Deposit"))].sort();
+  const rf = refFilter.trim().toLowerCase();
   const methodRows = filteredPayments.filter(p =>
     (!methodFilter || (p.payment_method || "Cash") === methodFilter) &&
-    (!typeFilter || txnType(p) === typeFilter)
+    (!typeFilter || txnType(p) === typeFilter) &&
+    (!rf || String(p.reference_no || "").toLowerCase().includes(rf))
   );
   const methodTotal = methodRows.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const byMethod = {};
@@ -348,7 +351,8 @@ function FinancePage() {
               <option value="">All methods</option>
               {paymentMethods.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
-            {(methodFilter || typeFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
+            <input value={refFilter} onChange={e => setRefFilter(e.target.value)} placeholder="Approval code…" className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-40" />
+            {(methodFilter || typeFilter || refFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); setRefFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
             <span className="text-xs text-gray-500">{methodRows.length} transaction{methodRows.length !== 1 ? "s" : ""} · {money(methodTotal)}</span>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
