@@ -22,7 +22,8 @@ export const roleLabel = r => ({
   sales_manager: "Sales Manager", operation_manager: "Operation Manager",
   company_admin: "Company Admin",
   salesman: "Salesman", part_time: "Part-time",
-  short_term_part_time: "Short-Term Part-time", finance: "Finance",
+  short_term_part_time: "Short-Term Part-time",
+  branch_operation_admin: "Branch Operation Admin", finance: "Finance",
   warehouse: "Warehouse", operation: "Warehouse",
   driver: "Driver", viewer: "Viewer",
 }[r] || r);
@@ -62,7 +63,7 @@ export const can = (user, action) => {
     addOrder:             orderCapable.includes(role),
     editOrder:            orderCapable.includes(role),
     deleteOrder:          salesSide.includes(role),
-    recordPayment:        [...salesSide, "salesman"].includes(role),
+    recordPayment:        [...salesSide, "salesman", "branch_operation_admin"].includes(role),
 
     // User management — Master only (the two new managers cannot; legacy
     // manager retained until existing managers are reassigned).
@@ -80,7 +81,7 @@ export const can = (user, action) => {
 // Can this user see this order?
 export const canSeeOrder = (user, order) => {
   if (!user) return false;
-  if (["master","manager","company_admin","finance"].includes(user.role)) return true;
+  if (["master","manager","company_admin","finance","branch_operation_admin"].includes(user.role)) return true;
   if (["salesman", "part_time", "short_term_part_time"].includes(user.role)) {
     const salesmen = (order.salesman || order.salesman_name || "")
       .split("/").map(s => s.trim().toLowerCase());

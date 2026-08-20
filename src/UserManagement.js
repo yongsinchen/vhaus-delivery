@@ -32,8 +32,8 @@ function UserManagement() {
   const [addAccess, setAddAccess] = useState({ company_id: "", role_id: "" });
 
   const availableRoles = isMaster
-    ? ["master", "sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "short_term_part_time", "driver", "operation", "finance"]
-    : ["sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "short_term_part_time", "driver", "operation", "finance"];
+    ? ["master", "sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "short_term_part_time", "branch_operation_admin", "driver", "operation", "finance"]
+    : ["sales_manager", "operation_manager", "company_admin", "salesman", "part_time", "short_term_part_time", "branch_operation_admin", "driver", "operation", "finance"];
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -336,6 +336,7 @@ function UserManagement() {
     salesman: "bg-emerald-100 text-emerald-700",
     part_time: "bg-teal-100 text-teal-700",
     short_term_part_time: "bg-cyan-100 text-cyan-700",
+    branch_operation_admin: "bg-orange-100 text-orange-700",
     finance: "bg-amber-100 text-amber-700",
   }[role] || "bg-gray-100 text-gray-600");
 

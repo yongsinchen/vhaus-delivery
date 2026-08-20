@@ -1008,6 +1008,11 @@ export default function App() {
   // just Orders and Commission (their own). See the visibleNav whitelist below.
   const isShortTermPT = (user?.base_role || user?.role) === "short_term_part_time";
   const STPT_NAV = ["orders", "customers", "commission"];
+  // Branch Operation Admin: sees all orders + customers (not own-scoped),
+  // collects payment, and requests delivery dates — no order create/edit, no
+  // other tabs. Also its own role (not aliased); nav narrowed below.
+  const isBranchOpsAdmin = (user?.base_role || user?.role) === "branch_operation_admin";
+  const BRANCH_OPS_NAV = ["orders", "customers", "delivery-approvals"];
 
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
@@ -1181,6 +1186,9 @@ export default function App() {
   // page isn't in their nav — snap them to Orders (and keep them off any page
   // outside their whitelist).
   useEffect(() => { if (isShortTermPT && !STPT_NAV.includes(page)) setPage("orders"); }, [isShortTermPT, page]); // eslint-disable-line
+  // Branch Operation Admin also defaults to "overview" (not in its nav) — snap
+  // to Orders and keep it inside its whitelist.
+  useEffect(() => { if (isBranchOpsAdmin && !BRANCH_OPS_NAV.includes(page)) setPage("orders"); }, [isBranchOpsAdmin, page]); // eslint-disable-line
 
   // Fix #7: blocked delivery dates for the visible calendar month — small
   // list, cheap to refetch on month navigation rather than accumulate.
@@ -1447,6 +1455,8 @@ export default function App() {
   const visibleNav = NAV.filter(n => {
     // Short-term part-time sees only Orders (own) + Commission (own).
     if (isShortTermPT) return STPT_NAV.includes(n.id);
+    // Branch Operation Admin: Orders (all, read-only) + Customers + Delivery Dates.
+    if (isBranchOpsAdmin) return BRANCH_OPS_NAV.includes(n.id);
     if (n.id === "operations") return !isSalesman && (can("viewServicePending") || can("viewDoReview"));
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation","operation_manager"].includes(effectiveRole);

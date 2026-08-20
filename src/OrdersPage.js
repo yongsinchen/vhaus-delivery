@@ -455,6 +455,9 @@ function OrdersPage() {
   const toast = useToast();
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
+  // Branch Operation Admin sees all orders but cannot create, edit, or delete
+  // them — the Orders page is read-only for that role.
+  const ordersReadOnly = (user?.base_role || user?.role) === "branch_operation_admin";
 
   const [orders, setOrders] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -1285,9 +1288,11 @@ function OrdersPage() {
           <h1 className="text-xl font-bold text-gray-900">Orders</h1>
           <p className="text-sm text-gray-500">{totalOrders} order{totalOrders !== 1 ? "s" : ""}{refreshing ? " · updating..." : ""}</p>
         </div>
-        <button onClick={openNew} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
-          + New Order
-        </button>
+        {!ordersReadOnly && (
+          <button onClick={openNew} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+            + New Order
+          </button>
+        )}
       </div>
 
       {/* Amended review banner — count is the server-side total for amended
@@ -1421,8 +1426,8 @@ function OrdersPage() {
                       <p className="text-sm text-gray-600 mt-0.5">{o.customer_name}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
-                      {!["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
+                      {!ordersReadOnly && <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>}
+                      {!ordersReadOnly && !["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
                   </div>
@@ -1586,11 +1591,13 @@ function OrdersPage() {
                   {o.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{o.remark}</div>}
                   {o.status !== "amended" && o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
 
-                  {/* Action buttons */}
-                  <div className="flex gap-2 pt-2">
-                    <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Edit Order</button>
-                    <button onClick={() => openSubmitPO(o)} className="py-2.5 px-4 rounded-xl text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">Submit PO</button>
-                  </div>
+                  {/* Action buttons — hidden for read-only roles (Branch Operation Admin) */}
+                  {!ordersReadOnly && (
+                    <div className="flex gap-2 pt-2">
+                      <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Edit Order</button>
+                      <button onClick={() => openSubmitPO(o)} className="py-2.5 px-4 rounded-xl text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">Submit PO</button>
+                    </div>
+                  )}
                 </div>
               </>);
             })()}
