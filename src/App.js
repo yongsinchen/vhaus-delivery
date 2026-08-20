@@ -1007,7 +1007,7 @@ export default function App() {
   // back to the raw user.role from /auth/profile) so the nav can be narrowed to
   // just Orders and Commission (their own). See the visibleNav whitelist below.
   const isShortTermPT = (user?.base_role || user?.role) === "short_term_part_time";
-  const STPT_NAV = ["orders", "commission"];
+  const STPT_NAV = ["orders", "customers", "commission"];
 
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
