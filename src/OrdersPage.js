@@ -466,6 +466,8 @@ function OrdersPage() {
   const [specOptionsMap, setSpecOptionsMap] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterBranch, setFilterBranch] = useState(""); // filter by branch
+  const [filterMonth, setFilterMonth] = useState("");   // filter by order-date month (YYYY-MM)
   const [amendedCount, setAmendedCount] = useState(0); // true total across all pages, not just the loaded page
   const [sortKey, setSortKey] = useState("created_at:desc"); // "column:order" passed to /sales-orders
   const [search, setSearch] = useState("");
@@ -529,6 +531,8 @@ function OrdersPage() {
     const headers = await authHeaders();
     const params = new URLSearchParams({ page: p, limit: perPage });
     if (filterStatus) params.set("status", filterStatus);
+    if (filterBranch) params.set("branch_id", filterBranch);
+    if (filterMonth) params.set("month", filterMonth);
     if (debouncedSearch) params.set("search", debouncedSearch);
     const [sBy, sOrd] = sortKey.split(":");
     params.set("sort_by", sBy); params.set("sort_order", sOrd || "desc");
@@ -549,11 +553,11 @@ function OrdersPage() {
       const cd = await cRes.json();
       setAmendedCount(cd.total || 0);
     } catch { /* leave prior count */ }
-  }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  }, [companyId, filterStatus, filterBranch, filterMonth, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters or sort change. sortKey must be here — the sort
   // dropdown only calls setSortKey, so without it a sort change never re-fetches.
-  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   useEffect(() => {
     if (!companyId) return;
@@ -1303,6 +1307,16 @@ function OrdersPage() {
           <option value="">All Status</option>
           {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
         </select>
+        {branches.length > 0 && (
+          <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+            <option value="">All Branches</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} title="Filter by order month"
+          className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
+        {filterMonth && <button onClick={() => setFilterMonth("")} className="text-xs text-violet-600 hover:underline">clear month</button>}
         <select value={sortKey} onChange={e => setSortKey(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="created_at:desc">Newest first</option>
