@@ -1001,10 +1001,12 @@ export default function App() {
   const effectiveRole = rawEffectiveRole === "part_time" ? "salesman" : rawEffectiveRole;
   const isMaster = effectiveRole === "master";
   const isSalesman = effectiveRole === "salesman";
-  // Short-term part-time: an order-creator with no other reach. Kept as its own
-  // role (not aliased to salesman) so the nav can be narrowed to just Orders and
-  // Commission (their own). See the visibleNav whitelist below.
-  const isShortTermPT = rawEffectiveRole === "short_term_part_time";
+  // Short-term part-time: an order-creator with no other reach. The backend
+  // aliases the role to 'salesman' for ACCESS, so effectiveRole/activeRoleKey
+  // read "salesman" — detect it from the TRUE stored role (base_role, falling
+  // back to the raw user.role from /auth/profile) so the nav can be narrowed to
+  // just Orders and Commission (their own). See the visibleNav whitelist below.
+  const isShortTermPT = (user?.base_role || user?.role) === "short_term_part_time";
   const STPT_NAV = ["orders", "commission"];
 
   // ── State ───────────────────────────────────────────────────────
