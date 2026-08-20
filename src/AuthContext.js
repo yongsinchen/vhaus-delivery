@@ -41,7 +41,7 @@ export const can = (user, action) => {
   // short_term_part_time can CREATE/EDIT orders (like a salesman) but nothing
   // else — no payment recording, no delete, no other tabs. It is intentionally
   // NOT aliased to salesman above; App.js narrows its nav to Orders + Commission.
-  const orderCapable = [...salesSide, "company_admin", "salesman", "short_term_part_time"];
+  const orderCapable = [...salesSide, "company_admin", "salesman", "short_term_part_time", "branch_operation_admin"];
 
   const rules = {
     // Tab visibility
