@@ -170,9 +170,21 @@ function CustomerPage() {
         const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: payModal.customer.id, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
         const d = await res.json();
         if (!d.payment) throw new Error(d.error || "Failed");
-        // Payment is now PENDING Finance approval — the Official Receipt (and OR
-        // number) is generated when Finance approves, so nothing prints here.
-        toast.success(`${money(total)} recorded — sent to Finance for approval`);
+        // Payment is PENDING Finance approval, but the OR is assigned at
+        // collection so the salesman can print it now for the customer.
+        toast.success(`${money(total)} recorded — pending Finance approval`);
+        const rows = payAllocations.filter(a => Number(a.amount) > 0).map(a => {
+          const ord = (payModal.orders || []).find(o => o.id === a.order_id) || {};
+          const oldBal = Number(a.balance) || 0, paid = Number(a.amount) || 0;
+          return { so_number: a.so_number, date: dmy(ord.order_date) || new Date().toLocaleDateString("en-MY"), payment_method: payMethod, amount: ord.order_amount != null ? Number(ord.order_amount) : null, paid, balance: Math.max(0, oldBal - paid) };
+        });
+        printOfficialReceipt({
+          company,
+          receiptNo: d.payment.or_number != null ? String(d.payment.or_number) : "",
+          customer: { name: payModal.customer.name, phone: payModal.customer.phone },
+          date: new Date().toLocaleDateString("en-MY"), rows,
+          totalReceived: total, creditBalance: 0, kindLabel: payKind === "deposit" ? "Deposit" : "Balance",
+        });
         setPayModal(null); if (detail) openDetail(detail.customer);
       });
     } catch (err) {
@@ -439,7 +451,7 @@ function CustomerPage() {
                             {p.approval_status === "pending" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending approval</span>}
                             {p.approval_status === "rejected" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Rejected</span>}
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
-                            {p.approval_status !== "pending" && p.approval_status !== "rejected" && (
+                            {p.approval_status !== "rejected" && (
                               <button onClick={() => reprintReceipt(p)} title="Print Official Receipt"
                                 className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 Receipt</button>
                             )}

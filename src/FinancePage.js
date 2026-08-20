@@ -652,8 +652,8 @@ function FinancePage() {
             )}
             {detailTxn.approval_note && <div className="px-5 pt-2 text-xs text-gray-500">Note: {detailTxn.approval_note}</div>}
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-100">
-              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : (apprOf(detailTxn) === "pending" ? "OR issued on approval" : "No OR number")}</span>
-              {apprOf(detailTxn) !== "pending" && apprOf(detailTxn) !== "rejected" &&
+              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : "No OR number"}</span>
+              {apprOf(detailTxn) !== "rejected" &&
                 <button onClick={() => printReceipt(detailTxn)} className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium">🧾 Print Official Receipt</button>}
             </div>
           </div>
