@@ -1001,6 +1001,11 @@ export default function App() {
   const effectiveRole = rawEffectiveRole === "part_time" ? "salesman" : rawEffectiveRole;
   const isMaster = effectiveRole === "master";
   const isSalesman = effectiveRole === "salesman";
+  // Short-term part-time: an order-creator with no other reach. Kept as its own
+  // role (not aliased to salesman) so the nav can be narrowed to just Orders and
+  // Commission (their own). See the visibleNav whitelist below.
+  const isShortTermPT = rawEffectiveRole === "short_term_part_time";
+  const STPT_NAV = ["orders", "commission"];
 
   // ── State ───────────────────────────────────────────────────────
   const [page, setPage] = useState("overview");
@@ -1169,6 +1174,11 @@ export default function App() {
     if (lookaheadMonth !== todayMonth) loadDoMonth(lookaheadMonth);
   }, [user, companyId]); // eslint-disable-line
   useEffect(() => { if (!user || !calMonthStr) return; loadDoMonth(calMonthStr); }, [calMonthStr, user, companyId]); // eslint-disable-line
+
+  // Short-term part-time defaults to "overview" like everyone else, but that
+  // page isn't in their nav — snap them to Orders (and keep them off any page
+  // outside their whitelist).
+  useEffect(() => { if (isShortTermPT && !STPT_NAV.includes(page)) setPage("orders"); }, [isShortTermPT, page]); // eslint-disable-line
 
   // Fix #7: blocked delivery dates for the visible calendar month — small
   // list, cheap to refetch on month navigation rather than accumulate.
@@ -1433,6 +1443,8 @@ export default function App() {
 
   // ── Nav items visible to this user ──────────────────────────────
   const visibleNav = NAV.filter(n => {
+    // Short-term part-time sees only Orders (own) + Commission (own).
+    if (isShortTermPT) return STPT_NAV.includes(n.id);
     if (n.id === "operations") return !isSalesman && (can("viewServicePending") || can("viewDoReview"));
     if (n.id === "team") return can("manageUsers");
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation","operation_manager"].includes(effectiveRole);
