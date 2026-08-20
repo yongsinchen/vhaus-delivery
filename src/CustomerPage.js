@@ -10,7 +10,7 @@ const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFract
 const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
 
 const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current (0-30d)" }, "30_60": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", label: "30-60 days" }, "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "60-90 days" }, "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "90+ days" } };
-const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate"];
+const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate", "2C2P", "eZbeli"];
 
 function CustomerPage() {
   const { user, activeCompanyId } = useAuth();
