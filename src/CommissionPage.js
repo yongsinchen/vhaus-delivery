@@ -37,7 +37,7 @@ const orderMonthLabel = m => monthLabel(shiftMonth(m, -1));
 // own): the branch-manager 1% and the per-branch override earner. Their
 // net_amount is SOMEONE ELSE'S order total, so they must be kept out of the
 // person's own "total sales" and shown as a separate line.
-const OVERRIDE_ROLES = ["branch_manager", "branch_override"];
+const OVERRIDE_ROLES = ["branch_manager", "branch_override", "director_override"];
 const isOverrideRow = c => OVERRIDE_ROLES.includes(c.role_name);
 
 // Total sales a salesman generated in the batch — the net amount commission is
@@ -276,6 +276,9 @@ function CommissionPage() {
   const [branchOverrides, setBranchOverrides] = useState([]); // per-branch override earner rows
   const [boUsers, setBoUsers] = useState([]); // candidate earners (all active users)
   const [boSavingId, setBoSavingId] = useState(null); // branch_id being saved
+  const [director, setDirector] = useState({ user: "", rate: "" }); // company-wide director override
+  const [dirUsers, setDirUsers] = useState([]); // candidate directors
+  const [dirSaving, setDirSaving] = useState(false);
   const [holds, setHolds] = useState([]); // eslint-disable-line
   const [incentives, setIncentives] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
@@ -351,6 +354,31 @@ function CommissionPage() {
     finally { setBoSavingId(null); }
   };
 
+  const loadDirectorOverride = useCallback(async () => {
+    if (!companyId) return;
+    const res = await af(`${API}/director-commission-override?company_id=${companyId}`);
+    const d = await res.json();
+    setDirector({ user: d.director_user_id || "", rate: d.director_rate_pct != null ? String(d.director_rate_pct) : "" });
+    setDirUsers(d.users || []);
+  }, [companyId]);
+
+  const saveDirectorOverride = async () => {
+    setDirSaving(true);
+    try {
+      await withLoading("Saving director override…", async () => {
+        const res = await af(`${API}/director-commission-override`, {
+          method: "PUT",
+          body: JSON.stringify({ user_id: director.user || null, rate_pct: director.user ? (director.rate === "" ? 0 : Number(director.rate)) : null }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || "Failed");
+        toast.success(director.user ? "Director override saved" : "Director override cleared");
+        loadDirectorOverride();
+      });
+    } catch (e) { toast.error(e.message || "Failed to save"); }
+    finally { setDirSaving(false); }
+  };
+
   const loadIncentives = useCallback(async () => {
     if (!companyId) return;
     const res = await af(`${API}/product-incentives?company_id=${companyId}`);
@@ -415,9 +443,10 @@ function CommissionPage() {
   useEffect(() => { if (tab === 2) {
     loadRules();
     loadBranchOverrides();
+    loadDirectorOverride();
     af(`${API}/salesman-names?company_id=${companyId}`).then(r=>r.json()).then(d => setSalesmen(d.salesmen || []));
     af(`${API}/company-settings?company_id=${companyId}`).then(r=>r.json()).then(d => { try { const ch = JSON.parse(d.settings?.sales_channels || '["branch"]'); if (Array.isArray(ch)) setChannels(ch); } catch {} });
-  } }, [tab, loadRules, loadBranchOverrides, companyId]);
+  } }, [tab, loadRules, loadBranchOverrides, loadDirectorOverride, companyId]);
   useEffect(() => { if (tab === 3) loadIncentives(); }, [tab, loadIncentives]);
 
   const loadDriverComms = useCallback(async () => {
@@ -685,7 +714,7 @@ function CommissionPage() {
                     // can see WHY a row pays less than its rate implies.
                     ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
-                    ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "director_override" ? "director" : c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
                   ];
@@ -833,7 +862,7 @@ function CommissionPage() {
                           {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.role_name === "branch_override" ? "bg-indigo-100 text-indigo-700" : "bg-violet-100 text-violet-700"}`}>{c.role_name === "branch_override" ? "Override" : "Mgr override"}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.role_name === "director_override" ? "bg-fuchsia-100 text-fuchsia-700" : c.role_name === "branch_override" ? "bg-indigo-100 text-indigo-700" : "bg-violet-100 text-violet-700"}`}>{c.role_name === "director_override" ? "Director" : c.role_name === "branch_override" ? "Override" : "Mgr override"}</span>
                           <span className="text-gray-400">{c.rate_pct}%</span>
                           <span className={`font-bold ${c.status === "pending" ? "text-amber-600" : "text-indigo-700"}`}>{money(c.commission_amt)}</span>
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${STATUS_STYLE[c.status] || "bg-gray-100 text-gray-500"}`}>{c.status}</span>
@@ -971,6 +1000,32 @@ function CommissionPage() {
               ))}
             </div>
             <p className="text-[11px] text-gray-400 mt-2">The rate is per person — the same earner uses one rate across every branch they override. Override earns nothing until the order's deposit gate is met.</p>
+          </div>
+
+          {/* Director override — one person earns a flat % of EVERY legit
+              (deposit-paid) order across ALL branches, on top of everyone
+              else. Stacks with the per-branch override earner. */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <h3 className="font-bold text-gray-900">Director Override Commission</h3>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">Assign one person to earn a flat % of the company's legit (deposit-paid) sales across <span className="font-medium">all branches</span>, at a flexible rate. Leave the person blank to remove.</p>
+            <div className="flex flex-wrap items-center gap-2 bg-gray-50 rounded-xl p-2">
+              <span className="text-sm font-medium text-gray-700 min-w-[110px]">Director</span>
+              <select value={director.user} onChange={e => setDirector(d => ({ ...d, user: e.target.value }))}
+                className="flex-1 min-w-[150px] px-3 py-1.5 rounded-lg border border-gray-200 text-sm bg-white">
+                <option value="">— No director override —</option>
+                {dirUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <div className="flex items-center gap-1">
+                <input type="number" step="0.1" min="0" max="100" value={director.rate} disabled={!director.user}
+                  onChange={e => setDirector(d => ({ ...d, rate: e.target.value }))}
+                  placeholder="Rate" className="w-20 px-2 py-1.5 text-sm text-right rounded-lg border border-gray-200 disabled:bg-gray-100" />
+                <span className="text-xs text-gray-400">%</span>
+              </div>
+              <button onClick={saveDirectorOverride} disabled={dirSaving}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                {dirSaving ? "Saving…" : "Save"}</button>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">Applies company-wide on top of salesmen and any branch override. Earns nothing until the order's deposit gate is met.</p>
           </div>
 
           <button onClick={() => setShowRuleForm(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ Add Rule</button>
