@@ -125,7 +125,7 @@ export default function PerformancePage() {
 
           {/* Per-salesman breakdown */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100"><h2 className="text-sm font-bold text-gray-700">By salesman</h2></div>
+            <div className="px-4 py-3 border-b border-gray-100"><h2 className="text-sm font-bold text-gray-700">By salesman <span className="text-xs font-normal text-gray-400">· split orders share the amount</span></h2></div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="bg-gray-50 text-xs text-gray-500 text-left"><th className="px-4 py-2">Salesman</th><th className="px-4 py-2 text-right">Legit orders</th><th className="px-4 py-2 text-right">Sales</th></tr></thead>
