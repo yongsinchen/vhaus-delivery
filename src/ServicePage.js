@@ -7,6 +7,8 @@ const getToken = async () => { const { data } = await supabase.auth.getSession()
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
 const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement", 4: "Delivery (Missing Item)" };
+// Short date for leg/arrival chips; blank-safe for null/empty values.
+const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
 const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚" };
 const STATUS_STYLE = {
   open: "bg-gray-100 text-gray-700", scheduled: "bg-blue-100 text-blue-700",
@@ -336,6 +338,30 @@ function ServicePage() {
                     {(svc._assigned?.name || svc.assigned?.name) && <span className="ml-2 text-gray-400">→ {svc._assigned?.name || svc.assigned?.name}</span>}
                   </p>
                   {svc.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{svc.description}</p>}
+                  {/* Legs — one chip per leg, coloured by status, with its
+                      scheduled date where set. */}
+                  {(svc._legs || []).length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Legs</span>
+                      {svc._legs.map(leg => (
+                        <span key={leg.id} className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${LEG_STATUS[leg.status] || "bg-gray-100 text-gray-600"}`}>
+                          Leg {leg.leg_order} · {String(leg.status || "").replace("_", " ")}{leg.scheduled_at ? ` · ${dmy(leg.scheduled_at)}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* Arrival dates — one chip per item (green when the item has an
+                      arrival date, grey when still awaiting arrival). */}
+                  {(svc._items || []).length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap mt-1">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Arrival</span>
+                      {svc._items.map(it => (
+                        <span key={it.id} className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${it.arrival_date ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                          {it.description}{it.arrival_date ? ` · ${dmy(it.arrival_date)}` : " · no date"}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <span className="text-xs text-gray-400 flex-shrink-0">{svc.created_at ? new Date(svc.created_at).toLocaleDateString("en-MY") : ""}</span>
