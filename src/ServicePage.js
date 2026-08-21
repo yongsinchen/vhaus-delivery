@@ -244,10 +244,11 @@ function ServicePage() {
     if (!filterArrival) return true;
     const items = svc._items || [];
     if (items.length === 0) return false; // no items → neither "with" nor "without"
-    // "with"  = every item has an arrival date (nothing left to arrive)
-    // "without" = at least one item still has no arrival date
+    // "with"  = the case has at least one item WITH an arrival date
+    // "without" = the case has at least one item WITHOUT an arrival date
+    // (a mixed case matches both.)
     return filterArrival === "with"
-      ? items.every(it => !!it.arrival_date)
+      ? items.some(it => !!it.arrival_date)
       : items.some(it => !it.arrival_date);
   };
   const filteredServices = services.filter(svc => {
