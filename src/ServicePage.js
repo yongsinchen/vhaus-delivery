@@ -6,10 +6,10 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
-const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement", 4: "Delivery (Missing Item)" };
+const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement", 4: "Delivery (Missing Item)", 5: "Delivery" };
 // Short date for leg/arrival chips; blank-safe for null/empty values.
 const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
-const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚" };
+const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚", 5: "📦" };
 const STATUS_STYLE = {
   open: "bg-gray-100 text-gray-700", scheduled: "bg-blue-100 text-blue-700",
   in_progress: "bg-amber-100 text-amber-700", claiming: "bg-violet-100 text-violet-700",
@@ -20,6 +20,136 @@ const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue
 // Per-item action on a service case (matches backend service_items.action_type).
 const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
 const ITEM_ACTION_ICON = { 1: "🪛", 2: "🔧", 3: "🔄" };
+const legDate = l => l?.scheduled_at || l?.scheduled_date || "";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function toDataUrl(url) {
+  if (!url) return null;
+  try {
+    const blob = await (await fetch(url)).blob();
+    return await new Promise(resolve => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = () => resolve(null); fr.readAsDataURL(blob); });
+  } catch { return null; }
+}
+
+// Print the Service Note (opens a print window → Save as PDF). Mirrors the
+// other printed documents in the app: a company header, the case details, and
+// the item + leg tables.
+function printServiceNote(detail, company = {}) {
+  const svc = detail.service || {}, order = detail.order || {};
+  const items = detail.items || [], legs = detail.legs || [];
+  const w = window.open("", "_blank"); if (!w) return;
+  const row = (cells) => `<tr>${cells.map(c => `<td style="border:1px solid #ccc;padding:4px 8px;font-size:12px">${c}</td>`).join("")}</tr>`;
+  const head = (cells) => `<tr>${cells.map(c => `<th style="border:1px solid #ccc;padding:4px 8px;font-size:12px;background:#f2f2f2;text-align:left">${c}</th>`).join("")}</tr>`;
+  const itemsTable = items.length ? `
+    <table style="border-collapse:collapse;width:100%;margin-top:6px">
+      ${head(["No", "Item", "Action", "Qty", "Arrival", "Status"])}
+      ${items.map((it, i) => row([i + 1, esc(it.description), ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", esc(it.status || "pending")])).join("")}
+    </table>` : `<p style="font-size:12px;color:#888">No items.</p>`;
+  const legsTable = legs.length ? `
+    <table style="border-collapse:collapse;width:100%;margin-top:6px">
+      ${head(["Leg", "From → To", "Scheduled", "Status", "Notes"])}
+      ${legs.map(l => row([l.leg_order, `${esc(l.from_location)} → ${esc(l.to_location)}`, legDate(l) ? dmy(legDate(l)) : "—", esc(String(l.status || "").replace("_", " ")), esc(l.notes || "")])).join("")}
+    </table>` : `<p style="font-size:12px;color:#888">No legs.</p>`;
+  const info = (l, v) => `<div style="font-size:12px;margin:1px 0"><b>${l}:</b> ${esc(v || "—")}</div>`;
+  w.document.write(`<!doctype html><html><head><title>Service Note ${esc(order.so_number || svc.id || "")}</title></head>
+    <body style="font-family:Arial,sans-serif;padding:24px;color:#111">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px">
+        <div style="display:flex;gap:12px;align-items:center">
+          ${company.logo ? `<img src="${esc(company.logo)}" style="height:48px"/>` : ""}
+          <div><div style="font-weight:bold;font-size:16px">${esc(company.name || "")}</div>
+          <div style="font-size:11px;color:#555">${esc(company.address || "")}</div>
+          ${company.hotline ? `<div style="font-size:11px;color:#555">Tel: ${esc(company.hotline)}</div>` : ""}</div>
+        </div>
+        <div style="text-align:right"><div style="font-size:18px;font-weight:bold">SERVICE NOTE</div>
+          <div style="font-size:12px">${esc(order.so_number ? `SO ${order.so_number}` : "")}</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:12px">
+        <div>
+          ${info("Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`)}
+          ${info("Status", svc.status)}
+          ${info("Customer", svc.customer_name || order.customer_name)}
+          ${info("Contact", svc.customer_phone || order.contact)}
+          ${info("Address", svc.customer_address || order.address)}
+        </div>
+        <div>
+          ${info("Service date", svc.service_date ? dmy(svc.service_date) : "")}
+          ${info("Due date", svc.due_date ? dmy(svc.due_date) : "")}
+          ${info("Salesman", order.salesman)}
+          ${info("Created", svc.created_at ? dmy(svc.created_at) : "")}
+        </div>
+      </div>
+      ${svc.description ? `<div style="margin-top:10px;font-size:12px"><b>Description:</b> ${esc(svc.description)}</div>` : ""}
+      <h3 style="font-size:13px;margin:16px 0 0">Items</h3>${itemsTable}
+      <h3 style="font-size:13px;margin:16px 0 0">Service Legs</h3>${legsTable}
+      <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px">
+        <div style="border-top:1px solid #111;padding-top:4px;width:200px;text-align:center">Prepared by</div>
+        <div style="border-top:1px solid #111;padding-top:4px;width:200px;text-align:center">Customer sign</div>
+      </div>
+    </body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch { /* user can print manually */ } }, 400);
+}
+
+// Export the Service Note as a real .xlsx (ExcelJS, lazily imported).
+async function exportServiceNoteExcel(detail, company = {}) {
+  const ExcelJS = (await import("exceljs")).default;
+  const svc = detail.service || {}, order = detail.order || {};
+  const items = detail.items || [], legs = detail.legs || [];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Service Note", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.columns = [{ width: 6 }, { width: 26 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }];
+  const thin = { style: "thin", color: { argb: "FF000000" } };
+  const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
+  const grayFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
+
+  ws.mergeCells("A1:B3");
+  const logoUrl = company.logo ? await toDataUrl(company.logo) : null;
+  if (logoUrl) {
+    const m = /^data:image\/(png|jpe?g|gif)/i.exec(logoUrl);
+    const ext = m ? (m[1].toLowerCase() === "jpg" ? "jpeg" : m[1].toLowerCase()) : "png";
+    ws.addImage(wb.addImage({ base64: logoUrl, extension: ext }), { tl: { col: 0, row: 0 }, ext: { width: 150, height: 54 } });
+  }
+  ws.mergeCells("C1:D1"); ws.getCell("C1").value = company.name || ""; ws.getCell("C1").font = { bold: true, size: 13 };
+  ws.mergeCells("C2:F2"); ws.getCell("C2").value = company.address || ""; ws.getCell("C2").font = { size: 9 }; ws.getCell("C2").alignment = { wrapText: true };
+  ws.getCell("C3").value = company.hotline ? `Tel: ${company.hotline}` : ""; ws.getCell("C3").font = { size: 9 };
+  ws.getCell("E1").value = "SERVICE NOTE"; ws.getCell("E1").font = { bold: true, size: 14 }; ws.getCell("E1").alignment = { horizontal: "right" };
+  ws.getCell("E3").value = order.so_number ? `SO ${order.so_number}` : ""; ws.getCell("E3").alignment = { horizontal: "right" };
+
+  let r = 5;
+  const info = (l1, v1, l2, v2) => {
+    ws.getCell(`A${r}`).value = l1; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:C${r}`); ws.getCell(`B${r}`).value = v1 ?? "";
+    ws.getCell(`D${r}`).value = l2; ws.getCell(`D${r}`).font = { bold: true };
+    ws.mergeCells(`E${r}:F${r}`); ws.getCell(`E${r}`).value = v2 ?? ""; r++;
+  };
+  info("Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`, "Status", svc.status);
+  info("Customer", svc.customer_name || order.customer_name, "Service date", svc.service_date ? dmy(svc.service_date) : "");
+  info("Contact", svc.customer_phone || order.contact, "Due date", svc.due_date ? dmy(svc.due_date) : "");
+  info("Address", svc.customer_address || order.address, "Salesman", order.salesman);
+  if (svc.description) { info("Description", svc.description, "", ""); }
+
+  r++;
+  const table = (title, heads, rows) => {
+    ws.getCell(`A${r}`).value = title; ws.getCell(`A${r}`).font = { bold: true, size: 12 }; r++;
+    heads.forEach((h, i) => { const c = ws.getCell(r, i + 1); c.value = h; c.font = { bold: true }; c.fill = grayFill; c.border = boxAll; });
+    r++;
+    rows.forEach(vals => { vals.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v; c.border = boxAll; }); r++; });
+    r++;
+  };
+  table("Items", ["No", "Item", "Action", "Qty", "Arrival", "Status"],
+    items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]));
+  table("Service Legs", ["Leg", "From", "To", "Scheduled", "Status", "Notes"],
+    legs.map(l => [l.leg_order, l.from_location || "", l.to_location || "", legDate(l) ? dmy(legDate(l)) : "—", String(l.status || "").replace("_", " "), l.notes || ""]));
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `ServiceNote_${(order.so_number || svc.id || "case")}.xlsx`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function ServicePage() {
   const { user, activeCompanyId } = useAuth();
@@ -35,6 +165,7 @@ function ServicePage() {
   const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
+  const [company, setCompany] = useState({}); // header/logo for the printed/exported Service Note
   const [detailLoading, setDetailLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [convertModal, setConvertModal] = useState(null);
@@ -82,6 +213,12 @@ function ServicePage() {
   }, [companyId]);
 
   useEffect(() => { loadServices(); loadPending(); }, [loadServices, loadPending]);
+  useEffect(() => {
+    if (!companyId) return;
+    af(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
+      if (d.settings) setCompany({ name: d.settings.company_name || "", address: d.settings.address || "", hotline: d.settings.hotline || "", logo: d.settings.logo_url || "" });
+    }).catch(() => {});
+  }, [companyId]);
   useEffect(() => {
     if (companyId) af(`${API}/suppliers?company_id=${companyId}`).then(r => r.json()).then(d => setSuppliers(d.suppliers || []));
   }, [companyId]);
@@ -366,7 +503,7 @@ function ServicePage() {
                       <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Legs</span>
                       {svc._legs.map(leg => (
                         <span key={leg.id} className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${LEG_STATUS[leg.status] || "bg-gray-100 text-gray-600"}`}>
-                          Leg {leg.leg_order} · {String(leg.status || "").replace("_", " ")}{leg.scheduled_at ? ` · ${dmy(leg.scheduled_at)}` : ""}
+                          Leg {leg.leg_order} · {String(leg.status || "").replace("_", " ")}{(leg.scheduled_at || leg.scheduled_date) ? ` · ${dmy(leg.scheduled_at || leg.scheduled_date)}` : ""}
                         </span>
                       ))}
                     </div>
@@ -565,7 +702,13 @@ function ServicePage() {
                         <p className="text-xs text-gray-500">{[detail.order?.so_number, detail.order?.customer_name].filter(Boolean).join(" · ")}</p>
                       </div>
                     </div>
-                    <button onClick={() => setDetail(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => printServiceNote(detail, company)} title="Download / print as PDF"
+                        className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">📄 PDF</button>
+                      <button onClick={() => exportServiceNoteExcel(detail, company)} title="Download as Excel"
+                        className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">⬇ Excel</button>
+                      <button onClick={() => setDetail(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+                    </div>
                   </div>
                 </div>
                 <div className="px-6 py-4 space-y-5">
