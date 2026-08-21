@@ -32,6 +32,7 @@ function ServicePage() {
   const [tab, setTab] = useState("cases"); // "cases" | "pending"
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -239,12 +240,26 @@ function ServicePage() {
   };
 
   const q = search.trim().toLowerCase();
-  const filteredServices = !q ? services : services.filter(svc => [
-    svc._order?.so_number, svc.orders?.so_number,
-    svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
-    svc.description, svc.customer_phone, svc._order?.contact,
-    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
-  ].filter(Boolean).join(" ").toLowerCase().includes(q));
+  const matchesArrival = (svc) => {
+    if (!filterArrival) return true;
+    const items = svc._items || [];
+    if (items.length === 0) return false; // no items → neither "with" nor "without"
+    // "with"  = every item has an arrival date (nothing left to arrive)
+    // "without" = at least one item still has no arrival date
+    return filterArrival === "with"
+      ? items.every(it => !!it.arrival_date)
+      : items.some(it => !it.arrival_date);
+  };
+  const filteredServices = services.filter(svc => {
+    if (!matchesArrival(svc)) return false;
+    if (!q) return true;
+    return [
+      svc._order?.so_number, svc.orders?.so_number,
+      svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
+      svc.description, svc.customer_phone, svc._order?.contact,
+      svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
+    ].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
@@ -258,6 +273,11 @@ function ServicePage() {
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
                 <option value="">All Status</option>
                 {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={filterArrival} onChange={e => setFilterArrival(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
+                <option value="">All Arrival</option>
+                <option value="with">With arrival date</option>
+                <option value="without">Without arrival date</option>
               </select>
             </>
           )}
@@ -312,8 +332,8 @@ function ServicePage() {
       {tab === "cases" && !loading && filteredServices.length === 0 && (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">🔧</div>
-          <p className="font-medium">{q || filterStatus ? "No matching service cases" : "No service cases"}</p>
-          <p className="text-xs mt-1">{q || filterStatus ? "Try a different search or status" : 'Create one from an order or click "+ New Service Case"'}</p>
+          <p className="font-medium">{q || filterStatus || filterArrival ? "No matching service cases" : "No service cases"}</p>
+          <p className="text-xs mt-1">{q || filterStatus || filterArrival ? "Try a different search, status, or arrival filter" : 'Create one from an order or click "+ New Service Case"'}</p>
         </div>
       )}
       {tab === "cases" && <div className="space-y-2">
