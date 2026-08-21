@@ -1436,7 +1436,14 @@ export default function App() {
     setGlobalSearch(v);
     if (!v.trim()) { setGlobalResults([]); return; }
     const q = v.toLowerCase();
-    setGlobalResults(orders.filter(o => o.soNumber?.toLowerCase().includes(q) || o.customerName?.toLowerCase().includes(q) || o.contact?.includes(q) || o.items?.some(i => i.itemName?.toLowerCase().includes(q))));
+    const matchRow = o => o.soNumber?.toLowerCase().includes(q) || o.svNumber?.toLowerCase().includes(q)
+      || o.customerName?.toLowerCase().includes(q) || o.contact?.includes(q)
+      || o.serviceNote?.toLowerCase().includes(q) || o.items?.some(i => i.itemName?.toLowerCase().includes(q));
+    // Orders first, then services (the dashboard's Service-type rows), each
+    // tagged so the result list can label and route them.
+    const orderHits = orders.filter(matchRow);
+    const serviceHits = services.filter(matchRow).map(s => ({ ...s, _isService: true }));
+    setGlobalResults([...orderHits, ...serviceHits]);
   };
 
   const setItem = (idx, k, v) => setForm(p => ({ ...p, items: p.items.map((it, i) => i===idx ? {...it,[k]:v} : it) }));
@@ -2087,19 +2094,22 @@ export default function App() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="flex items-center gap-3 p-4 border-b">
               <span className="text-gray-400">🔍</span>
-              <input autoFocus value={globalSearch} onChange={e=>handleGlobalSearch(e.target.value)} placeholder="Search SO, customer, item..." className="flex-1 text-sm focus:outline-none" />
+              <input autoFocus value={globalSearch} onChange={e=>handleGlobalSearch(e.target.value)} placeholder="Search SO/SV, customer, item, service..." className="flex-1 text-sm focus:outline-none" />
               <button onClick={()=>setShowSearch(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold text-sm">×</button>
             </div>
             <div className="max-h-96 overflow-y-auto">
               {globalSearch && globalResults.length===0 && <div className="text-center py-8 text-gray-400 text-sm">No results</div>}
               {globalResults.map((o,i) => (
-                <div key={i} onClick={()=>{handleView(o);setShowSearch(false);}} className="px-4 py-3 hover:bg-violet-50 cursor-pointer border-b border-gray-50 last:border-0">
+                <div key={i} onClick={()=>{ if (o._isService) { setPage("services"); } else { handleView(o); } setShowSearch(false); }} className="px-4 py-3 hover:bg-violet-50 cursor-pointer border-b border-gray-50 last:border-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="font-bold text-violet-700 text-sm">{o.soNumber}</span>
+                    <span className="font-bold text-violet-700 text-sm flex items-center gap-1.5">
+                      {o._isService && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 font-semibold">🔧 Service</span>}
+                      {o.soNumber}
+                    </span>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(o.status)}`}>{o.status}</span>
                   </div>
                   <p className="text-sm text-gray-700">{o.customerName}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{o.items?.map(i=>i.itemName).filter(Boolean).join(", ")}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{o._isService ? (o.serviceNote || o.items?.map(i=>i.itemName).filter(Boolean).join(", ")) : o.items?.map(i=>i.itemName).filter(Boolean).join(", ")}</p>
                 </div>
               ))}
               {!globalSearch && <div className="text-center py-8 text-gray-400 text-sm">Start typing...</div>}
