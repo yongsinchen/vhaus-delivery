@@ -15,6 +15,15 @@ const STATUS_STYLE = {
   in_progress: "bg-amber-100 text-amber-700", claiming: "bg-violet-100 text-violet-700",
   resolved: "bg-emerald-100 text-emerald-700", closed: "bg-gray-100 text-gray-400",
 };
+// Status-group tabs for the case list. Open = raised, no action yet (default
+// view); Scheduled = a date is set / work underway; Resolved = done.
+const STATUS_GROUPS = {
+  open: ["open"],
+  scheduled: ["scheduled", "in_progress", "claiming"],
+  resolved: ["resolved", "closed"],
+};
+const STATUS_TABS = [["open", "Open"], ["scheduled", "Scheduled"], ["resolved", "Resolved"]];
+const groupOf = status => Object.keys(STATUS_GROUPS).find(g => STATUS_GROUPS[g].includes(status)) || "open";
 const LEG_STATUS = { pending: "bg-gray-100 text-gray-600", scheduled: "bg-blue-100 text-blue-700", in_progress: "bg-amber-100 text-amber-700", completed: "bg-emerald-100 text-emerald-700" };
 const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue-100 text-blue-700", approved: "bg-violet-100 text-violet-700", received: "bg-emerald-100 text-emerald-700", rejected: "bg-red-100 text-red-600" };
 // Per-item action on a service case (matches backend service_items.action_type).
@@ -161,7 +170,7 @@ function ServicePage() {
   const [pending, setPending] = useState([]);
   const [tab, setTab] = useState("cases"); // "cases" | "pending"
   const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState("");
+  const [statusGroup, setStatusGroup] = useState("open"); // open (default) | scheduled | resolved
   const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
@@ -197,13 +206,12 @@ function ServicePage() {
   const loadServices = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const params = new URLSearchParams({ company_id: companyId });
-    if (filterStatus) params.set("status", filterStatus);
-    const res = await af(`${API}/service-cases?${params}`);
+    // Load all cases and group client-side, so switching status tabs is instant.
+    const res = await af(`${API}/service-cases?company_id=${companyId}`);
     const d = await res.json();
     setServices(d.services || []);
     setLoading(false);
-  }, [companyId, filterStatus]);
+  }, [companyId]);
 
   const loadPending = useCallback(async () => {
     if (!companyId) return;
@@ -388,16 +396,20 @@ function ServicePage() {
       ? items.some(it => !!it.arrival_date)
       : items.some(it => !it.arrival_date);
   };
-  const filteredServices = services.filter(svc => {
-    if (!matchesArrival(svc)) return false;
-    if (!q) return true;
-    return [
-      svc._order?.so_number, svc.orders?.so_number,
-      svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
-      svc.description, svc.customer_phone, svc._order?.contact,
-      svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
-    ].filter(Boolean).join(" ").toLowerCase().includes(q);
-  });
+  const matchesSearch = (svc) => !q || [
+    svc._order?.so_number, svc.orders?.so_number,
+    svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
+    svc.description, svc.customer_phone, svc._order?.contact,
+    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
+  ].filter(Boolean).join(" ").toLowerCase().includes(q);
+  // Count per status group (search + arrival applied, group not) so the tab
+  // badges reflect what each tab would show.
+  const groupCounts = services.reduce((acc, svc) => {
+    if (matchesArrival(svc) && matchesSearch(svc)) acc[groupOf(svc.status)] = (acc[groupOf(svc.status)] || 0) + 1;
+    return acc;
+  }, {});
+  const filteredServices = services.filter(svc =>
+    groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc));
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
@@ -408,10 +420,6 @@ function ServicePage() {
             <>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SO, customer, description..."
                 className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-56 focus:outline-none focus:border-violet-400" />
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
-                <option value="">All Status</option>
-                {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
               <select value={filterArrival} onChange={e => setFilterArrival(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white">
                 <option value="">All Arrival</option>
                 <option value="with">With arrival date</option>
@@ -432,6 +440,18 @@ function ServicePage() {
           Pending {pending.length > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pending.length}</span>}
         </button>
       </div>
+
+      {/* Status-group sub-tabs — Open (default) / Scheduled / Resolved. */}
+      {tab === "cases" && (
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+          {STATUS_TABS.map(([key, label]) => (
+            <button key={key} onClick={() => setStatusGroup(key)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${statusGroup === key ? "bg-white text-violet-700 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+              {label}<span className="ml-1.5 text-xs opacity-70">{groupCounts[key] || 0}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Pending tab */}
       {tab === "pending" && (
@@ -470,8 +490,8 @@ function ServicePage() {
       {tab === "cases" && !loading && filteredServices.length === 0 && (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">🔧</div>
-          <p className="font-medium">{q || filterStatus || filterArrival ? "No matching service cases" : "No service cases"}</p>
-          <p className="text-xs mt-1">{q || filterStatus || filterArrival ? "Try a different search, status, or arrival filter" : 'Create one from an order or click "+ New Service Case"'}</p>
+          <p className="font-medium">No {statusGroup} service cases{q || filterArrival ? " match" : ""}</p>
+          <p className="text-xs mt-1">{q || filterArrival ? "Try a different search or arrival filter, or switch tab" : `Cases in the ${statusGroup} stage will appear here`}</p>
         </div>
       )}
       {tab === "cases" && <div className="space-y-2">
