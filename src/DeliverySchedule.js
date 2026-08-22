@@ -75,7 +75,7 @@ function printDeliveryOrder(o, company = {}) {
     <div class="head pad">
       <div style="display:flex;gap:10px;align-items:flex-start">
         ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
-        <div><b>${esc(company.name || "")}</b><br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
+        <div><b>${esc(company.name || "")}</b>${company.reg ? ` (${esc(company.reg)})` : ""}<br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
       </div>
       <div style="text-align:right"><b>DO#: ${esc(o.do_number || "")}</b></div>
     </div>
@@ -142,7 +142,7 @@ async function exportDeliveryOrderExcel(o, company = {}) {
     const imageId = wb.addImage({ base64: logoUrl, extension: ext });
     ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 150, height: 54 } });
   }
-  ws.mergeCells("C1:D1"); ws.getCell("C1").value = company.name || "";
+  ws.mergeCells("C1:D1"); ws.getCell("C1").value = company.reg ? `${company.name || ""} (${company.reg})` : (company.name || "");
   ws.getCell("C1").font = { bold: true, size: 13 };
   ws.mergeCells("C2:D2"); ws.getCell("C2").value = company.address || "";
   ws.getCell("C2").font = { size: 9 }; ws.getCell("C2").alignment = { wrapText: true };
@@ -1196,7 +1196,7 @@ function DeliveryOrdersTab({ onChanged }) {
   useEffect(() => {
     af(`${API}/company-settings`).then(r => r.json()).then(d => {
       if (d.settings) setCompany({
-        name: d.settings.company_name || "", address: d.settings.address || "",
+        name: d.settings.company_name || "", reg: d.settings.registration_no || "", address: d.settings.address || "",
         hotline: d.settings.hotline || "", logo: d.settings.logo_url || "",
       });
     }).catch(() => {});
@@ -1311,7 +1311,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   // Company header/logo for printing a Delivery Order from the board.
   useEffect(() => {
     af(`${API}/company-settings`).then(r => r.json()).then(d => {
-      if (d.settings) setCompany({ name: d.settings.company_name || "", address: d.settings.address || "", hotline: d.settings.hotline || "", logo: d.settings.logo_url || "" });
+      if (d.settings) setCompany({ name: d.settings.company_name || "", reg: d.settings.registration_no || "", address: d.settings.address || "", hotline: d.settings.hotline || "", logo: d.settings.logo_url || "" });
     }).catch(() => {});
   }, []);
   const [viewMode, setViewMode] = useState("schedule"); // "schedule" board | "orders" Delivery Orders tab
