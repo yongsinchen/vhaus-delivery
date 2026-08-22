@@ -206,6 +206,9 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     @page { size: A4; margin: 8mm; }
     body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page { width: 725px; margin: 0 auto; }
+    /* Two copies (Customer + Company) — each on its own sheet. */
+    .page + .page { page-break-before: always; }
+    .copytag { background: rgba(255,255,255,.18); border: 0.5px solid rgba(255,255,255,.6); border-radius: 3px; padding: 1px 8px; font-weight: 800; letter-spacing: 1.5px; }
     .doc { width: 100%; border: 1px solid #1f2937; }
     .sec { border-bottom: 0.5px solid #1f2937; }
     .sec:last-child { border-bottom: none; }
@@ -300,9 +303,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     @media print { body { margin: 0; } }
   </style></head><body>
+    ${["Customer Copy", "Company Copy"].map(copyTag => `
     <div class="page"><div class="doc">
       <div class="branchbar sec">
         <span>BRANCH : ${branchLine}</span>
+        <span class="copytag">${copyTag}</span>
         <span class="r">DATE : ${dateStr}</span>
       </div>
       <div class="head pad sec">
@@ -390,7 +395,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           <div class="sline">Authorised Signature</div>
         </div>
       </div>
-    </div></div>
+    </div></div>`).join("")}
   </body></html>`;
 
   const w = window.open("", "_blank");
@@ -403,9 +408,10 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
   // document is taller than the printable height (~1050px), scale it down to fit.
   setTimeout(() => {
     try {
-      const page = w.document.querySelector(".page");
-      const doc = w.document.querySelector(".doc");
-      if (page && doc) {
+      // Scale each copy independently so both fit their own A4 sheet.
+      w.document.querySelectorAll(".page").forEach(page => {
+        const doc = page.querySelector(".doc");
+        if (!doc) return;
         const maxH = 1050;
         const h = doc.getBoundingClientRect().height;
         if (h > maxH) {
@@ -415,7 +421,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           page.style.height = Math.ceil(h * s) + "px";
           page.style.overflow = "hidden";
         }
-      }
+      });
     } catch (e) { /* fall back to unscaled print */ }
     w.print();
   }, 400);
