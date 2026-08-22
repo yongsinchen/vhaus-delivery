@@ -240,15 +240,15 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     .cust { display: flex; }
     .cust .col { flex: 1; padding: 6px 13px; }
     .cust .col + .col { border-left: 0.5px solid #1f2937; }
-    .frow { display: flex; font-size: 10px; padding: 1.5px 0; }
+    .frow { display: flex; font-size: 12px; padding: 1.5px 0; }
     .frow .lbl { width: 94px; flex-shrink: 0; color: #6b7280; font-weight: 600; }
     .frow .val { flex: 1; color: #1f2937; font-weight: 600; }
     .frow .val.multi { line-height: 1.35; }
 
     /* Items */
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
-    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 10px; height: 20px; vertical-align: top; }
+    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
+    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 12px; height: 20px; vertical-align: top; }
     table.items th:last-child, table.items td:last-child { border-right: none; }
     .c { text-align: center; } .r { text-align: right; }
     .desc .pname { font-weight: 600; }
@@ -361,6 +361,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
       <div class="blk sec">
         <div class="pay-grid">${payOptions}</div>
         <div class="pay-fields">
+          ${COMPANY.bank ? `<div class="pf"><span class="lab">Bank Account :</span><span class="line">${esc(COMPANY.bank)}</span></div>` : ""}
           <div class="pf"><span class="lab">Reference :</span><span class="line">&nbsp;</span></div>
           <div class="pf"><span class="lab">Paid Amount :</span><span class="line">RM ${money(deposit)}</span></div>
         </div>
