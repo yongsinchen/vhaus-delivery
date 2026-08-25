@@ -997,7 +997,8 @@ function ProductsPage() {
       <div className="flex flex-wrap gap-2">
         <input
           value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Search code or name…"
+          placeholder="Search code, name, size, supplier…"
+          title="Type several terms to narrow — all of them must match, in any order (e.g. TA207 divan queen)"
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-56 focus:outline-none focus:border-violet-400"
         />
         <select value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}
@@ -1157,7 +1158,7 @@ function ProductsPage() {
                     autoFocus
                     value={orgProdQuery}
                     onChange={e => searchOrgProducts(e.target.value)}
-                    placeholder="Search by code or name…"
+                    placeholder="Search by code, name, size… (e.g. TA207 divan queen)"
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400"
                   />
                   {orgProdSearching && <p className="text-xs text-gray-400">Searching…</p>}
