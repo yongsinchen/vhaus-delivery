@@ -166,9 +166,15 @@ function ServicePage() {
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
+  // Approvers (same set as delivery-date approvers) can create service cases
+  // directly; everyone else (salesmen) submits a request for approval.
+  const role = (user?.base_role || user?.role || "").toLowerCase();
+  const isApprover = ["master", "manager", "operation_manager", "company_admin"].includes(role);
+
   const [services, setServices] = useState([]);
   const [pending, setPending] = useState([]);
-  const [tab, setTab] = useState("cases"); // "cases" | "pending"
+  const [requests, setRequests] = useState([]); // service approval requests
+  const [tab, setTab] = useState("cases"); // "cases" | "pending" | "requests"
   const [loading, setLoading] = useState(true);
   const [statusGroup, setStatusGroup] = useState("open"); // open (default) | scheduled | resolved
   const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
@@ -220,7 +226,16 @@ function ServicePage() {
     setPending(Array.isArray(d) ? d : []);
   }, [companyId]);
 
-  useEffect(() => { loadServices(); loadPending(); }, [loadServices, loadPending]);
+  const loadRequests = useCallback(async () => {
+    if (!companyId) return;
+    try {
+      const res = await af(`${API}/service-requests?company_id=${companyId}`);
+      const d = await res.json();
+      setRequests(Array.isArray(d.requests) ? d.requests : []);
+    } catch { /* non-fatal */ }
+  }, [companyId]);
+
+  useEffect(() => { loadServices(); loadPending(); loadRequests(); }, [loadServices, loadPending, loadRequests]);
   useEffect(() => {
     if (!companyId) return;
     af(`${API}/company-settings?company_id=${companyId}`).then(r => r.json()).then(d => {
@@ -248,16 +263,36 @@ function ServicePage() {
     setOrderResults((Array.isArray(all) ? all : []).slice(0, 10));
   };
 
+  const resetCreate = () => { setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); };
   const createService = async () => {
     try {
-      await withLoading("Creating service case…", async () => {
+      await withLoading(isApprover ? "Creating service case…" : "Submitting request…", async () => {
         const items = createItems
           .filter(i => String(i.description || "").trim())
           .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1, arrival_date: i.arrival_date || null }));
-        const res = await af(`${API}/service-cases`, { method: "POST", body: JSON.stringify({ ...createForm, items }) });
+        // Approvers create the case directly; salesmen submit a request that a
+        // PIC must approve before the case (and its delivery legs) exist.
+        const endpoint = isApprover ? "service-cases" : "service-requests";
+        const res = await af(`${API}/${endpoint}`, { method: "POST", body: JSON.stringify({ ...createForm, items }) });
         const d = await res.json();
-        if (!d.service) throw new Error(d.error || "Failed");
-        toast.success("Service case created"); setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); loadServices();
+        if (isApprover ? !d.service : !d.request) throw new Error(d.error || "Failed");
+        toast.success(isApprover ? "Service case created" : "Service request submitted for approval");
+        resetCreate();
+        if (isApprover) loadServices(); else { loadRequests(); setTab("requests"); }
+      });
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const decideRequest = async (id, action) => {
+    let note = null;
+    if (action === "reject") { note = window.prompt("Reason for rejecting (optional):") ?? null; }
+    try {
+      await withLoading(action === "approve" ? "Approving…" : "Rejecting…", async () => {
+        const res = await af(`${API}/service-requests/${id}/${action}`, { method: "PATCH", body: JSON.stringify({ note }) });
+        const d = await res.json();
+        if (!d.request) throw new Error(d.error || "Failed");
+        toast.success(action === "approve" ? "Approved — service case created" : "Request rejected");
+        loadRequests(); if (action === "approve") loadServices();
       });
     } catch (e) { toast.error(e.message); }
   };
@@ -439,6 +474,15 @@ function ServicePage() {
         <button onClick={() => setTab("pending")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "pending" ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-amber-300"}`}>
           Pending {pending.length > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pending.length}</span>}
         </button>
+        {(() => {
+          const pendingReqs = requests.filter(r => r.status === "pending").length;
+          return (
+            <button onClick={() => setTab("requests")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "requests" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-blue-300"}`}>
+              {isApprover ? "Approvals" : "My Requests"}
+              {pendingReqs > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pendingReqs}</span>}
+            </button>
+          );
+        })()}
       </div>
 
       {/* Status-group sub-tabs — Open (default) / Scheduled / Resolved. */}
@@ -482,6 +526,53 @@ function ServicePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Requests tab — approvers see the queue with Approve/Reject; salesmen
+          see their own submissions with status. */}
+      {tab === "requests" && (
+        <div className="space-y-2">
+          {requests.length === 0 && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-4xl mb-3">📝</div>
+              <p className="font-medium">{isApprover ? "No service requests" : "You haven't submitted any requests"}</p>
+              <p className="text-xs mt-1">{isApprover ? "Salesman-submitted service requests will appear here for approval" : 'Click "+ New Service Case" to submit one for approval'}</p>
+            </div>
+          )}
+          {requests.map(r => {
+            const stBadge = r.status === "pending" ? "bg-amber-100 text-amber-700" : r.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500";
+            return (
+              <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-lg">{TYPE_ICON[r.service_type] || "🔧"}</span>
+                      <span className="font-bold text-gray-900 text-sm">{SERVICE_TYPES[r.service_type] || `Type ${r.service_type}`}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${stBadge}`}>{r.status}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {r.so_number && <span className="text-violet-600 font-medium">{r.so_number} · </span>}
+                      {r.customer_name || "No customer"}
+                      {r.requested_by_name && <span className="ml-2 text-gray-400">· by {r.requested_by_name}</span>}
+                    </p>
+                    {r.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-md">{r.description}</p>}
+                    {(r.items || []).length > 0 && <p className="text-[11px] text-gray-400 mt-0.5">{r.items.length} item(s){r.delivery_date ? ` · date ${r.delivery_date}` : r.schedule_tbc ? " · TBC" : ""}</p>}
+                    {r.status === "rejected" && r.decision_note && <p className="text-xs text-red-500 mt-1">Rejected: {r.decision_note}</p>}
+                  </div>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <span className="text-xs text-gray-400">{r.created_at ? new Date(r.created_at).toLocaleDateString("en-MY") : ""}</span>
+                    {isApprover && r.status === "pending" && (
+                      <div className="flex gap-2">
+                        <button onClick={() => decideRequest(r.id, "approve")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">Approve</button>
+                        <button onClick={() => decideRequest(r.id, "reject")} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -698,7 +789,7 @@ function ServicePage() {
             </div>
             <div className="px-6 py-4 border-t flex gap-3 justify-end">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
-              <button onClick={createService} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700">Create</button>
+              <button onClick={createService} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700">{isApprover ? "Create" : "Submit for approval"}</button>
             </div>
           </div>
         </div>
