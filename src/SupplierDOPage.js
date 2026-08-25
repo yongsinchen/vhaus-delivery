@@ -287,6 +287,7 @@ function SupplierDOPage() {
     try {
       const payload = {
         header: preview.header,
+        company_id: preview.header.company_id || null,
         photo_url: preview.photo_url,
         allow_duplicate: allowDuplicate,
         items: preview.items.map(it => ({
@@ -341,6 +342,29 @@ function SupplierDOPage() {
                 className="w-full px-3 py-1.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
             </div>
           ))}
+        </div>
+
+        {/* Bill-to company — which of our companies this DO belongs to. Auto-detected
+            from the DO's "Bill To", editable so it can be corrected before saving. */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Bill to company <span className="text-gray-400">(this DO will appear under this company)</span></label>
+              <select value={preview.header.company_id || ""} onChange={e => setPreview(p => ({ ...p, header: { ...p.header, company_id: e.target.value } }))}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                <option value="">— Select company —</option>
+                {(preview.companies || []).map(c => <option key={c.companyId} value={c.companyId}>{c.companyName}</option>)}
+              </select>
+            </div>
+            {preview.header.bill_to && (
+              <div className="text-xs text-gray-500 sm:pt-5">
+                Detected on DO: <span className="font-medium text-gray-700">{preview.header.bill_to}</span>
+                {preview.header.bill_to_company_name
+                  ? <span className="ml-1 text-emerald-600">→ matched {preview.header.bill_to_company_name}</span>
+                  : <span className="ml-1 text-amber-600">→ no match, please pick</span>}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Items */}
