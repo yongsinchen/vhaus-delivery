@@ -30,7 +30,6 @@ const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue
 const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
 const ITEM_ACTION_ICON = { 1: "🪛", 2: "🔧", 3: "🔄" };
 const legDate = l => l?.scheduled_at || l?.scheduled_date || "";
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 async function toDataUrl(url) {
   if (!url) return null;
@@ -40,64 +39,76 @@ async function toDataUrl(url) {
   } catch { return null; }
 }
 
-// Print the Service Note (opens a print window → Save as PDF). Mirrors the
-// other printed documents in the app: a company header, the case details, and
-// the item + leg tables.
-function printServiceNote(detail, company = {}) {
+// Save the Service Note as a real PDF file (jsPDF + autotable, lazily imported)
+// — a company header, the case details, and the item + leg tables. Downloads
+// directly, no print dialog.
+async function printServiceNote(detail, company = {}) {
+  const { jsPDF } = await import("jspdf");
+  const autoTable = (await import("jspdf-autotable")).default;
   const svc = detail.service || {}, order = detail.order || {};
   const items = detail.items || [], legs = detail.legs || [];
-  const w = window.open("", "_blank"); if (!w) return;
-  const row = (cells) => `<tr>${cells.map(c => `<td style="border:1px solid #ccc;padding:4px 8px;font-size:12px">${c}</td>`).join("")}</tr>`;
-  const head = (cells) => `<tr>${cells.map(c => `<th style="border:1px solid #ccc;padding:4px 8px;font-size:12px;background:#f2f2f2;text-align:left">${c}</th>`).join("")}</tr>`;
-  const itemsTable = items.length ? `
-    <table style="border-collapse:collapse;width:100%;margin-top:6px">
-      ${head(["No", "Item", "Action", "Qty", "Arrival", "Status"])}
-      ${items.map((it, i) => row([i + 1, esc(it.description), ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", esc(it.status || "pending")])).join("")}
-    </table>` : `<p style="font-size:12px;color:#888">No items.</p>`;
-  const legsTable = legs.length ? `
-    <table style="border-collapse:collapse;width:100%;margin-top:6px">
-      ${head(["Leg", "From → To", "Scheduled", "Status", "Notes"])}
-      ${legs.map(l => row([l.leg_order, `${esc(l.from_location)} → ${esc(l.to_location)}`, legDate(l) ? dmy(legDate(l)) : "—", esc(String(l.status || "").replace("_", " ")), esc(l.notes || "")])).join("")}
-    </table>` : `<p style="font-size:12px;color:#888">No legs.</p>`;
-  const info = (l, v) => `<div style="font-size:12px;margin:1px 0"><b>${l}:</b> ${esc(v || "—")}</div>`;
-  w.document.write(`<!doctype html><html><head><title>Service Note ${esc(order.so_number || svc.id || "")}</title></head>
-    <body style="font-family:Arial,sans-serif;padding:24px;color:#111">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px">
-        <div style="display:flex;gap:12px;align-items:center">
-          ${company.logo ? `<img src="${esc(company.logo)}" style="height:48px"/>` : ""}
-          <div><div style="font-weight:bold;font-size:16px">${esc(company.name || "")}</div>
-          <div style="font-size:11px;color:#555">${esc(company.address || "")}</div>
-          ${company.hotline ? `<div style="font-size:11px;color:#555">Tel: ${esc(company.hotline)}</div>` : ""}</div>
-        </div>
-        <div style="text-align:right"><div style="font-size:18px;font-weight:bold">SERVICE NOTE</div>
-          <div style="font-size:12px">${esc(order.so_number ? `SO ${order.so_number}` : "")}</div></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:12px">
-        <div>
-          ${info("Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`)}
-          ${info("Status", svc.status)}
-          ${info("Customer", svc.customer_name || order.customer_name)}
-          ${info("Contact", svc.customer_phone || order.contact)}
-          ${info("Address", svc.customer_address || order.address)}
-        </div>
-        <div>
-          ${info("Service date", svc.service_date ? dmy(svc.service_date) : "")}
-          ${info("Due date", svc.due_date ? dmy(svc.due_date) : "")}
-          ${info("Salesman", order.salesman)}
-          ${info("Created", svc.created_at ? dmy(svc.created_at) : "")}
-        </div>
-      </div>
-      ${svc.description ? `<div style="margin-top:10px;font-size:12px"><b>Description:</b> ${esc(svc.description)}</div>` : ""}
-      <h3 style="font-size:13px;margin:16px 0 0">Items</h3>${itemsTable}
-      <h3 style="font-size:13px;margin:16px 0 0">Service Legs</h3>${legsTable}
-      <div style="margin-top:40px;display:flex;justify-content:space-between;font-size:12px">
-        <div style="border-top:1px solid #111;padding-top:4px;width:200px;text-align:center">Prepared by</div>
-        <div style="border-top:1px solid #111;padding-top:4px;width:200px;text-align:center">Customer sign</div>
-      </div>
-    </body></html>`);
-  w.document.close();
-  w.focus();
-  setTimeout(() => { try { w.print(); } catch { /* user can print manually */ } }, 400);
+
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const M = 40, RIGHT = 555;
+  let y = 42;
+
+  // Header: logo + company info (left), title + SO (right).
+  let textX = M;
+  if (company.logo) { try { const logo = await toDataUrl(company.logo); if (logo) { doc.addImage(logo, "PNG", M, y - 6, 90, 34); textX = M + 100; } } catch { /* skip logo */ } }
+  doc.setFont("helvetica", "bold").setFontSize(13).text(String(company.name || ""), textX, y + 6);
+  doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(90);
+  let my = y + 18;
+  if (company.reg) { doc.text(String(company.reg), textX, my); my += 10; }
+  if (company.address) { doc.text(doc.splitTextToSize(String(company.address), 250), textX, my); my += 10; }
+  if (company.hotline) { doc.text("Tel: " + company.hotline, textX, my); my += 10; }
+  doc.setTextColor(17);
+  doc.setFont("helvetica", "bold").setFontSize(15).text("SERVICE NOTE", RIGHT, y + 6, { align: "right" });
+  doc.setFont("helvetica", "normal").setFontSize(9).text(order.so_number ? `SO ${order.so_number}` : "", RIGHT, y + 20, { align: "right" });
+
+  y = Math.max(my, y + 42) + 6;
+  doc.setDrawColor(17).setLineWidth(1).line(M, y, RIGHT, y); y += 16;
+
+  // Two-column info block.
+  const L = [
+    ["Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`],
+    ["Status", svc.status], ["Customer", svc.customer_name || order.customer_name],
+    ["Contact", svc.customer_phone || order.contact], ["Address", svc.customer_address || order.address],
+  ];
+  const R = [
+    ["Service date", svc.service_date ? dmy(svc.service_date) : ""],
+    ["Due date", svc.due_date ? dmy(svc.due_date) : ""],
+    ["Salesman", order.salesman], ["Created", svc.created_at ? dmy(svc.created_at) : ""],
+  ];
+  doc.setFontSize(9);
+  const rows = Math.max(L.length, R.length);
+  for (let i = 0; i < rows; i++) {
+    const yy = y + i * 13;
+    if (L[i]) { doc.setFont("helvetica", "bold").text(L[i][0] + ":", M, yy); doc.setFont("helvetica", "normal").text(String(L[i][1] || "—"), M + 62, yy); }
+    if (R[i]) { doc.setFont("helvetica", "bold").text(R[i][0] + ":", 320, yy); doc.setFont("helvetica", "normal").text(String(R[i][1] || "—"), 320 + 62, yy); }
+  }
+  y += rows * 13 + 6;
+  if (svc.description) {
+    doc.setFont("helvetica", "bold").text("Description:", M, y);
+    doc.setFont("helvetica", "normal").text(doc.splitTextToSize(String(svc.description), RIGHT - M - 70), M + 62, y);
+    y += 18;
+  }
+
+  const tableOpts = { theme: "grid", styles: { fontSize: 9, cellPadding: 4 }, headStyles: { fillColor: [242, 242, 242], textColor: 30, fontStyle: "bold" }, margin: { left: M, right: 40 } };
+  autoTable(doc, { ...tableOpts, startY: y + 4,
+    head: [["No", "Item", "Action", "Qty", "Arrival", "Status"]],
+    body: items.length ? items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]) : [["", "No items", "", "", "", ""]] });
+  autoTable(doc, { ...tableOpts, startY: doc.lastAutoTable.finalY + 16,
+    head: [["Leg", "From → To", "Scheduled", "Status", "Notes"]],
+    body: legs.length ? legs.map(l => [l.leg_order, `${l.from_location || ""} → ${l.to_location || ""}`, legDate(l) ? dmy(legDate(l)) : "—", String(l.status || "").replace("_", " "), l.notes || ""]) : [["", "No legs", "", "", ""]] });
+
+  // Signature lines.
+  const sy = doc.lastAutoTable.finalY + 48;
+  doc.setDrawColor(17).setLineWidth(0.5);
+  doc.line(M, sy, M + 200, sy); doc.line(RIGHT - 200, sy, RIGHT, sy);
+  doc.setFontSize(9).text("Prepared by", M + 100, sy + 12, { align: "center" });
+  doc.text("Customer sign", RIGHT - 100, sy + 12, { align: "center" });
+
+  doc.save(`ServiceNote_${order.so_number || svc.id || "case"}.pdf`);
 }
 
 // Export the Service Note as a real .xlsx (ExcelJS, lazily imported).
@@ -814,7 +825,7 @@ function ServicePage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => printServiceNote(detail, company)} title="Download / print as PDF"
+                      <button onClick={() => printServiceNote(detail, company)} title="Download as PDF"
                         className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">📄 PDF</button>
                       <button onClick={() => exportServiceNoteExcel(detail, company)} title="Download as Excel"
                         className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">⬇ Excel</button>
