@@ -178,6 +178,8 @@ function ServicePage() {
   const [loading, setLoading] = useState(true);
   const [statusGroup, setStatusGroup] = useState("open"); // open (default) | scheduled | resolved
   const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
+  const [dateFrom, setDateFrom] = useState(""); // scheduled-date range (svc.due_date)
+  const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
   const [company, setCompany] = useState({}); // header/logo for the printed/exported Service Note
@@ -431,6 +433,16 @@ function ServicePage() {
       ? items.some(it => !!it.arrival_date)
       : items.some(it => !it.arrival_date);
   };
+  // Scheduled-date range filter — on the case's due_date (the date the work is
+  // scheduled for). A case with no due_date is excluded once a range is set.
+  const matchesDate = (svc) => {
+    if (!dateFrom && !dateTo) return true;
+    const d = (svc.due_date || "").slice(0, 10);
+    if (!d) return false;
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  };
   const matchesSearch = (svc) => !q || [
     svc._order?.so_number, svc.orders?.so_number,
     svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
@@ -446,15 +458,15 @@ function ServicePage() {
   // Count per status group (type scope + search + arrival applied, group not)
   // so the sub-tab badges reflect what the active tab would show.
   const groupCounts = services.reduce((acc, svc) => {
-    if (typeScope(svc) && matchesArrival(svc) && matchesSearch(svc)) acc[groupOf(svc.status)] = (acc[groupOf(svc.status)] || 0) + 1;
+    if (typeScope(svc) && matchesArrival(svc) && matchesDate(svc) && matchesSearch(svc)) acc[groupOf(svc.status)] = (acc[groupOf(svc.status)] || 0) + 1;
     return acc;
   }, {});
   const filteredServices = services.filter(svc =>
-    typeScope(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc));
+    typeScope(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesDate(svc) && matchesSearch(svc));
   // Top-tab badges — current status group, per type scope (independent of which
   // tab is active so both badges are always right).
-  const casesBadge = services.filter(svc => !isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc)).length;
-  const deliveryBadge = services.filter(svc => isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc)).length;
+  const casesBadge = services.filter(svc => !isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesDate(svc) && matchesSearch(svc)).length;
+  const deliveryBadge = services.filter(svc => isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesDate(svc) && matchesSearch(svc)).length;
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
@@ -470,6 +482,16 @@ function ServicePage() {
                 <option value="with">With arrival date</option>
                 <option value="without">Without arrival date</option>
               </select>
+              <div className="flex items-center gap-1">
+                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Scheduled from"
+                  className="px-2 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
+                <span className="text-xs text-gray-400">–</span>
+                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} title="Scheduled to"
+                  className="px-2 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
+                {(dateFrom || dateTo) && (
+                  <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="text-xs text-gray-400 hover:text-gray-600 px-1" title="Clear dates">✕</button>
+                )}
+              </div>
             </>
           )}
           <button onClick={() => setShowCreate(true)} className="px-4 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">+ New Service Case</button>
@@ -594,8 +616,8 @@ function ServicePage() {
       {(tab === "cases" || tab === "delivery") && !loading && filteredServices.length === 0 && (
         <div className="text-center py-16 text-gray-400">
           <div className="text-4xl mb-3">{tab === "delivery" ? "🚚" : "🔧"}</div>
-          <p className="font-medium">No {statusGroup} {tab === "delivery" ? "deliveries" : "service cases"}{q || filterArrival ? " match" : ""}</p>
-          <p className="text-xs mt-1">{q || filterArrival ? "Try a different search or arrival filter, or switch tab" : `${tab === "delivery" ? "Deliveries" : "Cases"} in the ${statusGroup} stage will appear here`}</p>
+          <p className="font-medium">No {statusGroup} {tab === "delivery" ? "deliveries" : "service cases"}{q || filterArrival || dateFrom || dateTo ? " match" : ""}</p>
+          <p className="text-xs mt-1">{q || filterArrival || dateFrom || dateTo ? "Try a different search, date, or arrival filter, or switch tab" : `${tab === "delivery" ? "Deliveries" : "Cases"} in the ${statusGroup} stage will appear here`}</p>
         </div>
       )}
       {(tab === "cases" || tab === "delivery") && <div className="space-y-2">
