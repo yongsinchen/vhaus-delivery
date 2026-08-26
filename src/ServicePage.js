@@ -85,11 +85,16 @@ async function printServiceNote(detail, company = {}) {
     if (L[i]) { doc.setFont("helvetica", "bold").text(L[i][0] + ":", M, yy); doc.setFont("helvetica", "normal").text(String(L[i][1] || "—"), M + 62, yy); }
     if (R[i]) { doc.setFont("helvetica", "bold").text(R[i][0] + ":", 320, yy); doc.setFont("helvetica", "normal").text(String(R[i][1] || "—"), 320 + 62, yy); }
   }
-  y += rows * 13 + 6;
-  if (svc.description) {
-    doc.setFont("helvetica", "bold").text("Description:", M, y);
-    doc.setFont("helvetica", "normal").text(doc.splitTextToSize(String(svc.description), RIGHT - M - 70), M + 62, y);
-    y += 18;
+  y += rows * 13 + 12;
+  // Description in its own bordered box (not inline with the info block).
+  {
+    doc.setFont("helvetica", "bold").setFontSize(9).text("DESCRIPTION", M, y);
+    y += 6;
+    const lines = doc.splitTextToSize(String(svc.description || ""), RIGHT - M - 16);
+    const boxH = Math.max(46, lines.length * 12 + 14);
+    doc.setDrawColor(150).setLineWidth(0.5).rect(M, y, RIGHT - M, boxH);
+    doc.setFont("helvetica", "normal").setFontSize(10).text(lines, M + 8, y + 15);
+    y += boxH + 14;
   }
 
   const tableOpts = { theme: "grid", styles: { fontSize: 9, cellPadding: 4 }, headStyles: { fillColor: [242, 242, 242], textColor: 30, fontStyle: "bold" }, margin: { left: M, right: 40 } };
@@ -143,7 +148,16 @@ async function exportServiceNoteExcel(detail, company = {}) {
   info("Customer", svc.customer_name || order.customer_name, "Service date", svc.service_date ? dmy(svc.service_date) : "");
   info("Contact", svc.customer_phone || order.contact, "Due date", svc.due_date ? dmy(svc.due_date) : "");
   info("Address", svc.customer_address || order.address, "Salesman", order.salesman);
-  if (svc.description) { info("Description", svc.description, "", ""); }
+  // Description in its own bordered box spanning the sheet width.
+  r++;
+  ws.getCell(`A${r}`).value = "DESCRIPTION"; ws.getCell(`A${r}`).font = { bold: true }; r++;
+  ws.mergeCells(`A${r}:F${r}`);
+  const dcell = ws.getCell(`A${r}`);
+  dcell.value = svc.description || "";
+  dcell.alignment = { wrapText: true, vertical: "top" };
+  dcell.border = boxAll;
+  ws.getRow(r).height = 60;
+  r++;
 
   r++;
   const table = (title, heads, rows) => {
