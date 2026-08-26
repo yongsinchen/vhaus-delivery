@@ -446,7 +446,7 @@ function ServicePage() {
     svc._order?.so_number, svc.orders?.so_number,
     svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
     svc.description, svc.customer_phone, svc._order?.contact,
-    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type],
+    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type], svc._sv_number,
   ].filter(Boolean).join(" ").toLowerCase().includes(q);
   // Count per status group (search + arrival applied, group not) so the tab
   // badges reflect what each tab would show.
@@ -605,6 +605,7 @@ function ServicePage() {
                 <span className="text-2xl">{TYPE_ICON[svc.service_type] || "🔧"}</span>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
+                    {svc._sv_number && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700">{svc._sv_number}</span>}
                     <span className="font-bold text-gray-900 text-sm">{SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`}</span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[svc.status] || "bg-gray-100"}`}>{svc.status}</span>
                     {svc.source === "legacy_order" && <span className="px-1.5 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">Legacy</span>}
