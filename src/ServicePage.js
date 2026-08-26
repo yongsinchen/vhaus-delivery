@@ -29,7 +29,6 @@ const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue
 // Per-item action on a service case (matches backend service_items.action_type).
 const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
 const ITEM_ACTION_ICON = { 1: "🪛", 2: "🔧", 3: "🔄" };
-const legDate = l => l?.scheduled_at || l?.scheduled_date || "";
 
 async function toDataUrl(url) {
   if (!url) return null;
@@ -46,7 +45,7 @@ async function printServiceNote(detail, company = {}) {
   const { jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
   const svc = detail.service || {}, order = detail.order || {};
-  const items = detail.items || [], legs = detail.legs || [];
+  const items = detail.items || [];
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const M = 40, RIGHT = 555;
@@ -97,9 +96,6 @@ async function printServiceNote(detail, company = {}) {
   autoTable(doc, { ...tableOpts, startY: y + 4,
     head: [["No", "Item", "Action", "Qty", "Arrival", "Status"]],
     body: items.length ? items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]) : [["", "No items", "", "", "", ""]] });
-  autoTable(doc, { ...tableOpts, startY: doc.lastAutoTable.finalY + 16,
-    head: [["Leg", "From → To", "Scheduled", "Status", "Notes"]],
-    body: legs.length ? legs.map(l => [l.leg_order, `${l.from_location || ""} → ${l.to_location || ""}`, legDate(l) ? dmy(legDate(l)) : "—", String(l.status || "").replace("_", " "), l.notes || ""]) : [["", "No legs", "", "", ""]] });
 
   // Signature lines.
   const sy = doc.lastAutoTable.finalY + 48;
@@ -115,7 +111,7 @@ async function printServiceNote(detail, company = {}) {
 async function exportServiceNoteExcel(detail, company = {}) {
   const ExcelJS = (await import("exceljs")).default;
   const svc = detail.service || {}, order = detail.order || {};
-  const items = detail.items || [], legs = detail.legs || [];
+  const items = detail.items || [];
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Service Note", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   ws.columns = [{ width: 6 }, { width: 26 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }];
@@ -159,8 +155,6 @@ async function exportServiceNoteExcel(detail, company = {}) {
   };
   table("Items", ["No", "Item", "Action", "Qty", "Arrival", "Status"],
     items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]));
-  table("Service Legs", ["Leg", "From", "To", "Scheduled", "Status", "Notes"],
-    legs.map(l => [l.leg_order, l.from_location || "", l.to_location || "", legDate(l) ? dmy(legDate(l)) : "—", String(l.status || "").replace("_", " "), l.notes || ""]));
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
