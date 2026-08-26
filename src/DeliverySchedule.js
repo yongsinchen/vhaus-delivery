@@ -866,6 +866,75 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
   );
 }
 
+// -- Unassigned card quick-view: order/DO/service details + items without
+//    having to assign it to a team first.
+function UnassignedPreviewModal({ data, onClose }) {
+  const { type, item } = data;
+  const so = item.sales_orders || {};
+  const isDo = type === "do";
+  const number = isDo ? item.do_number : item.so_number;
+  const typeLabel = isDo ? "Delivery Order" : type === "service" ? "Service" : "Order";
+  const customer = isDo ? so.customer_name : item.customer_name;
+  const contact = isDo ? (so.customer_contact || so.contact) : item.contact;
+  const address = isDo ? (item.delivery_address || so.customer_address) : item.address;
+  const dateStr = isDo ? item.delivery_date : item.delivery_date;
+  const amount = item.order_amount;
+  const balance = item.balance;
+  const rows = isDo
+    ? (item.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ name: i.product_name || i.product_code || "—", qty: Number(i.quantity) || 0 }))
+    : parseItems(item.items).map(i => ({ name: i.itemName || i.product_name || "—", qty: Number(i.qty ?? i.quantity) || 0 }));
+  const Row = ({ label, value }) => value ? (
+    <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">{label}</span><span className="text-gray-800 break-words">{value}</span></div>
+  ) : null;
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3.5 border-b flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{typeLabel}</span>
+            <span className="font-bold text-gray-900 text-sm">{number}</span>
+            {item.sv_number && <span className="text-xs text-purple-500">{item.sv_number}</span>}
+            {!isDo && so.order_number && <span className="text-xs text-gray-400">{so.order_number}</span>}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+        </div>
+        <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+          <div className="space-y-1.5">
+            <Row label="Customer" value={customer} />
+            <Row label="Contact" value={contact} />
+            <Row label="Address" value={address} />
+            <Row label="Delivery date" value={dateStr} />
+            <Row label="Time slot" value={item.time_slot} />
+            <Row label="Amount" value={amount != null && Number(amount) > 0 ? `RM ${Number(amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : null} />
+            <Row label="Balance" value={parseFloat(balance) > 0 ? `RM ${balance}` : null} />
+          </div>
+          {item.service_note && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Service note</p>
+              <p className="text-sm text-gray-800 whitespace-pre-line border border-gray-200 rounded-xl px-3 py-2">{item.service_note}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-xs font-medium text-gray-500 mb-1">Items ({rows.length})</p>
+            {rows.length === 0
+              ? <p className="text-sm text-gray-400">No items listed.</p>
+              : (
+                <div className="space-y-1">
+                  {rows.map((r, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-1.5">
+                      <span className="text-gray-800">{r.name}</span>
+                      <span className="text-gray-500 shrink-0">×{r.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // -- Add Team Modal (replaces AddRouteModal) ---------------------------
 function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
   const [vehicleId, setVehicleId] = useState("");
@@ -1320,6 +1389,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
 
   const [serviceOrders, setServiceOrders] = useState([]);
   const [doModal, setDoModal] = useState(null);   // { salesOrderId, orderNumber, date } — Generate DO from the board
+  const [previewItem, setPreviewItem] = useState(null); // { type, item } — quick view of an unassigned card's details
   const [company, setCompany] = useState({});     // header/logo for printed DOs
   const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
@@ -1721,6 +1791,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       {showBlockedDates && <BlockedDatesModal blockedDates={blockedDates} onClose={() => setShowBlockedDates(false)} onRefresh={loadBlockedDates} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
+      {previewItem && <UnassignedPreviewModal data={previewItem} onClose={() => setPreviewItem(null)} />}
       {doModal && (
         <CreateDeliveryOrderModal
           salesOrderId={doModal.salesOrderId}
@@ -1883,7 +1954,10 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                               <span className="text-xs text-gray-400">{so.order_number}</span>
                               {item.status === "failed" && <span className="text-xs bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded">FAILED — retry</span>}
                             </div>
-                            <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
+                              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "do", item }); }} title="View details" className="text-gray-400 hover:text-violet-600 leading-none">👁</button>
+                            </span>
                           </div>
                           <p className="text-xs font-medium text-gray-700">{so.customer_name}</p>
                           <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
@@ -1925,6 +1999,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                             <span className="flex items-center gap-1.5">
                               {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
                               {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+                              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "service", item }); }} title="View details" className="text-gray-400 hover:text-purple-600 leading-none">👁</button>
                             </span>
                           </div>
                           <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
@@ -1954,6 +2029,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           <span className="flex items-center gap-1.5">
                             {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
                             {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+                            <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "order", item }); }} title="View details" className="text-gray-400 hover:text-blue-600 leading-none">👁</button>
                           </span>
                         </div>
                         <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
