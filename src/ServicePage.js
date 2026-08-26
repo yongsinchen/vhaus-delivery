@@ -308,6 +308,7 @@ function ServicePage() {
       customer_phone: editForm.customer_phone || null,
       customer_address: editForm.customer_address || null,
       description: editForm.description || null,
+      amount: editForm.amount === "" || editForm.amount == null ? "" : editForm.amount,
     });
     setEditForm(null);
   };
@@ -1008,7 +1009,7 @@ function ServicePage() {
                       className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
                       {Object.keys(STATUS_STYLE).map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
-                    <button onClick={() => setEditForm({ id: detail.service.id, service_type: detail.service.service_type || 1, customer_name: detail.service.customer_name || detail.order?.customer_name || "", customer_phone: detail.service.customer_phone || "", customer_address: detail.service.customer_address || "", description: detail.service.description || "" })}
+                    <button onClick={() => setEditForm({ id: detail.service.id, service_type: detail.service.service_type || 1, customer_name: detail.service.customer_name || detail.order?.customer_name || "", customer_phone: detail.service.customer_phone || "", customer_address: detail.service.customer_address || "", description: detail.service.description || "", amount: detail.service.amount != null ? String(detail.service.amount) : "" })}
                       className="ml-auto text-xs px-3 py-1 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50">✏️ Edit</button>
                     <button onClick={() => deleteService(detail.service.id)}
                       className="text-xs px-3 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Delete</button>
@@ -1037,6 +1038,11 @@ function ServicePage() {
                         <input value={editForm.customer_address} onChange={e => setEditForm(f => ({ ...f, customer_address: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
                       <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Description</label>
                         <textarea rows={2} value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                      {Number(editForm.service_type) === 5 && (
+                        <div><label className="block text-[11px] font-medium text-gray-500 mb-1">Amount (RM)</label>
+                          <input type="number" min="0" step="0.01" inputMode="decimal" value={editForm.amount} placeholder="0.00"
+                            onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))} className="w-full text-xs px-2 py-1.5 rounded-lg border border-gray-200" /></div>
+                      )}
                       <div className="flex items-center gap-2 justify-end">
                         <button onClick={() => setEditForm(null)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
                         <button onClick={saveEdit} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-medium">Save</button>
