@@ -34,14 +34,18 @@ const parseItems = items => {
   catch { return []; }
 };
 
-// Normalize a phone to wa.me international digits. Malaysian local numbers
-// ("012-345 6789" / "0123456789") become 60XXXXXXXXX; numbers already in
-// international form (60…/65…) are kept; anything else keeps its digits.
-const waNumber = (phone) => {
+// Normalize a phone to wa.me international digits. Numbers already in
+// international form (60…/65…) are kept. A leading 0 is a Malaysian local
+// number → 60XXXXXXXXX. A bare 8-digit number is Singapore local when the
+// order is flagged SG (country === "SG", or "singapore" in the address) →
+// 65XXXXXXXX; otherwise the digits are kept as-is.
+const waNumber = (phone, country, address) => {
   let d = String(phone || "").replace(/\D/g, "");
   if (!d) return "";
   if (d.startsWith("60") || d.startsWith("65")) return d;
   if (d.startsWith("0")) return "60" + d.slice(1);
+  const isSG = String(country || "").toUpperCase() === "SG" || /\bsingapore\b/i.test(address || "");
+  if (isSG && d.length === 8) return "65" + d;
   return d;
 };
 
@@ -540,8 +544,8 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
           </div>
           <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
           {o.contact && (
-            waNumber(o.contact)
-              ? <a href={`https://wa.me/${waNumber(o.contact)}`} target="_blank" rel="noopener noreferrer" draggable={false} onClick={e => e.stopPropagation()}
+            waNumber(o.contact, o.country, o.address)
+              ? <a href={`https://wa.me/${waNumber(o.contact, o.country, o.address)}`} target="_blank" rel="noopener noreferrer" draggable={false} onClick={e => e.stopPropagation()}
                   className="text-[11px] text-emerald-600 hover:text-emerald-700 hover:underline leading-tight inline-flex items-center gap-1" title="Message on WhatsApp">
                   <span aria-hidden="true">💬</span>{o.contact}
                 </a>
