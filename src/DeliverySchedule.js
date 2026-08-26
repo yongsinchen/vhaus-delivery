@@ -1853,15 +1853,26 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} />}
 
       <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
-        {/* Unassigned Panel */}
+        {/* Unassigned Panel — also a drop zone: dragging an assigned stop here
+            removes it from its route and returns it to the pool. */}
         <div className="xl:w-72 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className={`bg-white rounded-xl border shadow-sm ${!readOnly && draggingAssigned ? "border-orange-400 ring-2 ring-orange-200" : "border-gray-200"}`}
+            onDragOver={e => { if (!readOnly && draggingAssigned) e.preventDefault(); }}
+            onDrop={() => {
+              if (readOnly || !draggingAssigned) return;
+              const sid = draggingAssigned.scheduleId;
+              setDraggingAssigned(null);
+              if (sid) unassignOrder(sid);
+            }}>
             <div className="px-4 py-3 border-b bg-orange-50 rounded-t-xl">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-orange-700">
                   Unassigned <span className="ml-1 bg-orange-200 text-orange-800 text-xs px-2 py-0.5 rounded-full">{combinedUnassigned.length}</span>
                 </h3>
               </div>
+              {!readOnly && draggingAssigned && (
+                <p className="text-xs text-orange-500 mt-1 font-medium">Drop here to unassign</p>
+              )}
               <div className="flex gap-2 mt-1 flex-wrap">
                 <span className="text-xs text-gray-500">Delivery</span>
                 <span className="text-xs text-purple-600">Service</span>
