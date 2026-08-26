@@ -214,6 +214,7 @@ function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
             <Row label="Contact" value={req.customer_phone} />
             <Row label="Address" value={req.customer_address} />
             <Row label="Requested by" value={req.requested_by_name} />
+            <Row label="Amount" value={req.amount != null && req.amount !== "" ? `RM ${Number(req.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : ""} />
             <Row label="Requested date" value={req.service_date ? dmy(req.service_date) : ""} />
             <Row label="Wanted schedule" value={req.schedule_tbc ? "TBC" : (req.delivery_date ? dmy(req.delivery_date) : "")} />
             <Row label="Submitted" value={req.created_at ? new Date(req.created_at).toLocaleString("en-MY") : ""} />
@@ -307,7 +308,7 @@ function ServicePage() {
   };
 
   // Create form
-  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" });
+  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, amount: "", customer_name: "", customer_phone: "", customer_address: "" });
   const [orderSearch, setOrderSearch] = useState("");
   const [orderResults, setOrderResults] = useState([]);
   // Line items entered while creating a case (added later via the detail drawer).
@@ -369,7 +370,7 @@ function ServicePage() {
     setOrderResults((Array.isArray(all) ? all : []).slice(0, 10));
   };
 
-  const resetCreate = () => { setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, customer_name: "", customer_phone: "", customer_address: "" }); };
+  const resetCreate = () => { setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, amount: "", customer_name: "", customer_phone: "", customer_address: "" }); };
   const createService = async () => {
     try {
       await withLoading(isApprover ? "Creating service case…" : "Submitting request…", async () => {
@@ -778,7 +779,12 @@ function ServicePage() {
                   )}
                 </div>
               </div>
-              <span className="text-xs text-gray-400 flex-shrink-0">{svc.created_at ? new Date(svc.created_at).toLocaleDateString("en-MY") : ""}</span>
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                {svc.amount != null && svc.amount !== "" && (
+                  <span className="text-sm font-bold text-gray-800">RM {Number(svc.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>
+                )}
+                <span className="text-xs text-gray-400">{svc.created_at ? new Date(svc.created_at).toLocaleDateString("en-MY") : ""}</span>
+              </div>
             </div>
           </div>
         ))}
@@ -942,6 +948,14 @@ function ServicePage() {
                   </label>
                 </div>
               </div>
+              {Number(createForm.service_type) === 5 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Amount <span className="text-gray-400">(RM)</span></label>
+                  <input type="number" min="0" step="0.01" inputMode="decimal" value={createForm.amount}
+                    onChange={e => setCreateForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+                </div>
+              )}
             </div>
             <div className="px-6 py-4 border-t flex gap-3 justify-end shrink-0">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
@@ -967,6 +981,9 @@ function ServicePage() {
                       <div>
                         <h2 className="font-bold text-gray-900">{SERVICE_TYPES[detail.service?.service_type]}</h2>
                         <p className="text-xs text-gray-500">{[detail.order?.so_number, detail.order?.customer_name].filter(Boolean).join(" · ")}</p>
+                        {detail.service?.amount != null && detail.service?.amount !== "" && (
+                          <p className="text-sm font-bold text-gray-800 mt-0.5">RM {Number(detail.service.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
