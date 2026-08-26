@@ -38,92 +38,82 @@ async function toDataUrl(url) {
   } catch { return null; }
 }
 
-// Save the Service Note as a real PDF file (jsPDF + autotable, lazily imported)
-// — company header, the case details, and the description box. Downloads
-// directly, no print dialog.
-async function printServiceNote(detail, company = {}) {
-  const { jsPDF } = await import("jspdf");
+// Print the Service Note (→ Save as PDF from the browser dialog). Rendered as
+// HTML with system fonts so Chinese / mixed-language text renders correctly —
+// jsPDF's built-in fonts have no CJK glyphs. Same layout as before: company
+// header, the case details, a description box, and an items table.
+function printServiceNote(detail, company = {}) {
   const svc = detail.service || {}, order = detail.order || {};
-
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
-  const M = 40, RIGHT = 555;
-  let y = 42;
-
-  // Header: logo + company info (left), title + SO (right).
-  let textX = M;
-  if (company.logo) { try { const logo = await toDataUrl(company.logo); if (logo) { doc.addImage(logo, "PNG", M, y - 6, 90, 34); textX = M + 100; } } catch { /* skip logo */ } }
-  doc.setFont("helvetica", "bold").setFontSize(13).text(String(company.name || ""), textX, y + 6);
-  doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(90);
-  const LH = 10;               // advance by ACTUAL wrapped line count so lines never overlap
-  const addrW = 300;           // wrap width — stays left of the right-aligned title
-  let my = y + 18;
-  if (company.reg) { doc.text(String(company.reg), textX, my); my += LH; }
-  if (company.address) { const al = doc.splitTextToSize(String(company.address), addrW); doc.text(al, textX, my); my += al.length * LH; }
-  if (company.hotline) { doc.text("Tel: " + company.hotline, textX, my); my += LH; }
-  doc.setTextColor(17);
-  doc.setFont("helvetica", "bold").setFontSize(15).text("SERVICE NOTE", RIGHT, y + 6, { align: "right" });
-  doc.setFont("helvetica", "normal").setFontSize(9).text(order.so_number ? `SO ${order.so_number}` : "", RIGHT, y + 20, { align: "right" });
-
-  y = Math.max(my, y + 42) + 6;
-  doc.setDrawColor(17).setLineWidth(1).line(M, y, RIGHT, y); y += 16;
-
-  // Two-column info block.
-  const L = [
-    ["Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`],
-    ["Status", svc.status], ["Customer", svc.customer_name || order.customer_name],
-    ["Contact", svc.customer_phone || order.contact], ["Address", svc.customer_address || order.address],
-  ];
-  const R = [
-    ["Service date", svc.service_date ? dmy(svc.service_date) : ""],
-    ["Due date", svc.due_date ? dmy(svc.due_date) : ""],
-    ["Salesman", order.salesman], ["Created", svc.created_at ? dmy(svc.created_at) : ""],
-  ];
-  doc.setFontSize(9);
-  const rows = Math.max(L.length, R.length);
-  for (let i = 0; i < rows; i++) {
-    const yy = y + i * 13;
-    if (L[i]) { doc.setFont("helvetica", "bold").text(L[i][0] + ":", M, yy); doc.setFont("helvetica", "normal").text(String(L[i][1] || "—"), M + 62, yy); }
-    if (R[i]) { doc.setFont("helvetica", "bold").text(R[i][0] + ":", 320, yy); doc.setFont("helvetica", "normal").text(String(R[i][1] || "—"), 320 + 62, yy); }
-  }
-  y += rows * 13 + 12;
-  // Description in its own bordered box (not inline with the info block).
-  {
-    doc.setFont("helvetica", "bold").setFontSize(9).text("DESCRIPTION", M, y);
-    y += 6;
-    const lines = doc.splitTextToSize(String(svc.description || ""), RIGHT - M - 16);
-    const boxH = Math.max(46, lines.length * 12 + 14);
-    doc.setDrawColor(150).setLineWidth(0.5).rect(M, y, RIGHT - M, boxH);
-    doc.setFont("helvetica", "normal").setFontSize(10).text(lines, M + 8, y + 15);
-    y += boxH + 14;
-  }
-
-  // Items table — name + quantity only (no arrival date).
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const items = Array.isArray(detail.items) ? detail.items : [];
-  if (items.length > 0) {
-    doc.setFont("helvetica", "bold").setFontSize(9).text("ITEMS", M, y); y += 6;
-    const rowH = 16, qtyX = RIGHT - 70;
-    doc.setDrawColor(150).setLineWidth(0.5);
-    const drawRow = (yy, name, qty, bold) => {
-      doc.rect(M, yy, RIGHT - M, rowH);
-      doc.line(qtyX, yy, qtyX, yy + rowH);
-      doc.setFont("helvetica", bold ? "bold" : "normal").setFontSize(9);
-      const nm = doc.splitTextToSize(String(name), qtyX - M - 12);
-      doc.text(nm[0] || "", M + 8, yy + 11);
-      doc.text(String(qty), qtyX + 8, yy + 11);
-    };
-    drawRow(y, "Item", "Qty", true); y += rowH;
-    for (const it of items) { drawRow(y, it.description || "—", Number(it.quantity) || 1, false); y += rowH; }
-    y += 14;
-  }
 
-  // Signature lines.
-  const sy = y + 40;
-  doc.setDrawColor(17).setLineWidth(0.5);
-  doc.line(M, sy, M + 200, sy); doc.line(RIGHT - 200, sy, RIGHT, sy);
-  doc.setFontSize(9).text("Prepared by", M + 100, sy + 12, { align: "center" });
-  doc.text("Customer sign", RIGHT - 100, sy + 12, { align: "center" });
+  const infoRow = (l1, v1, l2, v2) =>
+    `<tr><td class="lbl">${esc(l1)}</td><td class="val">${esc(v1 || "—")}</td>` +
+    `<td class="lbl">${l2 ? esc(l2) : ""}</td><td class="val">${l2 ? esc(v2 || "—") : ""}</td></tr>`;
 
-  doc.save(`ServiceNote_${order.so_number || svc.id || "case"}.pdf`);
+  const infoRows = [
+    infoRow("Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`, "Service date", svc.service_date ? dmy(svc.service_date) : ""),
+    infoRow("Status", svc.status, "Due date", svc.due_date ? dmy(svc.due_date) : ""),
+    infoRow("Customer", svc.customer_name || order.customer_name, "Salesman", order.salesman),
+    infoRow("Contact", svc.customer_phone || order.contact, "Created", svc.created_at ? dmy(svc.created_at) : ""),
+    infoRow("Address", svc.customer_address || order.address, "", ""),
+  ].join("");
+
+  const itemsBlock = items.length > 0 ? `
+    <div class="section">ITEMS</div>
+    <table class="items">
+      <thead><tr><th class="name">Item</th><th class="qty">Qty</th></tr></thead>
+      <tbody>${items.map(it => `<tr><td class="name">${esc(it.description || "—")}</td><td class="qty">${esc(Number(it.quantity) || 1)}</td></tr>`).join("")}</tbody>
+    </table>` : "";
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Service Note ${esc(order.so_number || svc.id || "")}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; color: #111; margin: 32px; font-size: 12px; }
+      .hdr { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 10px; }
+      .hdr .co { display: flex; gap: 12px; align-items: flex-start; }
+      .hdr img { height: 40px; object-fit: contain; }
+      .co-name { font-weight: 700; font-size: 15px; }
+      .co-sub { color: #555; font-size: 10px; line-height: 1.4; margin-top: 2px; white-space: pre-line; max-width: 320px; }
+      .title { text-align: right; }
+      .title .t { font-weight: 700; font-size: 18px; }
+      .title .so { font-size: 11px; margin-top: 2px; }
+      table.info { width: 100%; border-collapse: collapse; margin-top: 14px; }
+      table.info td { padding: 2px 4px; vertical-align: top; }
+      table.info .lbl { font-weight: 700; width: 90px; white-space: nowrap; }
+      table.info .val { width: auto; padding-right: 24px; }
+      .section { font-weight: 700; font-size: 11px; margin: 16px 0 4px; }
+      .desc { border: 1px solid #999; min-height: 60px; padding: 8px 10px; white-space: pre-line; font-size: 13px; }
+      table.items { width: 100%; border-collapse: collapse; }
+      table.items th, table.items td { border: 1px solid #999; padding: 5px 8px; font-size: 12px; text-align: left; }
+      table.items .qty { width: 60px; text-align: left; }
+      table.items thead th { font-weight: 700; }
+      .sign { display: flex; justify-content: space-between; margin-top: 56px; }
+      .sign div { width: 200px; border-top: 1px solid #111; padding-top: 6px; text-align: center; font-size: 11px; }
+      @media print { body { margin: 0; padding: 20px; } }
+    </style></head><body onload="window.focus();window.print();">
+    <div class="hdr">
+      <div class="co">
+        ${company.logo ? `<img src="${esc(company.logo)}" alt="">` : ""}
+        <div>
+          <div class="co-name">${esc(company.name || "")}</div>
+          <div class="co-sub">${[company.reg, company.address, company.hotline ? "Tel: " + company.hotline : ""].filter(Boolean).map(esc).join("\n")}</div>
+        </div>
+      </div>
+      <div class="title"><div class="t">SERVICE NOTE</div><div class="so">${order.so_number ? "SO " + esc(order.so_number) : ""}</div></div>
+    </div>
+    <table class="info">${infoRows}</table>
+    <div class="section">DESCRIPTION</div>
+    <div class="desc">${esc(svc.description || "")}</div>
+    ${itemsBlock}
+    <div class="sign"><div>Prepared by</div><div>Customer sign</div></div>
+  </body></html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups to print / save the service note as PDF."); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 
 // Export the Service Note as a real .xlsx (ExcelJS, lazily imported).
@@ -980,7 +970,7 @@ function ServicePage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => printServiceNote(detail, company)} title="Download as PDF"
+                      <button onClick={() => printServiceNote(detail, company)} title="Print / Save as PDF (supports Chinese)"
                         className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">📄 PDF</button>
                       <button onClick={() => exportServiceNoteExcel(detail, company)} title="Download as Excel"
                         className="text-xs px-3 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">⬇ Excel</button>
