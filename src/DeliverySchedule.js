@@ -34,6 +34,17 @@ const parseItems = items => {
   catch { return []; }
 };
 
+// Normalize a phone to wa.me international digits. Malaysian local numbers
+// ("012-345 6789" / "0123456789") become 60XXXXXXXXX; numbers already in
+// international form (60…/65…) are kept; anything else keeps its digits.
+const waNumber = (phone) => {
+  let d = String(phone || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("60") || d.startsWith("65")) return d;
+  if (d.startsWith("0")) return "60" + d.slice(1);
+  return d;
+};
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
 // Print one Delivery Order — its OWN shipment lines (delivery_order_items), not
@@ -528,7 +539,14 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {o.balance}</span>}
           </div>
           <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
-          {o.contact && <p className="text-[11px] text-gray-500 leading-tight">{o.contact}</p>}
+          {o.contact && (
+            waNumber(o.contact)
+              ? <a href={`https://wa.me/${waNumber(o.contact)}`} target="_blank" rel="noopener noreferrer" draggable={false} onClick={e => e.stopPropagation()}
+                  className="text-[11px] text-emerald-600 hover:text-emerald-700 hover:underline leading-tight inline-flex items-center gap-1" title="Message on WhatsApp">
+                  <span aria-hidden="true">💬</span>{o.contact}
+                </a>
+              : <p className="text-[11px] text-gray-500 leading-tight">{o.contact}</p>
+          )}
           <p className="text-[11px] text-gray-400 leading-tight break-words">{o.address}</p>
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[11px]">
             <span className="text-gray-400">Ord: {o.order_date || "-"}</span>
