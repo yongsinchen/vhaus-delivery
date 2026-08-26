@@ -869,17 +869,11 @@ function VehicleModal({ vehicles, onClose, onRefresh }) {
 // -- Add Team Modal (replaces AddRouteModal) ---------------------------
 function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
   const [vehicleId, setVehicleId] = useState("");
-  const [driverId, setDriverId] = useState("");
-  const [drivers, setDrivers] = useState([]);
-
-  useEffect(() => {
-    af(`${API}/drivers`).then(res => res.json()).then(d => setDrivers(Array.isArray(d.drivers) ? d.drivers : []));
-  }, []);
 
   const handleCreate = async () => {
     if (!vehicleId) return alert("Please select a vehicle.");
-    // Driver is optional — a team can be created vehicle-only.
-    const res = await onCreate({ vehicle_id: parseInt(vehicleId), driver_id: driverId || null, helper_id: null });
+    // Vehicle-only team — no driver at creation.
+    const res = await onCreate({ vehicle_id: parseInt(vehicleId), driver_id: null, helper_id: null });
     if (res && res.error) alert(res.error);
   };
 
@@ -894,14 +888,6 @@ function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
             {activeVehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_plate ? `${v.vehicle_plate} — ` : ""}{v.driver_name || "Unknown driver"}{v.vehicle_type ? ` (${v.vehicle_type})` : ""}</option>)}
           </select>
           {activeVehicles.length === 0 && <p className="text-xs text-orange-500 mt-1">No active vehicles. <button onClick={onGoToVehicles} className="underline">Add vehicle first</button></p>}
-        </div>
-        <div className="mb-3">
-          <label className="text-xs text-gray-500 block mb-0.5">Select Driver <span className="text-gray-400">(optional)</span></label>
-          <select value={driverId} onChange={e => setDriverId(e.target.value)} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-            <option value="">-- No driver --</option>
-            {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-          {drivers.length === 0 && <p className="text-xs text-gray-400 mt-1">No driver accounts — you can still create a vehicle-only team.</p>}
         </div>
         <div className="flex gap-3 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
