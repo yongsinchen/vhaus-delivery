@@ -160,6 +160,82 @@ async function exportServiceNoteExcel(detail, company = {}) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Full-detail view of a service approval request, with the approver's
+// propose-a-date + approve / reject actions.
+function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
+  const [date, setDate] = useState(req.schedule_tbc ? "" : (req.delivery_date || ""));
+  const [tbc, setTbc] = useState(!!req.schedule_tbc);
+  const items = Array.isArray(req.items) ? req.items : [];
+  const Row = ({ label, value }) => value ? (
+    <div className="flex gap-2 text-sm"><span className="text-gray-400 w-28 shrink-0">{label}</span><span className="text-gray-800">{value}</span></div>
+  ) : null;
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{TYPE_ICON[req.service_type] || "🔧"}</span>
+            <h3 className="font-bold text-gray-900">{SERVICE_TYPES[req.service_type] || `Type ${req.service_type}`}</h3>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${req.status === "pending" ? "bg-amber-100 text-amber-700" : req.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{req.status}</span>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+        </div>
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          <div className="space-y-1.5">
+            <Row label="SO number" value={req.so_number} />
+            <Row label="Customer" value={req.customer_name} />
+            <Row label="Contact" value={req.customer_phone} />
+            <Row label="Address" value={req.customer_address} />
+            <Row label="Requested by" value={req.requested_by_name} />
+            <Row label="Requested date" value={req.service_date ? dmy(req.service_date) : ""} />
+            <Row label="Wanted schedule" value={req.schedule_tbc ? "TBC" : (req.delivery_date ? dmy(req.delivery_date) : "")} />
+            <Row label="Submitted" value={req.created_at ? new Date(req.created_at).toLocaleString("en-MY") : ""} />
+          </div>
+          {req.description && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Description</p>
+              <p className="text-sm text-gray-800 whitespace-pre-line border border-gray-200 rounded-xl px-3 py-2">{req.description}</p>
+            </div>
+          )}
+          {items.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Items ({items.length})</p>
+              <div className="space-y-1">
+                {items.map((it, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-1.5">
+                    <span className="text-gray-800">{it.description || "—"} <span className="text-gray-400">×{Number(it.quantity) || 1}</span></span>
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${it.arrival_date ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{it.arrival_date ? `arrives ${dmy(it.arrival_date)}` : "no arrival date"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {req.status === "rejected" && req.decision_note && <p className="text-xs text-red-500">Rejected: {req.decision_note}</p>}
+          {isApprover && req.status === "pending" && (
+            <div className="border-t pt-4">
+              <p className="text-xs font-medium text-gray-500 mb-1">Schedule date <span className="text-gray-400">(propose another date if needed)</span></p>
+              <div className="flex items-center gap-2">
+                <input type="date" value={tbc ? "" : date} disabled={tbc}
+                  onChange={e => setDate(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400 disabled:bg-gray-100 disabled:text-gray-400" />
+                <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <input type="checkbox" checked={tbc} onChange={e => setTbc(e.target.checked)} /> TBC
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+        {isApprover && req.status === "pending" && (
+          <div className="px-6 py-4 border-t flex gap-3 justify-end shrink-0">
+            <button onClick={() => onReject(req.id)} className="px-4 py-2 text-sm rounded-xl border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
+            <button onClick={() => onApprove(req.id, { deliveryDate: tbc ? "" : date })} className="px-5 py-2 text-sm rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700">Approve{!tbc && date && date !== (req.delivery_date || "") ? " with new date" : ""}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ServicePage() {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
@@ -174,6 +250,7 @@ function ServicePage() {
   const [services, setServices] = useState([]);
   const [pending, setPending] = useState([]);
   const [requests, setRequests] = useState([]); // service approval requests
+  const [reqDetail, setReqDetail] = useState(null); // service request open in the detail modal
   const [tab, setTab] = useState("cases"); // "cases" | "delivery" | "pending" | "requests"
   const [loading, setLoading] = useState(true);
   const [statusGroup, setStatusGroup] = useState("open"); // open (default) | scheduled | resolved
@@ -285,15 +362,20 @@ function ServicePage() {
     } catch (e) { toast.error(e.message); }
   };
 
-  const decideRequest = async (id, action) => {
-    let note = null;
-    if (action === "reject") { note = window.prompt("Reason for rejecting (optional):") ?? null; }
+  const decideRequest = async (id, action, opts = {}) => {
+    let note = opts.note ?? null;
+    if (action === "reject" && note == null) { note = window.prompt("Reason for rejecting (optional):") ?? null; }
     try {
       await withLoading(action === "approve" ? "Approving…" : "Rejecting…", async () => {
-        const res = await af(`${API}/service-requests/${id}/${action}`, { method: "PATCH", body: JSON.stringify({ note }) });
+        const payload = { note };
+        // Approver may propose another schedule date at approval. delivery_date
+        // present (even "") tells the backend to override; "" => schedule TBC.
+        if (action === "approve" && opts.deliveryDate !== undefined) payload.delivery_date = opts.deliveryDate;
+        const res = await af(`${API}/service-requests/${id}/${action}`, { method: "PATCH", body: JSON.stringify(payload) });
         const d = await res.json();
         if (!d.request) throw new Error(d.error || "Failed");
         toast.success(action === "approve" ? "Approved — service case created" : "Request rejected");
+        setReqDetail(null);
         loadRequests(); if (action === "approve") loadServices();
       });
     } catch (e) { toast.error(e.message); }
@@ -578,7 +660,7 @@ function ServicePage() {
           {requests.map(r => {
             const stBadge = r.status === "pending" ? "bg-amber-100 text-amber-700" : r.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500";
             return (
-              <div key={r.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div key={r.id} onClick={() => setReqDetail(r)} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-violet-200 transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -599,8 +681,8 @@ function ServicePage() {
                     <span className="text-xs text-gray-400">{r.created_at ? new Date(r.created_at).toLocaleDateString("en-MY") : ""}</span>
                     {isApprover && r.status === "pending" && (
                       <div className="flex gap-2">
-                        <button onClick={() => decideRequest(r.id, "approve")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">Approve</button>
-                        <button onClick={() => decideRequest(r.id, "reject")} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
+                        <button onClick={(e) => { e.stopPropagation(); setReqDetail(r); }} className="text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 font-medium">Review</button>
+                        <button onClick={(e) => { e.stopPropagation(); decideRequest(r.id, "reject"); }} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
                       </div>
                     )}
                   </div>
@@ -697,6 +779,17 @@ function ServicePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Service request detail / approval modal */}
+      {reqDetail && (
+        <RequestDetailModal
+          req={reqDetail}
+          isApprover={isApprover}
+          onApprove={(id, opts) => decideRequest(id, "approve", opts)}
+          onReject={(id) => decideRequest(id, "reject")}
+          onClose={() => setReqDetail(null)}
+        />
       )}
 
       {/* Create Modal */}
