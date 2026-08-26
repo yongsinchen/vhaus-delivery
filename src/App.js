@@ -6,6 +6,7 @@ import { FullPageLoader, useLoading, useToast } from "./UIComponents";
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
 const DeliveryDateRequestsPage = lazy(() => import("./DeliveryDateRequestsPage"));
+const OrderAmendmentsPage = lazy(() => import("./OrderAmendmentsPage"));
 const UserManagement = lazy(() => import("./UserManagement"));
 const ResetPasswordPage = lazy(() => import("./ResetPassword"));
 const ProductsPage = lazy(() => import("./ProductsPage"));
@@ -175,6 +176,7 @@ const NAV = [
   { id: "company-deliveries", label: "Company Deliveries", icon: "⬡", canKey: null },
   { id: "ready",      label: "Ready to Deliver", icon: "◈",  canKey: "viewMonthly" },
   { id: "delivery-approvals", label: "Delivery Dates", icon: "📅", canKey: null },
+  { id: "order-amendments", label: "Order Amendments", icon: "📝", canKey: null },
   { id: "balance",    label: "Outstanding Balance", icon: "💰", canKey: null },
   { id: "services",   label: "Services",         icon: "🔧", canKey: "viewService" },
   { id: "operations", label: "Operations",       icon: "⚙",  canKey: "viewServicePending", adminOnly: true },
@@ -1059,7 +1061,7 @@ export default function App() {
   const [servicesLoading, setServicesLoading] = useState(false); // eslint-disable-line
   const [supplierDOs, setSupplierDOs] = useState([]);
   const [doWarehouses, setDoWarehouses] = useState([]);
-  const [opsCounts, setOpsCounts] = useState({ service_pending: 0, do_review: 0, delivery_requests: 0 });
+  const [opsCounts, setOpsCounts] = useState({ service_pending: 0, do_review: 0, delivery_requests: 0, order_amendments: 0 });
   const opsLoadedRef = useRef(false);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
   const [doUploading, setDoUploading] = useState(false);
@@ -1240,7 +1242,7 @@ export default function App() {
         svc = svc.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name));
       }
       setServices(svc);
-      if (d?.pending_counts) setOpsCounts({ service_pending: Number(d.pending_counts.service_pending) || 0, do_review: Number(d.pending_counts.do_review) || 0, delivery_requests: Number(d.pending_counts.delivery_requests) || 0 });
+      if (d?.pending_counts) setOpsCounts({ service_pending: Number(d.pending_counts.service_pending) || 0, do_review: Number(d.pending_counts.do_review) || 0, delivery_requests: Number(d.pending_counts.delivery_requests) || 0, order_amendments: Number(d.pending_counts.order_amendments) || 0 });
       if (isSalesman) setEstCommission(Number(d?.commission_summary?.total) || 0);
     } catch (e) { console.error(e); }
     setServicesLoading(false);
@@ -1469,6 +1471,7 @@ export default function App() {
     if (n.id === "deliveries") return can("editSchedule") || ["master","manager","company_admin","operation","operation_manager"].includes(effectiveRole);
     if (n.id === "company-deliveries") return effectiveRole === "salesman";
     if (n.id === "delivery-approvals") return isSalesman || ["master","manager","operation_manager","company_admin"].includes(effectiveRole);
+    if (n.id === "order-amendments") return isSalesman || ["master","manager"].includes(effectiveRole);
     if (n.id === "balance") return isSalesman || effectiveRole === "finance";
     if (n.id === "driver") return can("editSchedule") || ["master","manager","company_admin","driver","operation","operation_manager"].includes(effectiveRole);
     // Commission + Finance: revenue-side managers, salesman, and Finance —
@@ -1513,6 +1516,9 @@ export default function App() {
             )}
             {n.id === "delivery-approvals" && opsCounts.delivery_requests > 0 && (
               <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{opsCounts.delivery_requests}</span>
+            )}
+            {n.id === "order-amendments" && opsCounts.order_amendments > 0 && (
+              <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{opsCounts.order_amendments}</span>
             )}
           </button>
         ))}
@@ -1958,6 +1964,7 @@ export default function App() {
 
     // SETTINGS
     if (page === "delivery-approvals") return <DeliveryDateRequestsPage />;
+    if (page === "order-amendments") return <OrderAmendmentsPage />;
     if (page === "settings") return <CompanySettingsPage />;
 
     return null;
@@ -2024,6 +2031,7 @@ export default function App() {
                 {n.id==="operations" && (opsCounts.service_pending+opsCounts.do_review)>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
                 {n.id==="ready" && readyOrders.length>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-amber-400 rounded-full" />}
                 {n.id==="delivery-approvals" && opsCounts.delivery_requests>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
+                {n.id==="order-amendments" && opsCounts.order_amendments>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
               </button>
             ))}
           </div>
