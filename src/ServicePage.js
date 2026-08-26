@@ -51,12 +51,14 @@ function printServiceNote(detail, company = {}) {
     `<tr><td class="lbl">${esc(l1)}</td><td class="val">${esc(v1 || "—")}</td>` +
     `<td class="lbl">${l2 ? esc(l2) : ""}</td><td class="val">${l2 ? esc(v2 || "—") : ""}</td></tr>`;
 
+  const hasAmount = svc.amount != null && svc.amount !== "";
+  const amountStr = hasAmount ? `RM ${Number(svc.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "";
   const infoRows = [
     infoRow("Type", SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`, "Service date", svc.service_date ? dmy(svc.service_date) : ""),
     infoRow("Status", svc.status, "Due date", svc.due_date ? dmy(svc.due_date) : ""),
     infoRow("Customer", svc.customer_name || order.customer_name, "Salesman", order.salesman),
     infoRow("Contact", svc.customer_phone || order.contact, "Created", svc.created_at ? dmy(svc.created_at) : ""),
-    infoRow("Address", svc.customer_address || order.address, "", ""),
+    infoRow("Address", svc.customer_address || order.address, hasAmount ? "Amount" : "", amountStr),
   ].join("");
 
   const itemsBlock = items.length > 0 ? `
@@ -150,6 +152,9 @@ async function exportServiceNoteExcel(detail, company = {}) {
   info("Customer", svc.customer_name || order.customer_name, "Service date", svc.service_date ? dmy(svc.service_date) : "");
   info("Contact", svc.customer_phone || order.contact, "Due date", svc.due_date ? dmy(svc.due_date) : "");
   info("Address", svc.customer_address || order.address, "Salesman", order.salesman);
+  if (svc.amount != null && svc.amount !== "") {
+    info("Amount", `RM ${Number(svc.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`, "", "");
+  }
   // Description in its own bordered box spanning the sheet width.
   r++;
   ws.getCell(`A${r}`).value = "DESCRIPTION"; ws.getCell(`A${r}`).font = { bold: true }; r++;
