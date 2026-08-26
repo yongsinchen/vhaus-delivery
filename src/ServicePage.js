@@ -174,7 +174,7 @@ function ServicePage() {
   const [services, setServices] = useState([]);
   const [pending, setPending] = useState([]);
   const [requests, setRequests] = useState([]); // service approval requests
-  const [tab, setTab] = useState("cases"); // "cases" | "pending" | "requests"
+  const [tab, setTab] = useState("cases"); // "cases" | "delivery" | "pending" | "requests"
   const [loading, setLoading] = useState(true);
   const [statusGroup, setStatusGroup] = useState("open"); // open (default) | scheduled | resolved
   const [filterArrival, setFilterArrival] = useState(""); // "" | "with" | "without"
@@ -437,21 +437,31 @@ function ServicePage() {
     svc.description, svc.customer_phone, svc._order?.contact,
     svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type], svc._sv_number,
   ].filter(Boolean).join(" ").toLowerCase().includes(q);
-  // Count per status group (search + arrival applied, group not) so the tab
-  // badges reflect what each tab would show.
+  // Plain "Delivery" (service_type 5) is split into its own Delivery tab —
+  // distinct from "Delivery (Missing Item)" (type 4), which stays a service
+  // case. The Service Cases tab excludes type 5; the Delivery tab shows only
+  // type 5. Both share the same status sub-tabs, search and arrival filter.
+  const isPlainDelivery = (svc) => Number(svc.service_type) === 5;
+  const typeScope = (svc) => (tab === "delivery" ? isPlainDelivery(svc) : !isPlainDelivery(svc));
+  // Count per status group (type scope + search + arrival applied, group not)
+  // so the sub-tab badges reflect what the active tab would show.
   const groupCounts = services.reduce((acc, svc) => {
-    if (matchesArrival(svc) && matchesSearch(svc)) acc[groupOf(svc.status)] = (acc[groupOf(svc.status)] || 0) + 1;
+    if (typeScope(svc) && matchesArrival(svc) && matchesSearch(svc)) acc[groupOf(svc.status)] = (acc[groupOf(svc.status)] || 0) + 1;
     return acc;
   }, {});
   const filteredServices = services.filter(svc =>
-    groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc));
+    typeScope(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc));
+  // Top-tab badges — current status group, per type scope (independent of which
+  // tab is active so both badges are always right).
+  const casesBadge = services.filter(svc => !isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc)).length;
+  const deliveryBadge = services.filter(svc => isPlainDelivery(svc) && groupOf(svc.status) === statusGroup && matchesArrival(svc) && matchesSearch(svc)).length;
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Services</h1>
         <div className="flex gap-2 flex-wrap">
-          {tab === "cases" && (
+          {(tab === "cases" || tab === "delivery") && (
             <>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SO, customer, description..."
                 className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-56 focus:outline-none focus:border-violet-400" />
@@ -469,7 +479,10 @@ function ServicePage() {
       {/* Tabs */}
       <div className="flex gap-2">
         <button onClick={() => setTab("cases")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "cases" ? "bg-violet-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>
-          Service Cases {filteredServices.length > 0 && <span className="ml-1 text-xs opacity-75">({filteredServices.length})</span>}
+          Service Cases {casesBadge > 0 && <span className="ml-1 text-xs opacity-75">({casesBadge})</span>}
+        </button>
+        <button onClick={() => setTab("delivery")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "delivery" ? "bg-violet-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-violet-300"}`}>
+          🚚 Delivery {deliveryBadge > 0 && <span className="ml-1 text-xs opacity-75">({deliveryBadge})</span>}
         </button>
         <button onClick={() => setTab("pending")} className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${tab === "pending" ? "bg-amber-500 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-amber-300"}`}>
           Pending {pending.length > 0 && <span className="ml-1 bg-red-100 text-red-700 text-xs font-bold px-1.5 rounded-full">{pending.length}</span>}
@@ -486,7 +499,7 @@ function ServicePage() {
       </div>
 
       {/* Status-group sub-tabs — Open (default) / Scheduled / Resolved. */}
-      {tab === "cases" && (
+      {(tab === "cases" || tab === "delivery") && (
         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
           {STATUS_TABS.map(([key, label]) => (
             <button key={key} onClick={() => setStatusGroup(key)}
@@ -576,16 +589,16 @@ function ServicePage() {
         </div>
       )}
 
-      {/* Service list */}
-      {tab === "cases" && loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-      {tab === "cases" && !loading && filteredServices.length === 0 && (
+      {/* Service list (Service Cases + Delivery tabs share this list) */}
+      {(tab === "cases" || tab === "delivery") && loading && <div className="space-y-2">{[1,2,3].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
+      {(tab === "cases" || tab === "delivery") && !loading && filteredServices.length === 0 && (
         <div className="text-center py-16 text-gray-400">
-          <div className="text-4xl mb-3">🔧</div>
-          <p className="font-medium">No {statusGroup} service cases{q || filterArrival ? " match" : ""}</p>
-          <p className="text-xs mt-1">{q || filterArrival ? "Try a different search or arrival filter, or switch tab" : `Cases in the ${statusGroup} stage will appear here`}</p>
+          <div className="text-4xl mb-3">{tab === "delivery" ? "🚚" : "🔧"}</div>
+          <p className="font-medium">No {statusGroup} {tab === "delivery" ? "deliveries" : "service cases"}{q || filterArrival ? " match" : ""}</p>
+          <p className="text-xs mt-1">{q || filterArrival ? "Try a different search or arrival filter, or switch tab" : `${tab === "delivery" ? "Deliveries" : "Cases"} in the ${statusGroup} stage will appear here`}</p>
         </div>
       )}
-      {tab === "cases" && <div className="space-y-2">
+      {(tab === "cases" || tab === "delivery") && <div className="space-y-2">
         {filteredServices.map(svc => (
           <div key={svc.id} onClick={() => openDetail(svc)}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
