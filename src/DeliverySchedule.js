@@ -878,8 +878,8 @@ function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
 
   const handleCreate = async () => {
     if (!vehicleId) return alert("Please select a vehicle.");
-    if (!driverId) return alert("Please select a driver.");
-    const res = await onCreate({ vehicle_id: parseInt(vehicleId), driver_id: driverId, helper_id: null });
+    // Driver is optional — a team can be created vehicle-only.
+    const res = await onCreate({ vehicle_id: parseInt(vehicleId), driver_id: driverId || null, helper_id: null });
     if (res && res.error) alert(res.error);
   };
 
@@ -896,12 +896,12 @@ function AddTeamModal({ activeVehicles, onClose, onCreate, onGoToVehicles }) {
           {activeVehicles.length === 0 && <p className="text-xs text-orange-500 mt-1">No active vehicles. <button onClick={onGoToVehicles} className="underline">Add vehicle first</button></p>}
         </div>
         <div className="mb-3">
-          <label className="text-xs text-gray-500 block mb-0.5">Select Driver</label>
+          <label className="text-xs text-gray-500 block mb-0.5">Select Driver <span className="text-gray-400">(optional)</span></label>
           <select value={driverId} onChange={e => setDriverId(e.target.value)} className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-            <option value="">-- Select Driver --</option>
+            <option value="">-- No driver --</option>
             {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          {drivers.length === 0 && <p className="text-xs text-orange-500 mt-1">No active driver accounts found. Create a user with the "driver" role first.</p>}
+          {drivers.length === 0 && <p className="text-xs text-gray-400 mt-1">No driver accounts — you can still create a vehicle-only team.</p>}
         </div>
         <div className="flex gap-3 justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
