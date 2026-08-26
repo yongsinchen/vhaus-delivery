@@ -97,6 +97,25 @@ async function printServiceNote(detail, company = {}) {
     y += boxH + 14;
   }
 
+  // Items table — name + quantity only (no arrival date).
+  const items = Array.isArray(detail.items) ? detail.items : [];
+  if (items.length > 0) {
+    doc.setFont("helvetica", "bold").setFontSize(9).text("ITEMS", M, y); y += 6;
+    const rowH = 16, qtyX = RIGHT - 70;
+    doc.setDrawColor(150).setLineWidth(0.5);
+    const drawRow = (yy, name, qty, bold) => {
+      doc.rect(M, yy, RIGHT - M, rowH);
+      doc.line(qtyX, yy, qtyX, yy + rowH);
+      doc.setFont("helvetica", bold ? "bold" : "normal").setFontSize(9);
+      const nm = doc.splitTextToSize(String(name), qtyX - M - 12);
+      doc.text(nm[0] || "", M + 8, yy + 11);
+      doc.text(String(qty), qtyX + 8, yy + 11);
+    };
+    drawRow(y, "Item", "Qty", true); y += rowH;
+    for (const it of items) { drawRow(y, it.description || "—", Number(it.quantity) || 1, false); y += rowH; }
+    y += 14;
+  }
+
   // Signature lines.
   const sy = y + 40;
   doc.setDrawColor(17).setLineWidth(0.5);
@@ -150,6 +169,24 @@ async function exportServiceNoteExcel(detail, company = {}) {
   dcell.alignment = { wrapText: true, vertical: "top" };
   dcell.border = boxAll;
   ws.getRow(r).height = 60;
+  r++;
+
+  // Items table — name + quantity only (no arrival date).
+  const items = Array.isArray(detail.items) ? detail.items : [];
+  if (items.length > 0) {
+    r++;
+    ws.getCell(`A${r}`).value = "ITEMS"; ws.getCell(`A${r}`).font = { bold: true }; r++;
+    const cols = ["A", "B", "C", "D", "E", "F"];
+    const writeRow = (name, qty, bold) => {
+      ws.mergeCells(`A${r}:E${r}`);
+      ws.getCell(`A${r}`).value = name; ws.getCell(`A${r}`).font = { bold: !!bold };
+      ws.getCell(`F${r}`).value = qty; ws.getCell(`F${r}`).font = { bold: !!bold }; ws.getCell(`F${r}`).alignment = { horizontal: "right" };
+      cols.forEach(c => ws.getCell(`${c}${r}`).border = boxAll);
+      r++;
+    };
+    writeRow("Item", "Qty", true);
+    for (const it of items) writeRow(it.description || "—", Number(it.quantity) || 1, false);
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
