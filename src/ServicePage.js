@@ -39,13 +39,11 @@ async function toDataUrl(url) {
 }
 
 // Save the Service Note as a real PDF file (jsPDF + autotable, lazily imported)
-// — a company header, the case details, and the item + leg tables. Downloads
+// — company header, the case details, and the description box. Downloads
 // directly, no print dialog.
 async function printServiceNote(detail, company = {}) {
   const { jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default;
   const svc = detail.service || {}, order = detail.order || {};
-  const items = detail.items || [];
 
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const M = 40, RIGHT = 555;
@@ -56,10 +54,12 @@ async function printServiceNote(detail, company = {}) {
   if (company.logo) { try { const logo = await toDataUrl(company.logo); if (logo) { doc.addImage(logo, "PNG", M, y - 6, 90, 34); textX = M + 100; } } catch { /* skip logo */ } }
   doc.setFont("helvetica", "bold").setFontSize(13).text(String(company.name || ""), textX, y + 6);
   doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(90);
+  const LH = 10;               // advance by ACTUAL wrapped line count so lines never overlap
+  const addrW = 300;           // wrap width — stays left of the right-aligned title
   let my = y + 18;
-  if (company.reg) { doc.text(String(company.reg), textX, my); my += 10; }
-  if (company.address) { doc.text(doc.splitTextToSize(String(company.address), 250), textX, my); my += 10; }
-  if (company.hotline) { doc.text("Tel: " + company.hotline, textX, my); my += 10; }
+  if (company.reg) { doc.text(String(company.reg), textX, my); my += LH; }
+  if (company.address) { const al = doc.splitTextToSize(String(company.address), addrW); doc.text(al, textX, my); my += al.length * LH; }
+  if (company.hotline) { doc.text("Tel: " + company.hotline, textX, my); my += LH; }
   doc.setTextColor(17);
   doc.setFont("helvetica", "bold").setFontSize(15).text("SERVICE NOTE", RIGHT, y + 6, { align: "right" });
   doc.setFont("helvetica", "normal").setFontSize(9).text(order.so_number ? `SO ${order.so_number}` : "", RIGHT, y + 20, { align: "right" });
@@ -97,13 +97,8 @@ async function printServiceNote(detail, company = {}) {
     y += boxH + 14;
   }
 
-  const tableOpts = { theme: "grid", styles: { fontSize: 9, cellPadding: 4 }, headStyles: { fillColor: [242, 242, 242], textColor: 30, fontStyle: "bold" }, margin: { left: M, right: 40 } };
-  autoTable(doc, { ...tableOpts, startY: y + 4,
-    head: [["No", "Item", "Action", "Qty", "Arrival", "Status"]],
-    body: items.length ? items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]) : [["", "No items", "", "", "", ""]] });
-
   // Signature lines.
-  const sy = doc.lastAutoTable.finalY + 48;
+  const sy = y + 40;
   doc.setDrawColor(17).setLineWidth(0.5);
   doc.line(M, sy, M + 200, sy); doc.line(RIGHT - 200, sy, RIGHT, sy);
   doc.setFontSize(9).text("Prepared by", M + 100, sy + 12, { align: "center" });
@@ -116,13 +111,11 @@ async function printServiceNote(detail, company = {}) {
 async function exportServiceNoteExcel(detail, company = {}) {
   const ExcelJS = (await import("exceljs")).default;
   const svc = detail.service || {}, order = detail.order || {};
-  const items = detail.items || [];
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Service Note", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   ws.columns = [{ width: 6 }, { width: 26 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 20 }];
   const thin = { style: "thin", color: { argb: "FF000000" } };
   const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
-  const grayFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
 
   ws.mergeCells("A1:B3");
   const logoUrl = company.logo ? await toDataUrl(company.logo) : null;
@@ -157,18 +150,6 @@ async function exportServiceNoteExcel(detail, company = {}) {
   dcell.alignment = { wrapText: true, vertical: "top" };
   dcell.border = boxAll;
   ws.getRow(r).height = 60;
-  r++;
-
-  r++;
-  const table = (title, heads, rows) => {
-    ws.getCell(`A${r}`).value = title; ws.getCell(`A${r}`).font = { bold: true, size: 12 }; r++;
-    heads.forEach((h, i) => { const c = ws.getCell(r, i + 1); c.value = h; c.font = { bold: true }; c.fill = grayFill; c.border = boxAll; });
-    r++;
-    rows.forEach(vals => { vals.forEach((v, i) => { const c = ws.getCell(r, i + 1); c.value = v; c.border = boxAll; }); r++; });
-    r++;
-  };
-  table("Items", ["No", "Item", "Action", "Qty", "Arrival", "Status"],
-    items.map((it, i) => [i + 1, it.description || "", ITEM_ACTIONS[it.action_type] || "Service", Number(it.quantity) || 1, it.arrival_date ? dmy(it.arrival_date) : "—", it.status || "pending"]));
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
