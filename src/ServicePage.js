@@ -667,12 +667,12 @@ function ServicePage() {
       {/* Create Modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
               <h3 className="font-bold text-gray-900">New Service Case</h3>
               <button onClick={() => setShowCreate(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
             </div>
-            <div className="px-6 py-5 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Service Type</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -788,7 +788,7 @@ function ServicePage() {
                 </div>
               </div>
             </div>
-            <div className="px-6 py-4 border-t flex gap-3 justify-end">
+            <div className="px-6 py-4 border-t flex gap-3 justify-end shrink-0">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
               <button onClick={createService} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700">{isApprover ? "Create" : "Submit for approval"}</button>
             </div>
