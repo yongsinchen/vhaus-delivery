@@ -1059,7 +1059,7 @@ export default function App() {
   const [servicesLoading, setServicesLoading] = useState(false); // eslint-disable-line
   const [supplierDOs, setSupplierDOs] = useState([]);
   const [doWarehouses, setDoWarehouses] = useState([]);
-  const [opsCounts, setOpsCounts] = useState({ service_pending: 0, do_review: 0 });
+  const [opsCounts, setOpsCounts] = useState({ service_pending: 0, do_review: 0, delivery_requests: 0 });
   const opsLoadedRef = useRef(false);
   const [supplierDOsLoading, setSupplierDOsLoading] = useState(false);
   const [doUploading, setDoUploading] = useState(false);
@@ -1240,7 +1240,7 @@ export default function App() {
         svc = svc.filter(o => (o.salesman||"").split("/").map(s=>s.trim().toLowerCase()).includes(name));
       }
       setServices(svc);
-      if (d?.pending_counts) setOpsCounts({ service_pending: Number(d.pending_counts.service_pending) || 0, do_review: Number(d.pending_counts.do_review) || 0 });
+      if (d?.pending_counts) setOpsCounts({ service_pending: Number(d.pending_counts.service_pending) || 0, do_review: Number(d.pending_counts.do_review) || 0, delivery_requests: Number(d.pending_counts.delivery_requests) || 0 });
       if (isSalesman) setEstCommission(Number(d?.commission_summary?.total) || 0);
     } catch (e) { console.error(e); }
     setServicesLoading(false);
@@ -1510,6 +1510,9 @@ export default function App() {
             )}
             {n.id === "ready" && readyOrders.length > 0 && (
               <span className="ml-auto bg-amber-400 text-gray-900 text-xs font-bold px-1.5 py-0.5 rounded-full">{readyOrders.length}</span>
+            )}
+            {n.id === "delivery-approvals" && opsCounts.delivery_requests > 0 && (
+              <span className="ml-auto bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{opsCounts.delivery_requests}</span>
             )}
           </button>
         ))}
@@ -2020,6 +2023,7 @@ export default function App() {
                 {page===n.id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-violet-600 rounded-full" />}
                 {n.id==="operations" && (opsCounts.service_pending+opsCounts.do_review)>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
                 {n.id==="ready" && readyOrders.length>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-amber-400 rounded-full" />}
+                {n.id==="delivery-approvals" && opsCounts.delivery_requests>0 && <div className="absolute top-1.5 right-2 w-2 h-2 bg-red-500 rounded-full" />}
               </button>
             ))}
           </div>
