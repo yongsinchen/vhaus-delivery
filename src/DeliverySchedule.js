@@ -469,9 +469,9 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
     <div
       className={`border-b border-gray-100 last:border-b-0 py-1.5 px-1 ${isTrip ? "bg-purple-50/40" : ""} ${isLocked ? "opacity-80" : "cursor-grab hover:bg-blue-50/30"}`}
       draggable={!isLocked}
-      onDragStart={() => !isLocked && onDragStart(teamId, index)}
+      onDragStart={() => !isLocked && onDragStart(teamId, index, schedule.id)}
       onDragOver={e => { if (!isLocked) e.preventDefault(); }}
-      onDrop={() => !isLocked && onDrop(teamId, index)}
+      onDrop={e => { if (!isLocked) { e.stopPropagation(); onDrop(teamId, index); } }}
     >
       <div className="flex gap-2">
         {/* Customer block (~30%) */}
@@ -1324,6 +1324,11 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [dragOrder, setDragOrder] = useState(null);
   const [draggingAssigned, setDraggingAssigned] = useState(null);
+  // Only admin-tier roles may drag an already-assigned stop onto a DIFFERENT
+  // team. Everyone who can edit the schedule keeps within-team reorder and the
+  // per-stop Reassign dropdown; this gate is specifically for cross-team drag.
+  const canMoveAcrossTeams = ["master", "manager", "operation_manager", "company_admin"]
+    .includes(String(currentUser?.role || "").toLowerCase());
   const [printTeam, setPrintTeam] = useState(null);
   const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
@@ -1667,9 +1672,17 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
 
   // Drag-drop reorder within a team — useCallback so memoized StopRows only
   // re-render when the drag state or data actually changes.
-  const handleAssignedDragStart = useCallback((teamId, fromIndex) => setDraggingAssigned({ teamId, fromIndex }), []);
+  const handleAssignedDragStart = useCallback((teamId, fromIndex, scheduleId) => setDraggingAssigned({ teamId, fromIndex, scheduleId }), []);
   const handleAssignedDrop = useCallback(async (teamId, toIndex) => {
-    if (!draggingAssigned || draggingAssigned.teamId !== teamId) return;
+    if (!draggingAssigned) return;
+    // Cross-team move: reassign the dragged stop to the team it was dropped on.
+    // Admin-tier only; other editors fall back to no-op (they use Reassign).
+    if (draggingAssigned.teamId !== teamId) {
+      const sid = draggingAssigned.scheduleId;
+      setDraggingAssigned(null);
+      if (canMoveAcrossTeams && sid) await reassignSchedule(sid, teamId);
+      return;
+    }
     const { fromIndex } = draggingAssigned;
     if (fromIndex === toIndex) { setDraggingAssigned(null); return; }
     const team = teams.find(t => t.id === teamId);
@@ -1685,7 +1698,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       af(`${API}/delivery-schedules/${s.id}`, { method: "PATCH", body: JSON.stringify({ sort_order: i + 1 }) })
     ));
     loadData();
-  }, [draggingAssigned, teams, loadData]);
+  }, [draggingAssigned, teams, loadData, canMoveAcrossTeams, reassignSchedule]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 relative">
@@ -1996,9 +2009,19 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                 <div key={team.id} className={`bg-white rounded-xl border shadow-sm ${isLocked ? "border-gray-300" : isConfirmed ? "border-green-300" : "border-gray-200"}`}
                   onDragOver={e => { if (!readOnly) e.preventDefault(); }}
                   onDrop={() => {
-                    if (readOnly || !dragOrder || isLocked) return;
-                    assignItem(team.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
-                    setDragOrder(null);
+                    if (readOnly || isLocked) return;
+                    if (dragOrder) {
+                      assignItem(team.id, dragOrder.id, dragOrder._type, dragOrder._setDate || false);
+                      setDragOrder(null);
+                      return;
+                    }
+                    // Assigned stop dropped on the team body (not on a row) —
+                    // cross-team move for admin-tier roles.
+                    if (draggingAssigned && draggingAssigned.teamId !== team.id) {
+                      const sid = draggingAssigned.scheduleId;
+                      setDraggingAssigned(null);
+                      if (canMoveAcrossTeams && sid) reassignSchedule(sid, team.id);
+                    }
                   }}>
                   {/* Team Header */}
                   <div className={`px-4 py-3 border-b rounded-t-xl ${isLocked ? "bg-gray-50" : isConfirmed ? "bg-green-50" : "bg-blue-50"}`}>
