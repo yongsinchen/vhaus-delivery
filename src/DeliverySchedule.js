@@ -910,13 +910,18 @@ function UnassignedPreviewModal({ data, onClose }) {
   const dateStr = isDo ? item.delivery_date : item.delivery_date;
   const amount = item.order_amount;
   const balance = item.balance;
-  // Arrival dates for a DO's lines live on the linked order's items JSON
-  // (matched by product code/name) — build a lookup so DO lines can show them.
+  // Arrival dates for a DO's lines come from the sales order's items
+  // (arrived_at, dual-written from the supplier-DO OCR) — plus the legacy
+  // items JSON for non-DO cards. Build a lookup keyed by product code/name.
   const arrivalByKey = {};
-  for (const li of parseItems(item.items || so.items)) {
-    const k = String(li.itemCode || li.itemName || li.product_code || li.product_name || "").toLowerCase().trim();
-    const a = li.arrivalDate || li.arrival_date;
-    if (k && a) arrivalByKey[k] = a;
+  const addArrival = (k, a) => { if (k && a) arrivalByKey[String(k).toLowerCase().trim()] = a; };
+  for (const li of parseItems(item.items)) {
+    addArrival(li.itemCode || li.product_code, li.arrivalDate || li.arrival_date);
+    addArrival(li.itemName || li.product_name, li.arrivalDate || li.arrival_date);
+  }
+  for (const soi of (so.sales_order_items || [])) {
+    addArrival(soi.product_code, soi.arrived_at);
+    addArrival(soi.product_name, soi.arrived_at);
   }
   const rows = isDo
     ? (item.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
