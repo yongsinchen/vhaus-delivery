@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
+import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -93,7 +94,7 @@ function printServiceNote(detail, company = {}) {
       .sign { display: flex; justify-content: space-between; margin-top: 56px; }
       .sign div { width: 200px; border-top: 1px solid #111; padding-top: 6px; text-align: center; font-size: 11px; }
       @media print { body { margin: 0; padding: 20px; } }
-    </style></head><body onload="window.focus();window.print();">
+    </style></head><body>
     <div class="hdr">
       <div class="co">
         ${company.logo ? `<img src="${esc(company.logo)}" alt="">` : ""}
@@ -111,11 +112,7 @@ function printServiceNote(detail, company = {}) {
     <div class="sign"><div>Prepared by</div><div>Customer sign</div></div>
   </body></html>`;
 
-  const w = window.open("", "_blank");
-  if (!w) { alert("Please allow pop-ups to print / save the service note as PDF."); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  printHtml(html);
 }
 
 // Export the Service Note as a real .xlsx (ExcelJS, lazily imported).
