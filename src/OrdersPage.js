@@ -499,6 +499,13 @@ function OrdersPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
+  // Customer phone typeahead — see the Phone Number field in the order drawer
+  const [custMatches, setCustMatches] = useState([]);
+  const [custOpen, setCustOpen] = useState(false);   // suppressed until the user types
+  const [custLoading, setCustLoading] = useState(false);
+  const [custPicked, setCustPicked] = useState(null); // the record the form was filled from
+  const debouncedPhone = useDebounce(form.customer_contact, 300);
+
   // Product picker
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customItemMode, setCustomItemMode] = useState(false);
@@ -612,6 +619,56 @@ function OrdersPage() {
       } catch {}
     });
   }, [companyId]);
+
+  // ── Customer lookup by phone ──────────────────────────────────────
+  // Only on a NEW order: on an edit the customer details are already settled,
+  // and a stray tap in the suggestion list would silently rewrite them.
+  useEffect(() => {
+    if (!drawerOpen || editId || !custOpen) return;
+    const digits = (debouncedPhone || "").replace(/[^0-9]/g, "");
+    if (digits.length < 3) { setCustMatches([]); return; }
+    let cancelled = false;
+    (async () => {
+      setCustLoading(true);
+      try {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/customers/lookup/${encodeURIComponent(digits)}`, { headers });
+        const d = await res.json();
+        if (!cancelled) setCustMatches(d.customers || []);
+      } catch {
+        if (!cancelled) setCustMatches([]);
+      } finally {
+        if (!cancelled) setCustLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedPhone, drawerOpen, editId, custOpen]); // eslint-disable-line
+
+  // Fill the form from a picked customer. Only fields the customer actually
+  // has a value for are written — a blank on the record must not wipe
+  // something already typed into the form.
+  const applyCustomer = (c) => {
+    setForm(f => {
+      const next = { ...f };
+      next.customer_contact = c.phone || f.customer_contact;
+      if (c.name) next.customer_name = c.name;
+      if (c.email) next.customer_email = c.email;
+      if (c.address) next.customer_address = c.address;
+      if (c.ic_number) {
+        next.customer_id_no = c.ic_number;
+        next.customer_id_type = inferIdType(c.ic_number);
+      }
+      // customers has no country column, so re-derive it from the address the
+      // same way typing that address by hand would.
+      const detected = detectCountryFromAddress(c.address || "");
+      const match = detected && countries.find(x => x.code === detected);
+      if (match) { next.country = match.code; next.gst_rate = match.gst_rate ?? 0; }
+      return next;
+    });
+    setCustPicked(c);
+    setCustOpen(false);
+    setCustMatches([]);
+  };
 
   // ── Product search for picker ─────────────────────────────────────
   const searchProducts = useCallback(async (q) => {
@@ -822,6 +879,9 @@ function OrdersPage() {
     }
     setFormError("");
     setStep(1);
+    // Start the phone lookup closed: a restored draft already carries a phone
+    // number, and a suggestion list popping open unprompted is noise.
+    setCustMatches([]); setCustOpen(false); setCustPicked(null);
     setDrawerOpen(true);
   };
 
@@ -882,6 +942,7 @@ function OrdersPage() {
     setDeliverElsewhere(!!f.delivery_address);
     setFormError("");
     setStep(1);
+    setCustMatches([]); setCustOpen(false); setCustPicked(null);
     setDrawerOpen(true);
   };
 
@@ -1803,7 +1864,54 @@ function OrdersPage() {
               <p className="text-[11px] text-amber-600">Name, phone and address are required to confirm. For orders above RM10,000, I/C number and email are also required (e-invoicing) — enter the name exactly as on I/C / passport.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Full Name *" value={form.customer_name} onChange={v => setForm(f => ({ ...f, customer_name: v }))} />
-                <Field label="Phone Number *" value={form.customer_contact} onChange={v => setForm(f => ({ ...f, customer_contact: v }))} />
+                {/* Phone doubles as a customer lookup on new orders: typing
+                    matches existing customers, and picking one fills in the
+                    rest instead of retyping it (and avoids a duplicate
+                    customer record). Edit keeps a plain field. */}
+                <div className="relative">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Phone Number *</label>
+                  <input
+                    type="tel"
+                    value={form.customer_contact}
+                    onChange={e => {
+                      setForm(f => ({ ...f, customer_contact: e.target.value }));
+                      setCustPicked(null);
+                      if (!editId) setCustOpen(true);
+                    }}
+                    onFocus={() => { if (!editId && custMatches.length > 0) setCustOpen(true); }}
+                    // Blur is delayed so a tap on a suggestion registers before
+                    // the list unmounts — on a touch screen blur lands first.
+                    onBlur={() => setTimeout(() => setCustOpen(false), 150)}
+                    autoComplete="off"
+                    placeholder={editId ? "" : "Type to find an existing customer"}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
+
+                  {custPicked && (
+                    <p className="mt-1 text-[11px] text-violet-600">
+                      Filled from existing customer · {custPicked.name}
+                    </p>
+                  )}
+
+                  {custOpen && !editId && (custLoading || custMatches.length > 0) && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                      {custLoading && custMatches.length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-400">Searching…</p>
+                      )}
+                      {custMatches.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          // onMouseDown, not onClick: blur fires first on click
+                          // and would close the list before the handler runs.
+                          onMouseDown={e => { e.preventDefault(); applyCustomer(c); }}
+                          className="w-full text-left px-3 py-2 hover:bg-violet-50 border-b border-gray-100 last:border-0">
+                          <p className="text-sm font-medium text-gray-800">{c.name || "(no name)"}</p>
+                          <p className="text-xs text-gray-500">{c.phone}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               {/* E-invoice toggle — force I/C + email even below RM10,000 */}
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
@@ -1835,27 +1943,9 @@ function OrdersPage() {
                 <Field label="Billing Address *" value={form.customer_address} onChange={v => {
                   setForm(f => {
                     const updated = { ...f, customer_address: v };
-                    if (v.length > 3) {
-                      const lower = v.toLowerCase();
-                      let detected = null;
-                      // Extract standalone postal codes (bounded by spaces/punctuation)
-                      const postalMatches = v.match(/(?:^|\s)(\d{5,6})(?:\s|$|,)/g) || [];
-                      const postals = postalMatches.map(m => m.trim().replace(",", ""));
-                      for (const p of postals) {
-                        if (p.length === 5) { detected = "MY"; break; }
-                        if (p.length === 6 && Number(p) >= 10000 && Number(p) <= 829999) { detected = "SG"; break; }
-                      }
-                      // Keyword fallback — use word boundaries to avoid matching "SG" inside "SG ARA"
-                      if (!detected) {
-                        const MY_KEYWORDS = ["malaysia", "penang", "pulau pinang", "kuala lumpur", "johor", "selangor", "kedah", "perak", "melaka", "negeri sembilan", "pahang", "terengganu", "kelantan", "sabah", "sarawak", "bukit mertajam", "butterworth", "bayan lepas", "georgetown", "simpang ampat", "nibong tebal", "sungai petani", "kulim", "ipoh"];
-                        if (MY_KEYWORDS.some(k => lower.includes(k))) detected = "MY";
-                        else if (/\bsingapore\b/i.test(v)) detected = "SG";
-                      }
-                      if (detected) {
-                        const match = countries.find(c => c.code === detected);
-                        if (match) { updated.country = match.code; updated.gst_rate = match.gst_rate ?? 0; }
-                      }
-                    }
+                    const detected = detectCountryFromAddress(v);
+                    const match = detected && countries.find(c => c.code === detected);
+                    if (match) { updated.country = match.code; updated.gst_rate = match.gst_rate ?? 0; }
                     return updated;
                   });
                 }} />
@@ -2389,6 +2479,39 @@ function OrdersPage() {
       )}
     </div>
   );
+}
+
+// Infer MY / SG from a billing address. A standalone 5-digit postcode is
+// Malaysian; a 6-digit one inside the Singapore range is Singaporean; place
+// names are the fallback. Returns null when nothing is conclusive.
+//
+// Shared by the Billing Address field and the customer-lookup autofill: the
+// customers table stores no country, so a saved customer's country has to be
+// re-derived from their address, and it must land on the same answer as typing
+// that address by hand would.
+export function detectCountryFromAddress(v) {
+  if (!v || v.length <= 3) return null;
+  // Standalone postal codes only — bounded by spaces/punctuation, so a house
+  // number or a phone fragment is not read as a postcode.
+  const postals = (v.match(/(?:^|\s)(\d{5,6})(?:\s|$|,)/g) || []).map(m => m.trim().replace(",", ""));
+  for (const p of postals) {
+    if (p.length === 5) return "MY";
+    if (p.length === 6 && Number(p) >= 10000 && Number(p) <= 829999) return "SG";
+  }
+  const lower = v.toLowerCase();
+  const MY_KEYWORDS = ["malaysia", "penang", "pulau pinang", "kuala lumpur", "johor", "selangor", "kedah", "perak", "melaka", "negeri sembilan", "pahang", "terengganu", "kelantan", "sabah", "sarawak", "bukit mertajam", "butterworth", "bayan lepas", "georgetown", "simpang ampat", "nibong tebal", "sungai petani", "kulim", "ipoh"];
+  if (MY_KEYWORDS.some(k => lower.includes(k))) return "MY";
+  // Word boundary so "SG ARA" (a Malaysian place) is not read as Singapore.
+  if (/\bsingapore\b/i.test(v)) return "SG";
+  return null;
+}
+
+// A stored ID is a passport if it contains letters, otherwise a Malaysian I/C.
+// customers has one ic_number column and no id-type flag, so the type has to be
+// inferred — the same letters-mean-passport rule the backend uses in
+// isPlaceholderIc when deciding what counts as a real identity document.
+export function inferIdType(idNo) {
+  return /[a-zA-Z]/.test(String(idNo || "")) ? "passport" : "ic";
 }
 
 function Field({ label, value, onChange, placeholder, small, type }) {
