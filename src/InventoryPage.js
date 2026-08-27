@@ -19,7 +19,6 @@ const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveC
 const TABS = ["Stock Levels", "Movements", "Forecast", "Adjust", "Import"];
 
 const fmtMonth = m => { const [y, mo] = String(m).split("-"); return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-MY", { month: "short", year: "numeric" }); };
-const fmtDay = d => d ? new Date(String(d).length <= 10 ? d + "T00:00:00" : d).toLocaleDateString("en-MY", { day: "numeric", month: "short" }) : "";
 
 function InventoryPage() {
   const { user, activeCompanyId } = useAuth();
@@ -92,6 +91,23 @@ function InventoryPage() {
     } catch { setProjection([]); }
     setProjLoading(false);
   }, [companyId, projMonths]);
+
+  // Pivot the per-product projection into a month-by-month view: each month
+  // lists every product with its opening / in / out / closing for that month.
+  const projByMonth = useMemo(() => {
+    const map = {};
+    for (const p of projection) {
+      for (const m of (p.months || [])) {
+        const inQty = (m.events || []).filter(e => e.type === "in").reduce((s, e) => s + (Number(e.qty) || 0), 0);
+        const outQty = (m.events || []).filter(e => e.type === "out").reduce((s, e) => s + (Number(e.qty) || 0), 0);
+        (map[m.month] ||= []).push({ product_id: p.product_id, product: p.product, opening: m.opening, closing: m.closing, inQty, outQty });
+      }
+    }
+    return Object.keys(map).sort().map(month => {
+      const rows = map[month].sort((a, b) => (a.closing < 0 ? 0 : 1) - (b.closing < 0 ? 0 : 1) || String(a.product?.name || "").localeCompare(String(b.product?.name || "")));
+      return { month, rows, negatives: rows.filter(r => r.closing < 0).length };
+    });
+  }, [projection]);
 
   const loadedRef = useRef({ inv: false, mov: false });
   useEffect(() => { loadWarehouses(); loadProducts(); }, [loadWarehouses, loadProducts]);
@@ -266,48 +282,34 @@ function InventoryPage() {
               <p className="text-xs mt-1">Products appear here once they have stock, upcoming confirmed orders, or open purchase orders.</p>
             </div>
           )}
-          {!projLoading && projection.map(p => (
-            <div key={p.product_id} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${p.first_negative ? "border-red-200" : "border-gray-100"}`}>
+          {!projLoading && projByMonth.map(({ month, rows, negatives }) => (
+            <div key={month} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${negatives > 0 ? "border-red-200" : "border-gray-100"}`}>
               <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2 bg-gray-50/60">
-                <div>
-                  <span className="font-bold text-gray-900 text-sm">{p.product?.name || p.product?.code || "Product"}</span>
-                  {p.product?.code && <span className="text-xs text-gray-400 ml-2">{p.product.code}</span>}
-                </div>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-gray-500">On hand <b className="text-gray-800">{p.on_hand}</b></span>
-                  {p.first_negative
-                    ? <span className="bg-red-100 text-red-700 font-semibold px-2 py-1 rounded-full">Runs out {fmtDay(p.first_negative.date)} — restock before</span>
-                    : <span className="bg-emerald-100 text-emerald-700 font-medium px-2 py-1 rounded-full">Covered</span>}
-                </div>
+                <span className="font-bold text-gray-900 text-sm">{fmtMonth(month)}</span>
+                {negatives > 0
+                  ? <span className="bg-red-100 text-red-700 font-semibold text-xs px-2 py-1 rounded-full">{negatives} product{negatives > 1 ? "s" : ""} run out</span>
+                  : <span className="bg-emerald-100 text-emerald-700 font-medium text-xs px-2 py-1 rounded-full">All covered</span>}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="text-gray-400 text-left">
-                    <th className="px-4 py-2 font-medium">Month</th>
+                    <th className="px-4 py-2 font-medium">Product</th>
                     <th className="px-3 py-2 font-medium text-right">Opening</th>
-                    <th className="px-3 py-2 font-medium">Movements</th>
+                    <th className="px-3 py-2 font-medium text-right">In</th>
+                    <th className="px-3 py-2 font-medium text-right">Out</th>
                     <th className="px-4 py-2 font-medium text-right">Closing</th>
                   </tr></thead>
                   <tbody>
-                    {p.months.map(m => (
-                      <tr key={m.month} className={`border-t border-gray-100 align-top ${m.closing < 0 ? "bg-red-50/50" : ""}`}>
-                        <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-700">{fmtMonth(m.month)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">{m.opening}</td>
-                        <td className="px-3 py-2">
-                          {m.events.length === 0 ? <span className="text-gray-300">—</span> : (
-                            <div className="space-y-0.5">
-                              {m.events.map((e, i) => (
-                                <div key={i} className="flex items-center gap-2 text-xs">
-                                  <span className="text-gray-400 w-12 shrink-0">{fmtDay(e.date)}</span>
-                                  <span className={`font-semibold w-10 shrink-0 ${e.type === "in" ? "text-emerald-600" : "text-red-600"}`}>{e.type === "in" ? "+" : "−"}{e.qty}</span>
-                                  <span className="text-gray-400 truncate">{e.type === "in" ? "PO" : "SO"} {e.ref}</span>
-                                  <span className="text-gray-500 ml-auto tabular-nums">= {e.balance}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                    {rows.map(r => (
+                      <tr key={r.product_id} className={`border-t border-gray-100 ${r.closing < 0 ? "bg-red-50/50" : ""}`}>
+                        <td className="px-4 py-2">
+                          <span className="font-medium text-gray-800">{r.product?.name || r.product?.code || "Product"}</span>
+                          {r.product?.code && <span className="text-xs text-gray-400 ml-2">{r.product.code}</span>}
                         </td>
-                        <td className={`px-4 py-2 text-right tabular-nums font-bold ${m.closing < 0 ? "text-red-600" : "text-gray-800"}`}>{m.closing}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.opening}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{r.inQty ? `+${r.inQty}` : ""}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-red-600">{r.outQty ? `−${r.outQty}` : ""}</td>
+                        <td className={`px-4 py-2 text-right tabular-nums font-bold ${r.closing < 0 ? "text-red-600" : "text-gray-800"}`}>{r.closing}</td>
                       </tr>
                     ))}
                   </tbody>
