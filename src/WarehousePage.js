@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
+import { printHtml } from "./printDocument";
 let jsQR = null;
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -109,10 +110,7 @@ function WarehousePage() {
 
   const printLabels = (lbls, doInfo) => {
     const html = lbls.map(l => `<div class="label"><div class="qr"><img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(l.qr_code)}" /></div><div class="info"><div class="code">${l.qr_code}</div><div class="prod"><b>${l.product_code || ""}</b> ${l.product_name || ""}</div>${l.so_number ? `<div class="so">SO: ${l.so_number}</div>` : ""}<div class="do">DO: ${doInfo?.do_number || ""} · ${doInfo?.supplier || ""}</div><div class="carton">Carton ${l.carton_number} of ${l.total_cartons}</div>${l.location_code ? `<div class="loc">📍 ${l.location_code}</div>` : ""}<div class="date">${new Date().toLocaleDateString("en-MY")}</div></div></div>`).join("");
-    const w = window.open("", "_blank");
-    if (!w) { toast.warning("Allow pop-ups to print"); return; }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Labels</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.label{border:1.5px solid #333;border-radius:8px;padding:12px;display:flex;gap:12px;align-items:center;page-break-inside:avoid}.qr img{width:100px;height:100px}.info{flex:1}.code{font-family:monospace;font-size:10px;color:#7C3AED;margin-bottom:4px}.prod{font-size:12px;font-weight:700;margin-bottom:2px}.so,.do{font-size:10px;color:#555}.carton{font-size:13px;font-weight:900;margin-top:4px;color:#111}.loc{font-size:11px;font-weight:700;color:#7C3AED;margin-top:2px}.date{font-size:9px;color:#999;margin-top:2px}</style></head><body><div class="grid">${html}</div></body></html>`);
-    w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+    printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Labels</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;margin:0;padding:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.label{border:1.5px solid #333;border-radius:8px;padding:12px;display:flex;gap:12px;align-items:center;page-break-inside:avoid}.qr img{width:100px;height:100px}.info{flex:1}.code{font-family:monospace;font-size:10px;color:#7C3AED;margin-bottom:4px}.prod{font-size:12px;font-weight:700;margin-bottom:2px}.so,.do{font-size:10px;color:#555}.carton{font-size:13px;font-weight:900;margin-top:4px;color:#111}.loc{font-size:11px;font-weight:700;color:#7C3AED;margin-top:2px}.date{font-size:9px;color:#999;margin-top:2px}</style></head><body><div class="grid">${html}</div></body></html>`);
   };
 
   // ── Camera scanner ────────────────────────────────────────
@@ -238,16 +236,13 @@ function WarehousePage() {
         ).join("");
       }
     }
-    const w = window.open("", "_blank");
-    if (!w) { toast.warning("Allow pop-ups to print"); return; }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pick List</title>
+    printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pick List</title>
     <style>@page{size:A4 landscape;margin:8mm}body{font-family:Arial,sans-serif;font-size:12px;margin:0;padding:12px}
     h1{font-size:18px;margin:0 0 3px}h2{font-size:12px;color:#666;margin:0 0 10px;font-weight:400}
     table{border-collapse:collapse;width:100%}th{background:#4C1D95;color:#fff;padding:7px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
     td{font-size:11px}</style></head>
     <body><h1>🏭 Pick List</h1><h2>Printed ${new Date().toLocaleDateString("en-MY")} · ${pickItems.length} total items · Next ${pickDays} day${pickDays > 1 ? "s" : ""}</h2>
     <table><thead><tr><th>SO / Customer</th><th>Code</th><th>Product</th><th>Location</th><th>QR</th><th style="text-align:center">✓</th></tr></thead><tbody>${html}</tbody></table></body></html>`);
-    w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
   };
 
   const loadPickList = async () => {

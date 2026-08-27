@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
+import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -727,9 +728,7 @@ function CommissionPage() {
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
                   ];
                 });
-                const w = window.open("", "_blank"); if (!w) return;
-                w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Payout month: ${monthLabel(payoutMonth)} · Orders dated: ${orderMonthLabel(payoutMonth)}<br/>Total: ${money(visibleTotal)} · ${visibleUsers.length} person(s)${isFiltered ? ` · filtered by "${search.trim()}"` : ""}</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(visibleTotal)}</p></body></html>`);
-                w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+                printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Payout month: ${monthLabel(payoutMonth)} · Orders dated: ${orderMonthLabel(payoutMonth)}<br/>Total: ${money(visibleTotal)} · ${visibleUsers.length} person(s)${isFiltered ? ` · filtered by "${search.trim()}"` : ""}</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(visibleTotal)}</p></body></html>`);
               }} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Report</button>
             )}
             {payout && !payoutLoading && (

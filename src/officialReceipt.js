@@ -2,6 +2,7 @@
 // from the Customer and Finance pages. Mirrors the company's pre-printed
 // receipt book and uses the uploaded company logo. Kept in one place so both
 // pages render an identical document.
+import { printHtml } from "./printDocument";
 
 const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -84,6 +85,5 @@ export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, d
   ${copy("Customer Copy")}
   ${copy("Office Copy")}
 </body></html>`;
-  const w = window.open("", "_blank"); if (!w) return;
-  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 600);
+  printHtml(html);
 }
