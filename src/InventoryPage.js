@@ -19,6 +19,7 @@ const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveC
 const TABS = ["Stock Levels", "Movements", "Forecast", "Adjust", "Import"];
 
 const fmtMonth = m => { const [y, mo] = String(m).split("-"); return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-MY", { month: "short", year: "numeric" }); };
+const fmtDay = d => d ? new Date(String(d).length <= 10 ? d + "T00:00:00" : d).toLocaleDateString("en-MY", { day: "numeric", month: "short" }) : "";
 
 function InventoryPage() {
   const { user, activeCompanyId } = useAuth();
@@ -81,6 +82,8 @@ function InventoryPage() {
   const [projection, setProjection] = useState([]);
   const [projMonths, setProjMonths] = useState(6);
   const [projLoading, setProjLoading] = useState(false);
+  const [projExpanded, setProjExpanded] = useState(() => new Set()); // "month|product_id" rows showing their events
+  const toggleProjRow = (key) => setProjExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   const loadProjection = useCallback(async () => {
     if (!companyId) return;
     setProjLoading(true);
@@ -100,7 +103,7 @@ function InventoryPage() {
       for (const m of (p.months || [])) {
         const inQty = (m.events || []).filter(e => e.type === "in").reduce((s, e) => s + (Number(e.qty) || 0), 0);
         const outQty = (m.events || []).filter(e => e.type === "out").reduce((s, e) => s + (Number(e.qty) || 0), 0);
-        (map[m.month] ||= []).push({ product_id: p.product_id, product: p.product, opening: m.opening, closing: m.closing, inQty, outQty });
+        (map[m.month] ||= []).push({ product_id: p.product_id, product: p.product, opening: m.opening, closing: m.closing, inQty, outQty, events: m.events || [] });
       }
     }
     return Object.keys(map).sort().map(month => {
@@ -300,18 +303,43 @@ function InventoryPage() {
                     <th className="px-4 py-2 font-medium text-right">Closing</th>
                   </tr></thead>
                   <tbody>
-                    {rows.map(r => (
-                      <tr key={r.product_id} className={`border-t border-gray-100 ${r.closing < 0 ? "bg-red-50/50" : ""}`}>
-                        <td className="px-4 py-2">
-                          <span className="font-medium text-gray-800">{r.product?.name || r.product?.code || "Product"}</span>
-                          {r.product?.code && <span className="text-xs text-gray-400 ml-2">{r.product.code}</span>}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.opening}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{r.inQty ? `+${r.inQty}` : ""}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-red-600">{r.outQty ? `−${r.outQty}` : ""}</td>
-                        <td className={`px-4 py-2 text-right tabular-nums font-bold ${r.closing < 0 ? "text-red-600" : "text-gray-800"}`}>{r.closing}</td>
-                      </tr>
-                    ))}
+                    {rows.map(r => {
+                      const key = `${month}|${r.product_id}`;
+                      const hasEvents = (r.events || []).length > 0;
+                      const open = projExpanded.has(key);
+                      return (
+                        <React.Fragment key={r.product_id}>
+                          <tr onClick={() => hasEvents && toggleProjRow(key)}
+                            className={`border-t border-gray-100 ${r.closing < 0 ? "bg-red-50/50" : ""} ${hasEvents ? "cursor-pointer hover:bg-gray-50" : ""}`}>
+                            <td className="px-4 py-2">
+                              <span className="text-gray-300 text-xs mr-1 inline-block w-3">{hasEvents ? (open ? "▾" : "▸") : ""}</span>
+                              <span className="font-medium text-gray-800">{r.product?.name || r.product?.code || "Product"}</span>
+                              {r.product?.code && <span className="text-xs text-gray-400 ml-2">{r.product.code}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.opening}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{r.inQty ? `+${r.inQty}` : ""}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-red-600">{r.outQty ? `−${r.outQty}` : ""}</td>
+                            <td className={`px-4 py-2 text-right tabular-nums font-bold ${r.closing < 0 ? "text-red-600" : "text-gray-800"}`}>{r.closing}</td>
+                          </tr>
+                          {open && hasEvents && (
+                            <tr className="bg-gray-50/70">
+                              <td colSpan={5} className="px-4 py-2">
+                                <div className="space-y-0.5 pl-6">
+                                  {r.events.map((e, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-xs">
+                                      <span className="text-gray-400 w-14 shrink-0">{fmtDay(e.date)}</span>
+                                      <span className={`font-semibold w-12 shrink-0 ${e.type === "in" ? "text-emerald-600" : "text-red-600"}`}>{e.type === "in" ? "+" : "−"}{e.qty}</span>
+                                      <span className="text-gray-500 shrink-0">{e.type === "in" ? "PO" : "SO"} {e.ref}</span>
+                                      <span className="text-gray-400 ml-auto tabular-nums">balance {e.balance}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
