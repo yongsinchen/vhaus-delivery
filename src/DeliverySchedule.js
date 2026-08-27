@@ -34,6 +34,14 @@ const parseItems = items => {
   catch { return []; }
 };
 
+// Short local date for an item's arrival date (date-only strings are anchored
+// to local midnight so they don't slip a day across time zones).
+const fmtItemDate = v => {
+  if (!v) return "";
+  const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v);
+  return isNaN(d) ? String(v) : d.toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
+};
+
 // Normalize a phone to wa.me international digits. Numbers already in
 // international form (60…/65…) are kept. A leading 0 is a Malaysian local
 // number → 60XXXXXXXXX. A bare 8-digit number is Singapore local when the
@@ -902,9 +910,23 @@ function UnassignedPreviewModal({ data, onClose }) {
   const dateStr = isDo ? item.delivery_date : item.delivery_date;
   const amount = item.order_amount;
   const balance = item.balance;
+  // Arrival dates for a DO's lines live on the linked order's items JSON
+  // (matched by product code/name) — build a lookup so DO lines can show them.
+  const arrivalByKey = {};
+  for (const li of parseItems(item.items || so.items)) {
+    const k = String(li.itemCode || li.itemName || li.product_code || li.product_name || "").toLowerCase().trim();
+    const a = li.arrivalDate || li.arrival_date;
+    if (k && a) arrivalByKey[k] = a;
+  }
   const rows = isDo
-    ? (item.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({ name: i.product_name || i.product_code || "—", qty: Number(i.quantity) || 0 }))
-    : parseItems(item.items).map(i => ({ name: i.itemName || i.product_name || "—", qty: Number(i.qty ?? i.quantity) || 0 }));
+    ? (item.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
+        name: i.product_name || i.product_code || "—", qty: Number(i.quantity) || 0,
+        arrival: i.arrival_date || i.arrivalDate || arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
+      }))
+    : parseItems(item.items).map(i => ({
+        name: i.itemName || i.product_name || "—", qty: Number(i.qty ?? i.quantity) || 0,
+        arrival: i.arrivalDate || i.arrival_date || null,
+      }));
   const Row = ({ label, value }) => value ? (
     <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">{label}</span><span className="text-gray-800 break-words">{value}</span></div>
   ) : null;
@@ -943,9 +965,14 @@ function UnassignedPreviewModal({ data, onClose }) {
               : (
                 <div className="space-y-1">
                   {rows.map((r, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-1.5">
-                      <span className="text-gray-800">{r.name}</span>
-                      <span className="text-gray-500 shrink-0">×{r.qty}</span>
+                    <div key={i} className="flex items-center justify-between gap-2 text-sm border border-gray-100 rounded-lg px-3 py-1.5">
+                      <span className="text-gray-800 min-w-0 break-words">{r.name}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${r.arrival ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>
+                          {r.arrival ? `arrived ${fmtItemDate(r.arrival)}` : "no arrival date"}
+                        </span>
+                        <span className="text-gray-500">×{r.qty}</span>
+                      </span>
                     </div>
                   ))}
                 </div>
