@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback , memo } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
+import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -119,9 +120,7 @@ function printDeliveryOrder(o, company = {}) {
     </div>
   </div>
   </body></html>`;
-  const w = window.open("", "_blank");
-  if (!w) { alert("Allow pop-ups to print"); return; }
-  w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  printHtml(html);
 }
 
 // Fetch an image URL as a base64 data URI so it embeds in the Excel/HTML file
@@ -657,13 +656,10 @@ function TeamPrintView({ team, onClose }) {
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
     if (!printArea) return;
-    const w = window.open("", "_blank");
-    if (!w) { alert("Allow pop-ups to print"); return; }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Delivery Schedule</title>
+    printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Delivery Schedule</title>
     <style>@page{size:A4 landscape;margin:8mm}body{font-family:Arial,sans-serif;margin:0;padding:8px}
     .order-block{page-break-inside:avoid}table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10px}</style>
     </head><body>${printArea.innerHTML}</body></html>`);
-    w.document.close(); w.focus(); setTimeout(() => { w.print(); w.onafterprint = () => w.close(); }, 500);
     onClose();
   };
   const dateStr = team.team_date || "-";

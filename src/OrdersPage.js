@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
+import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -152,12 +153,7 @@ function printDeliveryNote(doData, order, co) {
   </div>
   </body></html>`;
 
-  const w = window.open("", "_blank");
-  if (!w) { alert("Allow pop-ups to print"); return; }
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(() => w.print(), 300);
+  printHtml(html);
 }
 
 function printSalesOrder(order, signatureDataUrl, co, branchName) {
@@ -398,16 +394,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     </div></div>`).join("")}
   </body></html>`;
 
-  const w = window.open("", "_blank");
-  if (!w) { alert("Please allow pop-ups to print."); return; }
-  w.document.write(html);
-  w.document.close();
-  w.focus();
   // Auto-fit to a single A4 page: the .page wrapper is fixed at the A4 printable
-  // width (725px @96dpi), so its on-screen height matches the print layout. If the
+  // width (725px @96dpi), so its rendered height matches the print layout. If the
   // document is taller than the printable height (~1050px), scale it down to fit.
-  setTimeout(() => {
-    try {
+  printHtml(html, {
+    onBeforePrint: (w) => {
       // Scale each copy independently so both fit their own A4 sheet.
       w.document.querySelectorAll(".page").forEach(page => {
         const doc = page.querySelector(".doc");
@@ -422,9 +413,8 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           page.style.overflow = "hidden";
         }
       });
-    } catch (e) { /* fall back to unscaled print */ }
-    w.print();
-  }, 400);
+    },
+  });
 }
 
 // Fix #9: arrival-date entry via a bare native <input type="date"> forced

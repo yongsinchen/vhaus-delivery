@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
+import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -258,10 +259,7 @@ function FinancePage() {
     const rows = ["90_plus", "60_90", "30_60", "current"].flatMap(bucket =>
       (aging.buckets?.[bucket] || []).map(o => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${o.so_number}</td><td style="border:1px solid #ddd;padding:4px 8px">${o.customer_name}</td><td style="border:1px solid #ddd;padding:4px 8px">${o.contact || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${o.days_outstanding}d</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:700">${money(o.balance)}</td><td style="border:1px solid #ddd;padding:4px 8px">${AGING_STYLE[bucket]?.label || bucket}</td></tr>`)
     ).join("");
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Aging Report</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left}</style></head><body><h2>Accounts Receivable Aging Report</h2><p style="color:#666">${new Date().toLocaleDateString("en-MY")} · Total: ${money(aging.summary?.total)} · ${aging.summary?.order_count} orders</p><table><thead><tr><th>SO</th><th>Customer</th><th>Contact</th><th>Days</th><th style="text-align:right">Balance</th><th>Bucket</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
-    w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+    printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Aging Report</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left}</style></head><body><h2>Accounts Receivable Aging Report</h2><p style="color:#666">${new Date().toLocaleDateString("en-MY")} · Total: ${money(aging.summary?.total)} · ${aging.summary?.order_count} orders</p><table><thead><tr><th>SO</th><th>Customer</th><th>Contact</th><th>Days</th><th style="text-align:right">Balance</th><th>Bucket</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
   };
 
   return (
