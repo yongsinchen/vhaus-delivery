@@ -17,6 +17,7 @@ const authHeaders = async () => {
 const EMPTY_PRODUCT = {
   code: "", name: "", description: "", color: "", size: "", supplier_id: "", category_id: "",
   unit_cost: "", unit_price: "", is_standard: true, is_customizable: false, reorder_point: 0, is_clearance: false,
+  packages_per_unit: 1,
 };
 
 const EMPTY_BUNDLE = {
@@ -463,7 +464,7 @@ function ProductsPage() {
       supplier_id: isCatalogueGroup ? (p.org_supplier_id || "") : (p.suppliers?.id || ""),
       category_id: p.product_categories?.id || p.organization_categories?.id || "",
       unit_cost: p.unit_cost ?? "", unit_price: p.unit_price ?? "",
-      is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0,
+      is_standard: p.is_standard, is_customizable: p.is_customizable || false, reorder_point: p.reorder_point ?? 0, packages_per_unit: p.packages_per_unit ?? 1,
       is_clearance: !!p.is_clearance,
     });
     setFormError("");
@@ -499,7 +500,7 @@ function ProductsPage() {
       organization_category_id: categoriesAreOrgLevel ? (form.category_id || null) : null,
       unit_cost: form.unit_cost === "" ? null : Number(form.unit_cost),
       unit_price: form.unit_price === "" ? null : Number(form.unit_price),
-      is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0,
+      is_standard: form.is_standard, is_customizable: form.is_customizable, reorder_point: Number(form.reorder_point) || 0, packages_per_unit: Math.max(1, Number(form.packages_per_unit) || 1),
       is_clearance: !!form.is_clearance,
       // Pass explicit org master link when user picked one in the search-first flow
       ...(selectedOrgProductId && !editId ? { organization_product_id: selectedOrgProductId } : {}),
@@ -1240,6 +1241,7 @@ function ProductsPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Reorder Point" value={form.reorder_point} onChange={v => setForm(f => ({ ...f, reorder_point: v }))} type="number" placeholder="0" />
+                <Field label="Packages / Unit" value={form.packages_per_unit} onChange={v => setForm(f => ({ ...f, packages_per_unit: v }))} type="number" placeholder="1" />
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Standard Item</label>
                   <button onClick={() => setForm(f => ({ ...f, is_standard: !f.is_standard }))}
