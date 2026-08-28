@@ -675,16 +675,31 @@ function TeamPrintView({ team, onClose }) {
     // JSON (where the supplier-DO OCR records arrivalDate), matched on code/name,
     // so the printed "Arrival PG" column shows when each line arrived instead of
     // always printing "No arrival" — mirrors the on-screen StopRow resolution.
-    const arrivalByKey = {};
-    for (const li of parseItemsSafe(o.items)) {
-      const k = String(li.itemCode || li.itemName || "").toLowerCase().trim();
-      if (k && li.arrivalDate) arrivalByKey[k] = li.arrivalDate;
-    }
+    // Pair each DO line to ONE legacy JSON item, consuming each match so a
+    // single arrival can't bleed onto every line that shares a code/name (that
+    // printed a not-arrived line as "arrived"). Mirrors the backend's
+    // syncArrivalsToSalesOrderItems 1:1 pairing.
+    const jsonItems = parseItemsSafe(o.items);
+    const usedJson = new Set();
+    const arrivalFor = (line) => {
+      const code = String(line.product_code || "").toLowerCase().trim();
+      const name = String(line.product_name || "").toLowerCase().trim();
+      for (let k = 0; k < jsonItems.length; k++) {
+        if (usedJson.has(k)) continue;
+        const ji = jsonItems[k];
+        const jCode = String(ji.itemCode || "").toLowerCase().trim();
+        const jName = String(ji.itemName || "").toLowerCase().trim();
+        const codeHit = code && jCode && code === jCode;
+        const nameHit = name && jName && (jName === name || jName.startsWith(name + " "));
+        if (codeHit || nameHit) { usedJson.add(k); return ji.arrivalDate || null; }
+      }
+      return null;
+    };
     let items = sc.delivery_orders
       ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
           itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
           supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
-          arrivalDate: arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
+          arrivalDate: arrivalFor(i),
         }))
       : parseItemsSafe(o.items);
     // Service orders have no line items (inert order, items='[]'); surface the
