@@ -48,10 +48,35 @@ const roleForApply = r => ({ part_time: "part-timers", short_term_part_time: "sh
 // Title-case plural for the "All …" default option in the same select.
 const roleForApplyTitle = r => ({ part_time: "Part-Timers", short_term_part_time: "Short-Term Part-Timers" }[r] || "Salesmen");
 
-// Total sales a salesman generated in the batch — the net amount commission is
-// computed on, summed over their OWN orders (override rows excluded). Shared by
-// the card, the sort, and the printed report so all three can never disagree.
-const totalSalesOf = u => u.commissions.filter(c => !isOverrideRow(c)).reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
+// ── Split orders ─────────────────────────────────────────────────────────────
+// An order sold by two people carries both names in orders.salesman ("A / B").
+// calculateCommission splits it: every component of commission_amt is divided by
+// the number of names. net_amount is NOT — it stays the whole order's
+// commissionable amount — so any sales figure built from net_amount has to
+// divide by the same count, or a shared order is counted in full against every
+// person on it and the sales total will not reconcile with the payout.
+//
+// Split on "/" exactly as the backend does, so the display divisor is always the
+// same number the money was divided by — including names that never resolved to
+// a user account (the backend divides by the name count regardless).
+export const salesmenOf = c => String(c.orders?.salesman || "").split("/").map(s => s.trim()).filter(Boolean);
+export const shareCountOf = c => salesmenOf(c).length || 1;
+
+// This commission's share of the order's commissionable amount.
+//
+// Already GST-exclusive for Singapore: getCommissionableAmount divides by 1.09
+// before net_amount is stored, so nothing is deducted again here.
+//
+// Override rows (branch/director) are NOT divided — the earner takes their rate
+// on the whole branch order however many salesmen split the sale, which is why
+// their commission_amt has no /n either.
+export const shareNetOf = c => (Number(c.net_amount) || 0) / (isOverrideRow(c) ? 1 : shareCountOf(c));
+
+// Total sales a salesman generated in the batch — their SHARE of the net amount
+// commission is computed on, summed over their OWN orders (override rows
+// excluded). Shared by the card, the sort, and the printed report so all three
+// can never disagree.
+export const totalSalesOf = u => u.commissions.filter(c => !isOverrideRow(c)).reduce((s, c) => s + shareNetOf(c), 0);
 // The person's override earnings (commission on other people's branch sales).
 const overrideTotalOf = u => u.commissions.filter(isOverrideRow).reduce((s, c) => s + (Number(c.commission_amt) || 0), 0);
 // A commission's own business month, from its order's date ("YYYY-MM").
@@ -59,9 +84,9 @@ const orderMonthOf = c => (c.orders?.order_date || "").slice(0, 7);
 // Own (non-override) sales for a specific business month only — the payout view
 // also carries pending commissions from OTHER months, which must not count
 // toward the selected month's sales total.
-const ownSalesInMonth = (u, ym) => u.commissions
+export const ownSalesInMonth = (u, ym) => u.commissions
   .filter(c => !isOverrideRow(c) && orderMonthOf(c) === ym)
-  .reduce((s, c) => s + (Number(c.net_amount) || 0), 0);
+  .reduce((s, c) => s + shareNetOf(c), 0);
 
 // --- Remembered filters ------------------------------------------------------
 // Kept per user AND per company: one person's August at Vhaus PG is not their
@@ -202,6 +227,9 @@ function OrderDetailModal({ c, onClose, canWaiveIncentive, onIncentiveChanged })
   }, [onClose]);
   if (!c) return null;
   const o = c.orders || {};
+  const names = salesmenOf(c);
+  const shared = !isOverrideRow(c) && names.length > 1;
+  const thisPerson = (c.users?.salesman_name || c.users?.name || "").toLowerCase();
   const row = (label, value) => (
     <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-gray-50 last:border-0">
       <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
@@ -226,10 +254,26 @@ function OrderDetailModal({ c, onClose, canWaiveIncentive, onIncentiveChanged })
           {row("Outstanding balance", <span className={Number(o.balance) > 0 ? "text-amber-600 font-medium" : ""}>{money(o.balance)}</span>)}
 
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mt-4 mb-1">Commission</p>
-          {row("Salesman", c.users?.name || c.users?.salesman_name || "—")}
+          {/* Every salesman on the order, not just the one this row pays — the
+              order is split between them, so the others explain the divisor. */}
+          {row(names.length > 1 ? `Salesmen (${names.length})` : "Salesman",
+            names.length > 0
+              ? <span className="flex flex-wrap gap-1 justify-end">
+                  {names.map((nm, i) => (
+                    <span key={i} className={`px-1.5 py-0.5 rounded-md text-xs ${nm.toLowerCase() === thisPerson ? "bg-violet-100 text-violet-700 font-semibold" : "bg-gray-100 text-gray-600"}`}>{nm}</span>
+                  ))}
+                </span>
+              : (c.users?.name || c.users?.salesman_name || "—"))}
           {row("Role", c.role_name || "—")}
           {row("Status", <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[c.status] || "bg-gray-100"}`}>{c.status}</span>)}
-          {row("Net amount", money(c.net_amount))}
+          {/* Their share of the order. net_amount is the whole order and is
+              already GST-exclusive for Singapore; the only thing applied here
+              is the split across salesmen. */}
+          {row(shared ? "Net amount (share)" : "Net amount",
+            <>
+              {money(shareNetOf(c))}
+              {shared && <span className="text-xs text-gray-400 ml-1">({money(c.net_amount)} ÷ {names.length})</span>}
+            </>)}
           {row("Rate", `${c.rate_pct}%${c.incentive_pct > 0 ? ` + ${c.incentive_pct}% incentive` : ""}`)}
           {Number(c.tier_commission_amt) !== 0 && row("Tier", money(c.tier_commission_amt))}
           {Number(c.clearance_commission_amt) !== 0 && row("Clearance", money(c.clearance_commission_amt))}
@@ -721,9 +765,9 @@ function CommissionPage() {
                     // commission_amt already excludes a switched-off incentive, so the
                     // printed figures follow automatically. The marker exists so a reader
                     // can see WHY a row pays less than its rate implies.
-                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
-                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
-                    ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "director_override" ? "director" : c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.net_amount)}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
+                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
+                    ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "director_override" ? "director" : c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
                     ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
                     ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
                   ];
@@ -811,10 +855,13 @@ function CommissionPage() {
                               <div>
                                 <span className="font-bold text-violet-700">{c.orders?.so_number || "?"}</span>
                                 <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
-                                {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
+                                {/* Their share of the commissionable amount, not
+                                    the raw order total: already GST-exclusive for
+                                    Singapore, and divided when the SO is split. */}
+                                <span className="text-gray-400 ml-1">({money(shareNetOf(c))}{shareCountOf(c) > 1 && !isOverrideRow(c) ? ` ÷${shareCountOf(c)}` : ""})</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +RM${Math.round(Number(c.net_amount) * Number(c.incentive_pct) / 100)}` : ""}</span>
+                                <span className="text-gray-400">{c.rate_pct}%{c.incentive_pct > 0 ? ` +RM${Math.round(shareNetOf(c) * Number(c.incentive_pct) / 100)}` : ""}</span>
                                 <span className="font-bold text-emerald-700">{money(c.commission_amt)}</span>
                               </div>
                             </div>
@@ -866,7 +913,10 @@ function CommissionPage() {
                         <div>
                           <span className="font-bold text-indigo-700">{c.orders?.so_number || "?"}</span>
                           <span className="text-gray-500 ml-2">{c.orders?.customer_name || ""}</span>
-                          {c.orders?.order_amount && <span className="text-gray-400 ml-1">({money(c.orders.order_amount)})</span>}
+                          {/* Override earners take their rate on the whole order,
+                              so this is never divided — but still the commissionable
+                              (GST-exclusive) amount, not the raw gross. */}
+                          <span className="text-gray-400 ml-1">({money(shareNetOf(c))})</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.role_name === "director_override" ? "bg-fuchsia-100 text-fuchsia-700" : c.role_name === "branch_override" ? "bg-indigo-100 text-indigo-700" : "bg-violet-100 text-violet-700"}`}>{c.role_name === "director_override" ? "Director" : c.role_name === "branch_override" ? "Override" : "Mgr override"}</span>
@@ -955,7 +1005,8 @@ function CommissionPage() {
                   {!c.deposit_met && <span className="text-xs text-amber-600">⏳ Deposit &lt; 30%</span>}
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(c.net_amount)}
+                  {/* Same share basis as the Payout tab, so the two reconcile. */}
+                  {c.users?.name || c.users?.salesman_name || "?"} · {c.role_name} · {c.rate_pct}%{c.incentive_pct > 0 ? ` +${c.incentive_pct}% incentive` : ""} on {money(shareNetOf(c))}{shareCountOf(c) > 1 && !isOverrideRow(c) ? ` (÷${shareCountOf(c)})` : ""}
                 </p>
                 <CommissionBreakdown c={c} />
                 {commissionReason(c) && <p className="text-xs text-amber-600 mt-0.5">{commissionReason(c)}</p>}
