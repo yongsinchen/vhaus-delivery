@@ -656,8 +656,16 @@ function TeamPrintView({ team, onClose, company }) {
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
     if (!printArea) return;
+    // Give the print document an explicit landscape page width + a matching
+    // viewport. Without them, mobile browsers lay the sheet out at the phone's
+    // narrow viewport and squeeze the wide 16-column table into a strip; the
+    // fixed 281mm width (A4 landscape minus 8mm margins) makes it fill the page
+    // and lets "fit to page" scale it correctly on any device.
     printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Delivery Schedule</title>
-    <style>@page{size:A4 landscape;margin:8mm}body{font-family:Arial,sans-serif;margin:0;padding:8px}
+    <meta name="viewport" content="width=1080, initial-scale=1">
+    <style>@page{size:A4 landscape;margin:8mm}
+    html,body{margin:0;padding:0}
+    body{font-family:Arial,sans-serif;width:281mm;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .order-block{page-break-inside:avoid}table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10px}</style>
     </head><body>${printArea.innerHTML}</body></html>`);
     onClose();
