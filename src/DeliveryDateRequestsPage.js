@@ -27,6 +27,9 @@ function DeliveryDateRequestsPage() {
   const [isApprover, setIsApprover] = useState(false);
   const [loading, setLoading] = useState(true);
   const [doFor, setDoFor] = useState(null); // { salesOrderId, orderNumber, date } — Create DO after approval
+  const [detailReq, setDetailReq] = useState(null); // request whose order is being reviewed
+  const [detail, setDetail] = useState(null);       // fetched { order, legacy_order }
+  const [detailLoading, setDetailLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all"); // all | pending | needs_reschedule | approved | rejected
   const [filterText, setFilterText] = useState("");        // match SO number / customer
   const [page, setPage] = useState(0);
@@ -77,6 +80,19 @@ function DeliveryDateRequestsPage() {
     const res = await af(`${API}/delivery-date-requests/${r.id}/pick`, { method: "PATCH", body: JSON.stringify({ requested_date: date }) });
     const d = await res.json();
     if (res.ok) { toast.success("Delivery date set"); load(); } else toast.error(d.error || "Failed");
+  };
+
+  // ── Order detail review (before deciding) ────────────────────────
+  const openDetail = async (r) => {
+    setDetailReq(r); setDetail(null);
+    if (!r.sales_order_id) return; // legacy request without a linked SO — show basics only
+    setDetailLoading(true);
+    try {
+      const res = await af(`${API}/sales-orders/${r.sales_order_id}`);
+      const d = await res.json();
+      if (res.ok) setDetail(d);
+    } catch (e) { /* modal still shows request basics */ }
+    finally { setDetailLoading(false); }
   };
 
   // ── PIC actions ──────────────────────────────────────────────────
@@ -169,6 +185,7 @@ function DeliveryDateRequestsPage() {
           <Availability load={r.requested_date_load} />
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
+          <button onClick={() => openDetail(r)} className="mt-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 inline-flex items-center gap-1">🔍 View order details</button>
         </div>
         {isApprover && (r.status === "pending" || r.status === "needs_reschedule") && (
           <div className="flex flex-col gap-1.5 shrink-0">
@@ -316,6 +333,82 @@ function DeliveryDateRequestsPage() {
           )}
         </>
       )}
+
+      {/* Order detail review modal — click an order to see its items/details
+          and decide (approve / propose / reject) right here. */}
+      {detailReq && (() => {
+        const o = detail?.order || null;
+        const items = Array.isArray(o?.sales_order_items) ? o.sales_order_items : [];
+        const legItems = Array.isArray(detail?.legacy_order?.items) ? detail.legacy_order.items : [];
+        const arrivalFor = (it) => {
+          if (it.arrived_at) return String(it.arrived_at).slice(0, 10);
+          const code = String(it.product_code || "").toLowerCase().trim();
+          const name = String(it.product_name || "").toLowerCase().trim();
+          const m = legItems.find(j =>
+            (code && String(j.itemCode || "").toLowerCase().trim() === code) ||
+            (name && String(j.itemName || "").toLowerCase().trim() === name));
+          return m?.arrivalDate ? String(m.arrivalDate).slice(0, 10) : null;
+        };
+        const money = v => (v != null && v !== "") ? `RM ${Number(v).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "";
+        const Info = ({ label, value }) => value ? (
+          <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">{label}</span><span className="text-gray-800">{value}</span></div>
+        ) : null;
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDetailReq(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-violet-700">SO {detailReq.so_number}</span>
+                  <Badge s={detailReq.status} />
+                </div>
+                <button onClick={() => setDetailReq(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+              </div>
+              <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+                <div className="space-y-1.5">
+                  <Info label="Customer" value={o?.customer_name || detailReq.customer_name} />
+                  <Info label="Contact" value={o?.customer_contact} />
+                  <Info label="Address" value={o?.customer_address || o?.delivery_address} />
+                  <Info label="Order status" value={o?.status} />
+                  <Info label="Order amount" value={money(o?.order_amount ?? o?.total)} />
+                  <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">Requested date</span><b className="text-gray-900">{fmt(detailReq.requested_date)}</b></div>
+                </div>
+                <Availability load={detailReq.requested_date_load} />
+                {detailReq.remark && <p className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">📝 {detailReq.remark}</p>}
+
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-1.5">Items {items.length > 0 ? `(${items.length})` : ""}</p>
+                  {detailLoading ? (
+                    <p className="text-sm text-gray-400">Loading order…</p>
+                  ) : !detailReq.sales_order_id ? (
+                    <p className="text-sm text-gray-400">This request has no linked sales order to show.</p>
+                  ) : items.length === 0 ? (
+                    <p className="text-sm text-gray-400">No items on this order.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {items.map((it, i) => {
+                        const arr = arrivalFor(it);
+                        return (
+                          <div key={i} className="flex items-center justify-between gap-2 text-sm border border-gray-100 rounded-lg px-3 py-1.5">
+                            <span className="text-gray-800">{it.product_name || it.product_code || "—"} <span className="text-gray-400">×{Number(it.quantity) || 1}</span></span>
+                            <span className={`text-[11px] px-1.5 py-0.5 rounded-full shrink-0 ${arr ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{arr ? `arrived ${fmt(arr)}` : "not arrived"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {isApprover && (detailReq.status === "pending" || detailReq.status === "needs_reschedule") && (
+                <div className="px-6 py-4 border-t flex gap-2 justify-end shrink-0 flex-wrap">
+                  <button onClick={() => { reject(detailReq); setDetailReq(null); }} className="px-4 py-2 text-sm rounded-xl border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
+                  <button onClick={() => { setProposeFor(detailReq); setAltDates(["", "", ""]); setAltNote(""); setDetailReq(null); }} className="px-4 py-2 text-sm rounded-xl bg-amber-500 text-white font-medium hover:bg-amber-600">Propose dates</button>
+                  <button onClick={() => { approve(detailReq); setDetailReq(null); }} className="px-5 py-2 text-sm rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700">Approve</button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Propose alternatives modal */}
       {proposeFor && (
