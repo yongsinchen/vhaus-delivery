@@ -192,7 +192,10 @@ async function exportServiceNoteExcel(detail, company = {}) {
 // Full-detail view of a service approval request, with the approver's
 // propose-a-date + approve / reject actions.
 function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
-  const [date, setDate] = useState(req.schedule_tbc ? "" : (req.delivery_date || ""));
+  // Pre-fill the schedule picker with the wanted-schedule date, falling back to
+  // the requested service date so a request that carried only a service date is
+  // still proposed with a real date (and can reach the delivery board).
+  const [date, setDate] = useState(req.schedule_tbc ? "" : (req.delivery_date || req.service_date || ""));
   const [tbc, setTbc] = useState(!!req.schedule_tbc);
   const items = Array.isArray(req.items) ? req.items : [];
   const Row = ({ label, value }) => value ? (
@@ -258,7 +261,7 @@ function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
         {isApprover && req.status === "pending" && (
           <div className="px-6 py-4 border-t flex gap-3 justify-end shrink-0">
             <button onClick={() => onReject(req.id)} className="px-4 py-2 text-sm rounded-xl border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
-            <button onClick={() => onApprove(req.id, { deliveryDate: tbc ? "" : date })} className="px-5 py-2 text-sm rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700">Approve{!tbc && date && date !== (req.delivery_date || "") ? " with new date" : ""}</button>
+            <button onClick={() => onApprove(req.id, { deliveryDate: tbc ? "" : date, tbc })} className="px-5 py-2 text-sm rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700">Approve{!tbc && date && date !== (req.delivery_date || req.service_date || "") ? " with new date" : ""}</button>
           </div>
         )}
       </div>
@@ -400,8 +403,13 @@ function ServicePage() {
       await withLoading(action === "approve" ? "Approving…" : "Rejecting…", async () => {
         const payload = { note };
         // Approver may propose another schedule date at approval. delivery_date
-        // present (even "") tells the backend to override; "" => schedule TBC.
-        if (action === "approve" && opts.deliveryDate !== undefined) payload.delivery_date = opts.deliveryDate;
+        // present (even "") tells the backend to override; TBC is signalled
+        // explicitly so an empty date falls back to the service date instead of
+        // silently unscheduling the case.
+        if (action === "approve") {
+          payload.schedule_tbc = !!opts.tbc;
+          if (opts.deliveryDate !== undefined) payload.delivery_date = opts.deliveryDate;
+        }
         const res = await af(`${API}/service-requests/${id}/${action}`, { method: "PATCH", body: JSON.stringify(payload) });
         const d = await res.json();
         if (!d.request) throw new Error(d.error || "Failed");
