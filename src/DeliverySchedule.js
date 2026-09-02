@@ -651,7 +651,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
 const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .print-area, .print-area * { visibility: visible !important; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } .order-block { page-break-inside: avoid; } .no-print { display: none !important; } }`;
 
 // -- Team Print View ---------------------------------------------------
-function TeamPrintView({ team, onClose }) {
+function TeamPrintView({ team, onClose, company }) {
   const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
@@ -727,7 +727,7 @@ function TeamPrintView({ team, onClose }) {
         </div>
         <div className="print-area p-4">
           <div className="text-center mb-3">
-            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>V Haus Living (Pg) Delivery Schedule</h1>
+            <h1 style={{ fontSize:"14px", fontWeight:"bold", margin:0 }}>{(company?.name || "").trim() ? `${company.name.trim()} Delivery Schedule` : "Delivery Schedule"}</h1>
             <p style={{ fontSize:"11px", margin:"2px 0 0 0", color:"#444" }}>Date: {dateStr} &nbsp;|&nbsp; Vehicle: {vehicleStr || "-"}</p>
           </div>
           {(() => {
@@ -1855,7 +1855,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       {showVehicleModal && <VehicleModal vehicles={vehicles} onClose={() => setShowVehicleModal(false)} onRefresh={loadVehicles} />}
       {showBlockedDates && <BlockedDatesModal blockedDates={blockedDates} onClose={() => setShowBlockedDates(false)} onRefresh={loadBlockedDates} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
-      {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} />}
+      {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} company={company} />}
       {previewItem && <UnassignedPreviewModal data={previewItem} onClose={() => setPreviewItem(null)} />}
       {doModal && (
         <CreateDeliveryOrderModal
