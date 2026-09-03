@@ -465,6 +465,8 @@ function OrdersPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterBranch, setFilterBranch] = useState(""); // filter by branch
   const [filterMonth, setFilterMonth] = useState("");   // filter by order-date month (YYYY-MM)
+  const [filterOrderFrom, setFilterOrderFrom] = useState(""); // order-date range start (YYYY-MM-DD)
+  const [filterOrderTo, setFilterOrderTo] = useState("");     // order-date range end (YYYY-MM-DD)
   const [filterSalesman, setFilterSalesman] = useState(""); // filter by salesman
   const [amendedCount, setAmendedCount] = useState(0); // true total across all pages, not just the loaded page
   const [sortKey, setSortKey] = useState("created_at:desc"); // "column:order" passed to /sales-orders
@@ -538,6 +540,8 @@ function OrdersPage() {
     if (filterStatus) params.set("status", filterStatus);
     if (filterBranch) params.set("branch_id", filterBranch);
     if (filterMonth) params.set("month", filterMonth);
+    if (filterOrderFrom) params.set("order_from", filterOrderFrom);
+    if (filterOrderTo) params.set("order_to", filterOrderTo);
     if (filterSalesman) params.set("salesman", filterSalesman);
     if (debouncedSearch) params.set("search", debouncedSearch);
     const [sBy, sOrd] = sortKey.split(":");
@@ -559,11 +563,11 @@ function OrdersPage() {
       const cd = await cRes.json();
       setAmendedCount(cd.total || 0);
     } catch { /* leave prior count */ }
-  }, [companyId, filterStatus, filterBranch, filterMonth, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters or sort change. sortKey must be here — the sort
   // dropdown only calls setSortKey, so without it a sort change never re-fetches.
-  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   useEffect(() => {
     if (!companyId) return;
@@ -1384,6 +1388,15 @@ function OrdersPage() {
         <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} title="Filter by order month"
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
         {filterMonth && <button onClick={() => setFilterMonth("")} className="text-xs text-violet-600 hover:underline">clear month</button>}
+        <div className="flex items-center gap-1.5" title="Filter by order date range">
+          <span className="text-xs text-gray-400">Order date</span>
+          <input type="date" value={filterOrderFrom} max={filterOrderTo || undefined} onChange={e => setFilterOrderFrom(e.target.value)}
+            className="px-2 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
+          <span className="text-xs text-gray-400">–</span>
+          <input type="date" value={filterOrderTo} min={filterOrderFrom || undefined} onChange={e => setFilterOrderTo(e.target.value)}
+            className="px-2 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400" />
+          {(filterOrderFrom || filterOrderTo) && <button onClick={() => { setFilterOrderFrom(""); setFilterOrderTo(""); }} className="text-xs text-violet-600 hover:underline">clear</button>}
+        </div>
         <select value={sortKey} onChange={e => setSortKey(e.target.value)}
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
           <option value="created_at:desc">Newest first</option>
@@ -1413,6 +1426,7 @@ function OrdersPage() {
                   {o._item_count || (o.sales_order_items || []).length || 0} item{(o._item_count || (o.sales_order_items || []).length || 0) !== 1 ? "s" : ""}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
+                  {o.order_date ? ` · 🧾 ${o.order_date}` : ""}
                   {o.delivery_date ? ` · 📅 ${o.delivery_date === "TBC" ? "TBC" : o.delivery_date}` : ""}
                 </p>
               </div>
