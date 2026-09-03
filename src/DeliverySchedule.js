@@ -434,7 +434,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
   }
   const items = dord
     ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
-        itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
+        itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
         supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
         arrivalDate: arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
         _do: true,
@@ -705,7 +705,7 @@ function TeamPrintView({ team, onClose, company }) {
     };
     let items = sc.delivery_orders
       ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
-          itemCode: i.product_code, itemName: i.product_name, unit: String(Number(i.quantity)),
+          itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
           supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
           arrivalDate: arrivalFor(i),
         }))
