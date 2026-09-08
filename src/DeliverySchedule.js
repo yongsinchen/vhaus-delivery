@@ -1703,12 +1703,21 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   };
 
   const deleteTeam = async (id) => {
-    if (!window.confirm("Delete this team and all its schedules?")) return;
+    if (!window.confirm("Delete this team?")) return;
     try {
       await withLoading("Deleting team…", async () => {
-        const res = await af(`${API}/delivery-teams/${id}`, { method: "DELETE" });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        // P0-13: the backend refuses to silently orphan assigned orders. A team
+        // with active assignments comes back 409 requires_confirmation; a locked
+        // (dispatched/delivered) team can't be deleted at all. On confirmation,
+        // retry with force to cleanly unassign them back to the pool.
+        let res = await af(`${API}/delivery-teams/${id}`, { method: "DELETE" });
+        let data = await res.json();
+        if (res.status === 409 && data.requires_confirmation) {
+          if (!window.confirm(`${data.error}\n\nUnassign all ${data.assigned_count} order(s) and delete the team?`)) return;
+          res = await af(`${API}/delivery-teams/${id}?force=true`, { method: "DELETE" });
+          data = await res.json();
+        }
+        if (!res.ok || data.error) throw new Error(data.error || "Failed to delete team");
         loadData();
       });
     } catch (e) { toast.error(e.message); }
