@@ -1723,6 +1723,23 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } catch (e) { toast.error(e.message); }
   };
 
+  // Delete Date safety: the backend refuses to delete a date that still holds
+  // scheduled orders / DOs / trips / routes / team assignments (never orphans).
+  // A safe (empty) date clears its empty team/route shells.
+  const deleteDate = async () => {
+    if (!window.confirm(`Delete delivery date ${date}?\n\nThis is only allowed when the date has no scheduled orders, delivery orders, trips, or team assignments. It will be refused (nothing deleted) if any records still exist.`)) return;
+    try {
+      await withLoading("Deleting date…", async () => {
+        const res = await af(`${API}/delivery/dates/${date}`, { method: "DELETE" });
+        const d = await res.json();
+        if (res.status === 409 && d.requires_cleanup) { window.alert(d.error); return; }
+        if (!res.ok || d.error) throw new Error(d.error || "Failed to delete date");
+        toast.success(`Delivery date ${date} cleared`);
+        loadData();
+      });
+    } catch (e) { toast.error(e.message); }
+  };
+
   // -- CRUD: Schedules (assign / unassign / reorder) --------------------
   const assignItem = async (teamId, id, type, setDateOnAssign = false) => await withLoading("Assigning to route…", async () => {
     const team = teams.find(t => String(t.id) === String(teamId));
@@ -1863,6 +1880,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           {!readOnly && <button onClick={buildSmartPlan} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
+          {!readOnly && <button onClick={deleteDate} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50" title="Delete this delivery date (only if it has no scheduled deliveries)">Delete Date</button>}
           {!readOnly && <button onClick={() => setShowAddTeam(true)} className="bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-blue-700">+ Add Team</button>}
         </div>
         )}
