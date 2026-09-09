@@ -1358,6 +1358,23 @@ function DeliveryOrdersTab({ onChanged }) {
 
   const statusCls = s => ({ draft: "bg-gray-100 text-gray-600", scheduled: "bg-blue-100 text-blue-700", out_for_delivery: "bg-amber-100 text-amber-700", arrived: "bg-indigo-100 text-indigo-700", delivered: "bg-green-100 text-green-700", completed: "bg-green-100 text-green-700", failed: "bg-red-100 text-red-700", cancelled: "bg-gray-200 text-gray-500" }[String(s || "").toLowerCase()] || "bg-gray-100 text-gray-600");
 
+  // A DO carries no team of its own — it comes through its delivery_schedules
+  // row(s) (see lib/selects.js DELIVERY_ORDER_LIST_SELECT on the backend). A DO
+  // can have more than one attempt (e.g. a failed run followed by a
+  // reschedule); prefer the current (non-terminal) attempt, falling back to
+  // the last attempt on record (e.g. the one that actually delivered it).
+  const TERMINAL_SCHED_STATUS = ["delivered", "failed"];
+  const activeSchedule = o => {
+    const scheds = o.delivery_schedules || [];
+    if (scheds.length === 0) return null;
+    return scheds.find(s => !TERMINAL_SCHED_STATUS.includes(String(s.status || "").toLowerCase())) || scheds[scheds.length - 1];
+  };
+  const teamLabel = o => {
+    const team = activeSchedule(o)?.delivery_teams;
+    if (!team) return null;
+    return [team.delivery_vehicles?.vehicle_plate, team.driver?.name].filter(Boolean).join(" · ") || null;
+  };
+
   const rows = dos
     .filter(o => showDone || !TERMINAL.includes(String(o.status || "").toLowerCase()))
     .filter(o => !dateFilter || o.delivery_date === dateFilter)
@@ -1388,7 +1405,7 @@ function DeliveryOrdersTab({ onChanged }) {
             <table className="w-full text-xs">
               <thead><tr className="bg-gray-50 text-gray-500 text-left">
                 <th className="px-3 py-2">DO #</th><th className="px-3 py-2">SO #</th><th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Delivery date</th><th className="px-3 py-2"></th>
+                <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Team</th><th className="px-3 py-2">Delivery date</th><th className="px-3 py-2"></th>
               </tr></thead>
               <tbody>
                 {rows.map(o => {
@@ -1402,6 +1419,7 @@ function DeliveryOrdersTab({ onChanged }) {
                       <td className="px-3 py-2">{so.customer_name}</td>
                       <td className="px-3 py-2 text-gray-500 max-w-[240px] truncate">{items.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</td>
                       <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${statusCls(o.status)}`}>{o.status}</span></td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{teamLabel(o) || "—"}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {terminal ? <span className="text-gray-500">{o.delivery_date || "—"}</span>
                           : <><input type="date" value={edit[o.id] || ""} onChange={e => setEdit(p => ({ ...p, [o.id]: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
