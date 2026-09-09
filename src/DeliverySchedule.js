@@ -1318,6 +1318,7 @@ function DeliveryOrdersTab({ onChanged }) {
   const [edit, setEdit] = useState({});      // do id -> date string being edited
   const [savingId, setSavingId] = useState(null);
   const [dateFilter, setDateFilter] = useState(""); // filter list by delivery date
+  const [teamFilter, setTeamFilter] = useState(""); // "" = all, "unassigned" = no team, else a team_id
   const [company, setCompany] = useState({});       // header/logo for the printed DO
   const TERMINAL = ["completed", "cancelled"];
 
@@ -1375,9 +1376,25 @@ function DeliveryOrdersTab({ onChanged }) {
     return [team.delivery_vehicles?.vehicle_plate, team.driver?.name].filter(Boolean).join(" · ") || null;
   };
 
+  // Distinct assigned teams currently in the list, for the filter dropdown.
+  const teamFilterOptions = (() => {
+    const map = new Map();
+    dos.forEach(o => {
+      const teamId = activeSchedule(o)?.team_id;
+      const label = teamLabel(o);
+      if (teamId && label) map.set(teamId, label);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  })();
+
   const rows = dos
     .filter(o => showDone || !TERMINAL.includes(String(o.status || "").toLowerCase()))
     .filter(o => !dateFilter || o.delivery_date === dateFilter)
+    .filter(o => {
+      if (!teamFilter) return true;
+      const teamId = activeSchedule(o)?.team_id || null;
+      return teamFilter === "unassigned" ? !teamId : teamId === teamFilter;
+    })
     .sort((a, b) => {
       const ad = a.delivery_date || "", bd = b.delivery_date || "";  // TBC (no date) first
       if (!ad && bd) return -1;
@@ -1394,6 +1411,14 @@ function DeliveryOrdersTab({ onChanged }) {
             <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded px-2 py-1 text-xs" />
           </label>
           {dateFilter && <button onClick={() => setDateFilter("")} className="text-xs text-gray-400 hover:text-red-500">clear</button>}
+          <label className="text-xs text-gray-500 flex items-center gap-1">Team
+            <select value={teamFilter} onChange={e => setTeamFilter(e.target.value)} className="border rounded px-2 py-1 text-xs">
+              <option value="">All teams</option>
+              <option value="unassigned">Unassigned</option>
+              {teamFilterOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+          {teamFilter && <button onClick={() => setTeamFilter("")} className="text-xs text-gray-400 hover:text-red-500">clear</button>}
           <label className="text-xs text-gray-500 flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show completed/cancelled</label>
           <button onClick={load} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
         </div>
