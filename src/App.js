@@ -1544,7 +1544,7 @@ export default function App() {
     if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
-    if (page === "orders") return <OrdersPage />;
+    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} />;
 
     // DELIVERIES
     if (page === "deliveries") return (
@@ -1964,7 +1964,7 @@ export default function App() {
 
     // SETTINGS
     if (page === "delivery-approvals") return <DeliveryDateRequestsPage />;
-    if (page === "order-amendments") return <OrderAmendmentsPage />;
+    if (page === "order-amendments") return <OrderAmendmentsPage onDecided={loadBootstrap} />;
     if (page === "settings") return <CompanySettingsPage />;
 
     return null;

@@ -447,7 +447,7 @@ function ArrivalDateInput({ value, disabled, onChange, className }) {
   );
 }
 
-function OrdersPage() {
+function OrdersPage({ onNavigateToAmendments } = {}) {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -1153,9 +1153,12 @@ function OrdersPage() {
       }
     }
 
-    // Warn when editing a confirmed/delivered order
+    // Warn when editing a confirmed/delivered order. Only a CRITICAL change
+    // (items/SKU/qty/price/discount/amount) actually requires manager
+    // approval (P0-18) — a customer-detail-only edit applies immediately, so
+    // the wording here must not claim otherwise.
     if (editId && ["confirmed", "delivered"].includes(editingOrder?.status)) {
-      if (!window.confirm("This order is already " + editingOrder.status + ". Saving changes will set it to 'Amended' and require manager re-approval.\n\nContinue?")) return;
+      if (!window.confirm("This order is already " + editingOrder.status + ". If this change includes items, price, discount, or amount, it will be submitted for manager approval instead of applying immediately.\n\nContinue?")) return;
     }
     setSaving(true);
     setFormError("");
@@ -1228,8 +1231,8 @@ function OrdersPage() {
     const d = await res.json();
     setSaving(false);
     if (!res.ok) { setFormError(d.error || "Failed to save"); return; }
-    if (d.order?.status === "amended") {
-      alert("Order amended. Status changed to 'Amended' — manager approval required to re-confirm.");
+    if (d.pending_amendment) {
+      toast.warning(d.message || "This is a critical change — submitted for manager approval. The order's live data has NOT been changed yet.");
     }
     setDrawerOpen(false);
     if (!editId) clearDraft(); // new order saved — drop the autosaved draft
@@ -1435,10 +1438,19 @@ function OrdersPage() {
                 <div className="flex items-center gap-1 mt-1 justify-end">
                   <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); printSO(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
-                  <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
-                    className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
-                    {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-                  </select>
+                  {/* P0-19 §14: "amended" is a pending-review flag, not a status a
+                      dropdown can flip past — that bypasses the canonical
+                      Before→After review on the Order Amendments page. Route
+                      there instead of a bare status flip. */}
+                  {o.status === "amended" ? (
+                    <button onClick={e => { e.stopPropagation(); onNavigateToAmendments?.(); }}
+                      className="text-xs px-2 py-1 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 font-medium">⚠️ Review Amendment</button>
+                  ) : (
+                    <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
+                      className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
+                      {STATUSES.filter(s => s !== "amended").map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                    </select>
+                  )}
                 </div>
               </div>
             </div>
@@ -1628,14 +1640,17 @@ function OrdersPage() {
                     </div>
                   )}
 
-                  {/* Amended review banner */}
+                  {/* P0-19 §10/§14: live values above are always the true
+                      current order; this only signals a pending REQUEST and
+                      routes to the single canonical review/approve surface
+                      (Order Amendments page) — it never applies anything here. */}
                   {o.status === "amended" && (
                     <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold text-amber-800">⚠️ Amendment Pending Review</span>
-                        <button onClick={() => changeStatus(o, "confirmed")} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">✓ Re-confirm</button>
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <span className="text-sm font-bold text-amber-800">⚠️ Pending Amendment — Waiting for Manager Approval</span>
+                        <button onClick={() => onNavigateToAmendments?.()} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 font-medium shrink-0">Review Before → After</button>
                       </div>
-                      {o.notes && <p className="text-xs text-amber-700 whitespace-pre-wrap mt-1">{o.notes}</p>}
+                      <p className="text-xs text-amber-700">The requested changes have NOT been applied yet — see Order Amendments for the full before/after and status.</p>
                     </div>
                   )}
 
