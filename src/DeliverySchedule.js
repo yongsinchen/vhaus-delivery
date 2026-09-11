@@ -1573,6 +1573,12 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
   const [trips, setTrips] = useState([]);
+  // Independent collapse state per Unassigned-panel group (SO/DO/Service/
+  // Trips) — false = expanded (default). Deliberately NOT derived from or
+  // reset by any fetched data, so assigning an item, clicking Refresh, or
+  // changing the date never disturbs what the user chose to collapse.
+  const [collapsedGroups, setCollapsedGroups] = useState({ so: false, do: false, service: false, trip: false });
+  const toggleGroupCollapsed = (key) => setCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAddTeam, setShowAddTeam] = useState(false);
@@ -2312,19 +2318,28 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                 what's actually visible below it (post date/filter), and a
                 group with nothing to show is hidden entirely rather than
                 rendered with a "0" header. Sticky group headers scroll within
-                this panel's own overflow-y-auto container, never the page. */}
+                this panel's own overflow-y-auto container, never the page.
+                Each group's collapse state (collapsedGroups) is independent
+                and lives only in this component's own state — never reset by
+                a refetch/assign/date-change, and never affects the count. */}
             <div className="p-3 space-y-1 max-h-screen overflow-y-auto">
               {combinedUnassigned.length === 0
                 ? <p className="text-xs text-gray-400 text-center py-4">All assigned!</p>
                 : unassignedGroups.map(group => group.items.length === 0 ? null : (
                     <div key={group.key} className="mb-3">
-                      <div className="sticky top-0 z-10 -mx-3 px-3 py-1 mb-1.5 bg-white/95 backdrop-blur-sm border-b border-gray-100 flex items-center justify-between">
-                        <h4 className="text-[11px] font-bold text-gray-500 tracking-wide">{group.label}</h4>
+                      <div onClick={() => toggleGroupCollapsed(group.key)}
+                        className="sticky top-0 z-10 -mx-3 px-3 py-1 mb-1.5 bg-white/95 backdrop-blur-sm border-b border-gray-100 flex items-center justify-between cursor-pointer select-none hover:bg-gray-50">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`text-gray-400 text-[10px] transition-transform duration-150 ${collapsedGroups[group.key] ? "-rotate-90" : ""}`}>▼</span>
+                          <h4 className="text-[11px] font-bold text-gray-500 tracking-wide">{group.label}</h4>
+                        </span>
                         <span className="text-[11px] font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{group.items.length}</span>
                       </div>
-                      <div className="space-y-2">
-                        {group.items.map(item => renderUnassignedCard(item))}
-                      </div>
+                      {!collapsedGroups[group.key] && (
+                        <div className="space-y-2">
+                          {group.items.map(item => renderUnassignedCard(item))}
+                        </div>
+                      )}
                     </div>
                   ))}
             </div>
