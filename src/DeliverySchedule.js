@@ -1461,36 +1461,59 @@ function DeliveryOrdersTab({ onChanged }) {
             <table className="w-full text-xs">
               <thead><tr className="bg-gray-50 text-gray-500 text-left">
                 <th className="px-3 py-2">DO #</th><th className="px-3 py-2">SO #</th><th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Team</th><th className="px-3 py-2">Delivery date</th><th className="px-3 py-2"></th>
+                <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Team</th>
+                {/* P0 hotfix: frozen action column — stays visible while DO#/SO#/
+                    Customer/Items/Status/Team scroll horizontally underneath.
+                    Opaque bg + left border + shadow so scrolled content never
+                    bleeds through; z-10 keeps it above those scrolling cells. */}
+                <th className="sticky right-0 z-10 bg-gray-50 px-3 py-2 border-l border-gray-200 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.08)]">Delivery Date / Actions</th>
               </tr></thead>
               <tbody>
                 {rows.map(o => {
                   const so = o.sales_orders || {};
                   const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
-                  const terminal = TERMINAL.includes(String(o.status || "").toLowerCase());
+                  // A superseded DO is dead (replaced by a fresh DO from an
+                  // approved active-DO amendment) — its raw status can still
+                  // read as e.g. "scheduled", so treat it as terminal too.
+                  const terminal = !!o.superseded_at || TERMINAL.includes(String(o.status || "").toLowerCase());
                   return (
                     <tr key={o.id} className="border-t">
                       <td className="px-3 py-2 font-bold text-violet-700 whitespace-nowrap">{o.do_number}</td>
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{so.order_number}</td>
                       <td className="px-3 py-2">{so.customer_name}</td>
                       <td className="px-3 py-2 text-gray-500 max-w-[240px] truncate">{items.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</td>
-                      <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full font-medium ${statusCls(o.status)}`}>{o.status}</span></td>
-                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{teamLabel(o) || "—"}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {terminal ? <span className="text-gray-500">{o.delivery_date || "—"}</span>
-                          : <><input type="date" value={edit[o.id] || ""} onChange={e => setEdit(p => ({ ...p, [o.id]: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
-                              {!o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</>}
+                      <td className="px-3 py-2">
+                        {o.superseded_at ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium bg-gray-200 text-gray-500" title={`Superseded ${o.superseded_at}`}>
+                            Superseded{o.superseded_by?.do_number ? ` → see ${o.superseded_by.do_number}` : ""}
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full font-medium ${statusCls(o.status)}`}>{o.status}</span>
+                        )}
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          {!terminal && (
-                            <>
-                              <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
-                              {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
-                            </>
-                          )}
-                          <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Print / Save as PDF">📄 PDF</button>
-                          <button onClick={() => exportDeliveryOrderExcel(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Download as Excel">📊 Excel</button>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{teamLabel(o) || "—"}</td>
+                      {/* P0 hotfix: frozen action column (see header cell comment) —
+                          same sticky/bg/border/shadow treatment, kept as one cell
+                          with date on top and the button row below so the frozen
+                          column stays as narrow as the buttons require rather than
+                          the width of two independently-sticky cells. */}
+                      <td className="sticky right-0 z-10 bg-white px-3 py-2 whitespace-nowrap border-l border-gray-200 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                        <div className="flex flex-col gap-1">
+                          <div>
+                            {terminal ? <span className="text-gray-500">{o.delivery_date || "—"}</span>
+                              : <><input type="date" value={edit[o.id] || ""} onChange={e => setEdit(p => ({ ...p, [o.id]: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
+                                  {!o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</>}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {!terminal && (
+                              <>
+                                <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
+                                {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
+                              </>
+                            )}
+                            <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Print / Save as PDF">📄 PDF</button>
+                            <button onClick={() => exportDeliveryOrderExcel(o, company)} className="border border-gray-300 px-2 py-1 rounded hover:bg-gray-50" title="Download as Excel">📊 Excel</button>
+                          </div>
                         </div>
                       </td>
                     </tr>

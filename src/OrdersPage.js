@@ -55,6 +55,26 @@ const DO_STATUS_STYLE = {
   cancelled: "bg-gray-100 text-gray-400",
 };
 
+// P1-1 — Delivery Order status badge that always surfaces supersession first:
+// a superseded DO is dead (replaced by a fresh DO from an approved active-DO
+// amendment) and must never read as "current" anywhere it's shown, regardless
+// of whatever raw `status` it was left in.
+function DoStatusBadge({ d }) {
+  if (d?.superseded_at) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-500">
+        Superseded
+        {d.superseded_by?.do_number ? ` → see ${d.superseded_by.do_number}` : ""}
+      </span>
+    );
+  }
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${DO_STATUS_STYLE[d?.status] || "bg-gray-100 text-gray-600"}`}>
+      {String(d?.status || "").replace(/_/g, " ")}
+    </span>
+  );
+}
+
 // Today's date (Malaysia, UTC+8) as YYYY-MM-DD for date inputs
 const todayMY = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit",
@@ -94,6 +114,9 @@ const TERMS = [
 ];
 
 const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+// P1-1: submitted-at / reviewed-at timestamps on amendment banners.
+const fmtDateTime = (d) => d ? new Date(d).toLocaleString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -486,6 +509,17 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [arrivalItems, setArrivalItems] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
   const [viewArrival, setViewArrival] = useState(null);
+  // P1-1 — Active Delivery Order Amendment: the most recent sales_order_amendments
+  // row for the order currently open in either the view drawer or the edit
+  // drawer (null when there's none). `order`/`legacy_order` from
+  // GET /sales-orders/:id are ALWAYS canonical — this is presentation-only.
+  const [pendingAmendment, setPendingAmendment] = useState(null);
+  // View drawer only: when a "pending" amendment is shown, this toggles the
+  // primary display between the proposed snapshot (default) and the current
+  // approved order. Also doubles as an expand toggle for rejected/conflict.
+  const [viewShowCurrent, setViewShowCurrent] = useState(false);
+  const [viewShowProposed, setViewShowProposed] = useState(false); // rejected/conflict: expand the proposed version
+  const [viewShowChanges, setViewShowChanges] = useState(false);   // rejected/conflict: expand the before→after change list
   const [orderServices, setOrderServices] = useState(null); // services linked to the viewed order
   const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
@@ -698,14 +732,25 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   // Returns full order with sales_order_items, payment_proofs, signature.
   // Skips fetch if already loaded. Also returns legacy_order for arrival data.
   const getFullOrder = async (order) => {
-    if (order.sales_order_items) return { order, legacy_order: null };
+    if (order.sales_order_items) return { order, legacy_order: null, pending_amendment: null };
     try {
       const headers = await authHeaders();
       const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
-      if (!res.ok) { toast.error("Failed to load order detail"); return { order, legacy_order: null }; }
+      if (!res.ok) { toast.error("Failed to load order detail"); return { order, legacy_order: null, pending_amendment: null }; }
       const d = await res.json();
-      return { order: d.order || order, legacy_order: d.legacy_order || null };
-    } catch { toast.error("Network error loading order"); return { order, legacy_order: null }; }
+      return { order: d.order || order, legacy_order: d.legacy_order || null, pending_amendment: d.pending_amendment || null };
+    } catch { toast.error("Network error loading order"); return { order, legacy_order: null, pending_amendment: null }; }
+  };
+
+  // P1-1: build a display-only pseudo sales-order from a pending amendment's
+  // proposed_snapshot, layered onto the canonical order for fields the
+  // snapshot doesn't carry (id, order_number, created_at, etc). NEVER used
+  // for anything but rendering — submitting edits always goes through the
+  // canonical `order`/`form` path.
+  const snapshotToDisplayOrder = (canonicalOrder, snapshot) => {
+    if (!snapshot) return canonicalOrder;
+    const items = (snapshot.items || []).map((it, i) => ({ ...it, id: it.source_item_id || `proposed-${i}` }));
+    return { ...canonicalOrder, ...snapshot, sales_order_items: items };
   };
 
   const parseLegacyArrival = (legacyOrder) => {
@@ -823,13 +868,18 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const openView = async (o) => {
     setDoData(null);
     setOrderServices(null);
+    setPendingAmendment(null);
+    setViewShowCurrent(false);
+    setViewShowProposed(false);
+    setViewShowChanges(false);
     try {
       // Keep the overlay up until the related sections (delivery orders +
       // services) are loaded too, so "loading done" means the drawer is ready.
       await withLoading("Loading order…", async () => {
-        const { order: full, legacy_order } = await getFullOrder(o);
+        const { order: full, legacy_order, pending_amendment } = await getFullOrder(o);
         setViewArrival(parseLegacyArrival(legacy_order));
         setViewingOrder(full);
+        setPendingAmendment(pending_amendment);
         await Promise.all([loadDeliveryOrders(o.id), loadOrderServices(full)]);
       });
     } catch (e) { toast.error("Failed to load order: " + e.message); }
@@ -901,10 +951,15 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const openEdit = async (o) => {
     // Load the full order behind the overlay so the drawer opens ready,
     // instead of flashing stale/empty form fields.
-    const { order: fullOrder, legacy_order } = await withLoading("Loading order…", () => getFullOrder(o));
+    const { order: fullOrder, legacy_order, pending_amendment } = await withLoading("Loading order…", () => getFullOrder(o));
     setEditId(o.id);
     setArrivalItems(parseLegacyArrival(legacy_order));
     setEditingOrder(fullOrder);
+    // UX-only: pending critical amendment blocks the item/qty/price/discount
+    // controls below so the user gets instant feedback instead of a raw 409.
+    // The backend's own duplicate-pending-amendment guard is the real
+    // enforcement (see PUT /sales-orders/:id).
+    setPendingAmendment(pending_amendment);
     const f = fullOrder;
     setForm({
       customer_name: f.customer_name || "",
@@ -1494,13 +1549,19 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
           <div className="absolute inset-0 bg-black/40" onClick={() => setViewingOrder(null)} />
           <div className="relative w-full max-w-lg bg-white h-full overflow-y-auto shadow-2xl">
             {(() => {
-              const o = viewingOrder;
-              const items = o.sales_order_items || [];
-              const sub = Number(o.subtotal) || 0;
-              const disc = Number(o.discount) || 0;
-              const gst = o.gst_waived ? 0 : (Number(o.gst_amount) || 0);
+              const o = viewingOrder; // canonical, current-approved order — never mutated by a pending amendment
+              const amend = pendingAmendment;
+              // P1-1: which version is PRIMARY right now.
+              //  - pending: proposed snapshot by default, toggle to current
+              //  - conflict/rejected/approved/none: always the canonical order
+              const showingProposed = amend?.status === "pending" && !viewShowCurrent;
+              const view = showingProposed ? snapshotToDisplayOrder(o, amend.proposed_snapshot) : o;
+              const items = view.sales_order_items || [];
+              const sub = Number(view.subtotal) || 0;
+              const disc = Number(view.discount) || 0;
+              const gst = view.gst_waived ? 0 : (Number(view.gst_amount) || 0);
               const total = sub - disc + gst;
-              const dep = Number(o.deposit) || 0;
+              const dep = Number(view.deposit) || 0;
               const bal = total - dep;
               return (<>
                 <div className="sticky top-0 bg-white border-b px-5 py-3 z-10">
@@ -1511,7 +1572,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100"}`}>{statusLabel(o.status)}</span>
                         {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
                       </div>
-                      <p className="text-sm text-gray-600 mt-0.5">{o.customer_name}</p>
+                      <p className="text-sm text-gray-600 mt-0.5">{view.customer_name}</p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
@@ -1521,15 +1582,65 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                   </div>
                 </div>
                 <div className="px-5 py-4 space-y-4">
+                  {/* P1-1 — Active Delivery Order Amendment banners */}
+                  {amend?.status === "pending" && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 space-y-1.5">
+                      <p className="text-sm font-bold text-amber-800">⏳ {showingProposed ? "AMENDMENT PENDING MANAGER APPROVAL" : "CURRENT OPERATIONAL VERSION"}</p>
+                      <p className="text-xs text-amber-700">
+                        {showingProposed
+                          ? "These changes are pending approval and have not yet been applied to Delivery Orders or delivery operations."
+                          : "Viewing the current, live order as it stands today. A newer amendment (below) is still awaiting approval and is not reflected here."}
+                      </p>
+                      <p className="text-xs text-amber-700">Submitted by <span className="font-medium">{amend.requested_by_name || "—"}</span> on {fmtDateTime(amend.requested_at)}</p>
+                      <div className="flex gap-3">
+                        <button onClick={() => setViewShowCurrent(v => !v)} className="text-xs font-medium text-violet-700 underline hover:text-violet-900">
+                          {showingProposed ? "View Current Approved Version →" : "← Back to Pending Amendment"}
+                        </button>
+                        {/* P0-19: manager approve/reject only happens on the Order
+                            Amendments page — this banner is informational, so it
+                            links there rather than duplicating approval controls. */}
+                        <button onClick={() => onNavigateToAmendments?.()} className="text-xs font-medium text-amber-800 underline hover:text-amber-900">
+                          Review in Order Amendments →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {amend?.status === "rejected" && (
+                    <div className="rounded-xl border border-gray-300 bg-gray-50 px-3.5 py-3 space-y-1.5">
+                      <p className="text-sm font-bold text-gray-700">✕ AMENDMENT REJECTED</p>
+                      <p className="text-xs text-gray-600">Reviewed by <span className="font-medium">{amend.reviewed_by_name || "—"}</span> on {fmtDateTime(amend.reviewed_at)}</p>
+                      {amend.decision_note && <p className="text-xs text-gray-600">Rejection reason: <span className="italic">{amend.decision_note}</span></p>}
+                      <div className="flex gap-3 pt-0.5">
+                        <button onClick={() => setViewShowProposed(v => !v)} className="text-xs font-medium text-violet-700 underline hover:text-violet-900">{viewShowProposed ? "Hide" : "View"} Rejected Proposal</button>
+                        <button onClick={() => setViewShowChanges(v => !v)} className="text-xs font-medium text-violet-700 underline hover:text-violet-900">{viewShowChanges ? "Hide" : "View"} Before → After</button>
+                      </div>
+                      {viewShowProposed && <AmendmentSnapshotPreview snapshot={amend.proposed_snapshot} />}
+                      {viewShowChanges && <AmendmentChangesList changes={amend.changes} />}
+                    </div>
+                  )}
+                  {amend?.status === "conflict" && (
+                    <div className="rounded-xl border border-red-300 bg-red-50 px-3.5 py-3 space-y-1.5">
+                      <p className="text-sm font-bold text-red-800">⚠ AMENDMENT CONFLICT</p>
+                      <p className="text-xs text-red-700">The order changed after this amendment was submitted. Please review the latest order (shown below) and submit a new amendment.</p>
+                      <div className="flex gap-3 pt-0.5 flex-wrap">
+                        <span className="text-xs text-gray-500">Viewing: Latest Current Version</span>
+                        <button onClick={() => setViewShowProposed(v => !v)} className="text-xs font-medium text-violet-700 underline hover:text-violet-900">{viewShowProposed ? "Hide" : "View"} Conflicted Proposed Version</button>
+                        <button onClick={() => setViewShowChanges(v => !v)} className="text-xs font-medium text-violet-700 underline hover:text-violet-900">{viewShowChanges ? "Hide" : "View"} Before → After</button>
+                      </div>
+                      {viewShowProposed && <AmendmentSnapshotPreview snapshot={amend.proposed_snapshot} />}
+                      {viewShowChanges && <AmendmentChangesList changes={amend.changes} />}
+                    </div>
+                  )}
+
                   {/* Customer info */}
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Contact</p><p className="font-medium text-gray-800">{o.customer_contact || "-"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Salesman</p><p className="font-medium text-gray-800">{o.salesman_name || "-"}</p></div>
-                    {o.customer_id_no && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">{o.customer_id_type === "passport" ? "Passport No" : "I/C No"}</p><p className="font-medium text-gray-800">{o.customer_id_no}</p></div>}
-                    {o.customer_email && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Email</p><p className="font-medium text-gray-800 break-all">{o.customer_email}</p></div>}
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Contact</p><p className="font-medium text-gray-800">{view.customer_contact || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Salesman</p><p className="font-medium text-gray-800">{view.salesman_name || "-"}</p></div>
+                    {view.customer_id_no && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">{view.customer_id_type === "passport" ? "Passport No" : "I/C No"}</p><p className="font-medium text-gray-800">{view.customer_id_no}</p></div>}
+                    {view.customer_email && <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Email</p><p className="font-medium text-gray-800 break-all">{view.customer_email}</p></div>}
                   </div>
-                  {o.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">{o.delivery_address ? "Billing Address" : "Address"}</p><p className="font-medium text-gray-800">{o.customer_address}</p></div>}
-                  {o.delivery_address && <div className="bg-violet-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-violet-400">Delivery Address</p><p className="font-medium text-gray-800">{o.delivery_address}</p></div>}
+                  {view.customer_address && <div className="bg-gray-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-gray-400">{view.delivery_address ? "Billing Address" : "Address"}</p><p className="font-medium text-gray-800">{view.customer_address}</p></div>}
+                  {view.delivery_address && <div className="bg-violet-50 rounded-xl p-2.5 text-sm"><p className="text-xs text-violet-400">Delivery Address</p><p className="font-medium text-gray-800">{view.delivery_address}</p></div>}
 
                   {/* Key numbers */}
                   <div className="grid grid-cols-4 gap-2">
@@ -1542,9 +1653,9 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
 
                   {/* Delivery info */}
                   <div className="grid grid-cols-3 gap-2 text-sm">
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{o.delivery_type || "Delivery"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className={`font-medium ${o.delivery_date === "TBC" ? "text-amber-600" : ""}`}>{o.delivery_date || "-"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{o.delivery_time_slot || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{view.delivery_type || "Delivery"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className={`font-medium ${view.delivery_date === "TBC" ? "text-amber-600" : ""}`}>{view.delivery_date || "-"}</p></div>
+                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{view.delivery_time_slot || "-"}</p></div>
                   </div>
 
                   {/* Items */}
@@ -1600,12 +1711,12 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                         {doData.delivery_orders.map(d => (
                           <div key={d.id} className={`border rounded-xl p-2.5 ${d.status === "cancelled" ? "border-gray-100 bg-gray-50 opacity-60" : "border-violet-100 bg-violet-50/40"}`}>
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-bold text-violet-700">{d.do_number}</span>
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${DO_STATUS_STYLE[d.status] || "bg-gray-100 text-gray-600"}`}>{d.status.replace(/_/g, " ")}</span>
+                                <DoStatusBadge d={d} />
                                 {d.delivery_date && <span className="text-xs text-gray-500">{d.delivery_date}</span>}
                               </div>
-                              {["draft", "scheduled"].includes(d.status) && (
+                              {!d.superseded_at && ["draft", "scheduled"].includes(d.status) && (
                                 <button onClick={() => cancelDeliveryOrder(d)} className="text-[10px] text-red-400 hover:text-red-600">Cancel</button>
                               )}
                             </div>
@@ -1649,19 +1760,12 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                     </div>
                   )}
 
-                  {/* P0-19 §10/§14: live values above are always the true
-                      current order; this only signals a pending REQUEST and
-                      routes to the single canonical review/approve surface
-                      (Order Amendments page) — it never applies anything here. */}
-                  {o.status === "amended" && (
-                    <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3">
-                      <div className="flex items-center justify-between mb-1 gap-2">
-                        <span className="text-sm font-bold text-amber-800">⚠️ Pending Amendment — Waiting for Manager Approval</span>
-                        <button onClick={() => onNavigateToAmendments?.()} className="text-xs px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 font-medium shrink-0">Review Before → After</button>
-                      </div>
-                      <p className="text-xs text-amber-700">The requested changes have NOT been applied yet — see Order Amendments for the full before/after and status.</p>
-                    </div>
-                  )}
+                  {/* Note: the pending-amendment banner for this state now lives
+                      once, at the top of this drawer (P1-1's richer version,
+                      which also links to Order Amendments) — P0-19 originally
+                      added a second, simpler banner here too; consolidated to
+                      avoid showing the same "pending approval" information
+                      twice in one drawer. */}
 
                   {/* Linked service cases */}
                   {Array.isArray(orderServices) && orderServices.length > 0 && (
@@ -1679,7 +1783,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                   )}
 
                   {/* Notes & Remark */}
-                  {o.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{o.remark}</div>}
+                  {view.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{view.remark}</div>}
                   {o.status !== "amended" && o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
 
                   {/* Action buttons */}
@@ -1806,6 +1910,20 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
               </div>
             </div>
             <div className="px-6 py-4 space-y-4">
+              {editId && pendingAmendment?.status === "pending" && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+                  <p className="text-sm font-bold text-amber-800">⏳ AMENDMENT PENDING MANAGER APPROVAL</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Submitted by {pendingAmendment.requested_by_name || "—"} on {fmtDateTime(pendingAmendment.requested_at)}. These changes have not yet been applied — item, quantity, price, discount and admin-charge edits are locked below until a manager decides. Customer/delivery detail fields above can still be corrected.
+                  </p>
+                </div>
+              )}
+              {editId && pendingAmendment?.status === "conflict" && (
+                <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3">
+                  <p className="text-sm font-bold text-red-800">⚠ AMENDMENT CONFLICT</p>
+                  <p className="text-xs text-red-700 mt-0.5">A previous amendment on this order could not be applied because the order changed after it was submitted. You are editing the current, latest order — this submission will start a fresh amendment.</p>
+                </div>
+              )}
               {formError && <div className="bg-red-50 text-red-700 text-sm px-3 py-2 rounded-xl">{formError}</div>}
 
               {/* Wizard step indicator — new orders only; editing shows the full form */}
@@ -2046,6 +2164,20 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
 
               {/* ── Phase 2: Items & discount ── */}
               {(editId || step === 2) && (<>
+              {editId && pendingAmendment?.status === "pending" ? (
+                // P1-1: UX-only lock — the backend's duplicate-pending-amendment
+                // guard (409 on PUT /sales-orders/:id) is the real enforcement;
+                // this just gives instant feedback instead of a raw error after
+                // submitting. Non-critical (customer/delivery detail) fields
+                // above stay editable, matching the server's own critical vs.
+                // customer_detail distinction.
+                <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-5 text-center">
+                  <p className="text-sm font-bold text-amber-800">Amendment Pending Approval</p>
+                  <p className="text-xs text-amber-700 mt-1 max-w-sm mx-auto">
+                    Items, quantities, prices, discount and admin charges are locked while your submitted amendment awaits manager review. A manager must approve or reject it before another critical change can be submitted.
+                  </p>
+                </div>
+              ) : (<>
               {/* Line items */}
               <div>
                 <div className="mb-2">
@@ -2179,6 +2311,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                 </div>
               </div>
               </>)}
+              </>)}
 
               {/* ── Payment fields — EDITING ONLY. New orders confirm without a
                     deposit; payment is collected later on the customer payment
@@ -2209,7 +2342,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
               </div>
 
               {form.payment_method === "Instalment" && (
-                <NumField label="Admin Charges (RM)" value={form.admin_charges} onChange={v => setForm(f => ({ ...f, admin_charges: v }))} />
+                <NumField label="Admin Charges (RM)" value={form.admin_charges} onChange={v => setForm(f => ({ ...f, admin_charges: v }))}
+                  disabled={editId && pendingAmendment?.status === "pending"} />
               )}
 
               {/* Payment Proofs */}
@@ -2568,6 +2702,47 @@ function NumField({ label, value, onChange, disabled }) {
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
       <input type="number" value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
         className={`w-full px-3 py-1.5 text-sm rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400 ${disabled ? "bg-gray-50 text-gray-400" : ""}`} />
+    </div>
+  );
+}
+
+// P1-1 — read-only preview of an amendment's proposed_snapshot (header +
+// items), used in the rejected/conflict banners so a salesperson can see
+// exactly what was proposed without it ever being mistaken for the live order.
+function AmendmentSnapshotPreview({ snapshot }) {
+  if (!snapshot) return <p className="text-xs text-gray-400 mt-1">No proposed data recorded.</p>;
+  const items = snapshot.items || [];
+  return (
+    <div className="mt-1.5 rounded-lg border border-gray-200 bg-white p-2.5 space-y-1.5">
+      <p className="text-[11px] font-bold text-gray-500">PROPOSED VERSION (not applied)</p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-gray-600">
+        {snapshot.customer_name && <div>Customer: <span className="text-gray-800">{snapshot.customer_name}</span></div>}
+        {snapshot.discount != null && <div>Discount: <span className="text-gray-800">{money(snapshot.discount)}</span></div>}
+        {snapshot.subtotal != null && <div>Subtotal: <span className="text-gray-800">{money(snapshot.subtotal)}</span></div>}
+        {snapshot.admin_charges != null && <div>Admin charges: <span className="text-gray-800">{money(snapshot.admin_charges)}</span></div>}
+      </div>
+      {items.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-gray-100">
+          {items.map((it, i) => (
+            <div key={it.source_item_id || i} className="flex items-center justify-between text-xs">
+              <span className="text-gray-700 truncate">{it.product_name || it.product_code || "Item"}{[it.size, it.color].filter(Boolean).length ? ` (${[it.size, it.color].filter(Boolean).join(" · ")})` : ""}</span>
+              <span className="text-gray-500 whitespace-nowrap ml-2">{money(it.unit_price)} × {it.quantity || 1}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// P1-1 — human-readable before→after change chips (same rendering style as
+// the Manager review queue in OrderAmendmentsPage.js) for the field-level
+// diff already computed server-side on the amendment row.
+function AmendmentChangesList({ changes }) {
+  if (!Array.isArray(changes) || changes.length === 0) return <p className="text-xs text-gray-400 mt-1">No field-level differences recorded.</p>;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1">
+      {changes.map((c, i) => <span key={i} className="text-[11px] bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full">{c}</span>)}
     </div>
   );
 }

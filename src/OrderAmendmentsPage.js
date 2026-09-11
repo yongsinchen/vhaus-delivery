@@ -19,6 +19,18 @@ const STATUS = {
   conflict: { label: "Conflict", cls: "bg-orange-100 text-orange-700" },
 };
 
+// P1-1 — apply_active_do_amendment() 409 `reason` codes, shown when a
+// conflict is specific to an affected Delivery Order rather than the
+// generic "Sales Order changed" case P0-19 already handles.
+const ACTIVE_DO_REASON_MESSAGES = {
+  already_decided: "This amendment has already been decided.",
+  stale_state: "The sales order changed since this amendment was requested — cannot apply automatically. Reload the order and review.",
+  active_do_in_transit: "An affected Delivery Order is already out for delivery or arrived — it can no longer be superseded. Resolve it before approving this amendment.",
+  below_delivered_qty: "A proposed quantity is lower than what has already been delivered for that item.",
+  removed_item_has_delivery: "An item being removed already has delivered quantity recorded against it.",
+  arrival_changed: "The arrival evidence for an affected item is no longer valid — recheck arrival status (or request an override) before approving.",
+};
+
 // Field-by-field before/after table from the two JSON snapshots. Canonical
 // (P0-18) snapshot column names are before_snapshot / proposed_snapshot —
 // NOT before_data/after_data (that was the never-applied migration 073
@@ -134,6 +146,28 @@ function BeforeAfter({ before, after }) {
   );
 }
 
+// P1-1 — advisory snapshot of Delivery Orders active at submission time.
+// Never approval authority (the RPC always re-reads live state) — purely a
+// heads-up so the manager knows a DO may be superseded by approving.
+function ActiveDoWarning({ snapshot }) {
+  if (!Array.isArray(snapshot) || snapshot.length === 0) return null;
+  return (
+    <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 p-3">
+      <p className="text-xs font-bold text-amber-800">⚠ ACTIVE DELIVERY ORDER AFFECTED</p>
+      <ul className="mt-1 space-y-0.5">
+        {snapshot.map((d, i) => (
+          <li key={d.delivery_order_id || i} className="text-xs text-amber-700">
+            <span className="font-medium">{d.do_number || d.delivery_order_id}</span> — {d.status || "—"}
+            {d.schedule?.delivery_date && <> · {d.schedule.delivery_date}</>}
+            {d.schedule?.team_id && <> · team {d.schedule.team_id}</>}
+          </li>
+        ))}
+      </ul>
+      <p className="text-[11px] text-amber-600 mt-1">Approving may supersede the affected Delivery Order(s) above and create a replacement.</p>
+    </div>
+  );
+}
+
 function AmendmentCard({ a, isApprover, busyId, onDecide }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
@@ -156,11 +190,13 @@ function AmendmentCard({ a, isApprover, busyId, onDecide }) {
           <div className="flex gap-2">
             <button onClick={() => setRejecting(true)} disabled={busyId === a.id}
               className="px-3 py-1.5 text-xs rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">Reject</button>
-            <button onClick={() => onDecide(a.id, "approve")} disabled={busyId === a.id}
+            <button onClick={() => onDecide(a, "approve")} disabled={busyId === a.id}
               className="px-4 py-1.5 text-xs rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">Approve</button>
           </div>
         )}
       </div>
+
+      {a.status === "pending" && <ActiveDoWarning snapshot={a.active_do_snapshot} />}
 
       {a.status === "conflict" && (
         <div className="mt-2 bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-xs text-orange-700">
@@ -190,7 +226,7 @@ function AmendmentCard({ a, isApprover, busyId, onDecide }) {
           <div className="flex gap-2">
             <button onClick={() => { setRejecting(false); setNote(""); }} disabled={busyId === a.id}
               className="flex-1 py-2 rounded-xl text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50">Cancel</button>
-            <button onClick={() => onDecide(a.id, "reject", note)} disabled={busyId === a.id}
+            <button onClick={() => onDecide(a, "reject", note)} disabled={busyId === a.id}
               className="flex-1 py-2 rounded-xl text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">Confirm Reject</button>
           </div>
         </div>
@@ -227,16 +263,40 @@ export default function OrderAmendmentsPage({ onDecided } = {}) {
   // error: the backend has already marked the amendment 'conflict', so
   // reload to reflect that distinct state instead of leaving it looking
   // like a transient failure.
-  const decide = async (id, action, note) => {
-    setBusyId(id);
+  // Takes the full amendment row (not just its id) so a successful approve
+  // that superseded a Delivery Order (P1-1) can resolve the OLD DO's
+  // do_number from this same row's active_do_snapshot — already loaded, no
+  // extra fetch.
+  const decide = async (a, action, note) => {
+    setBusyId(a.id);
     try {
-      const res = await af(`${API}/order-amendments/${id}/${action}`, { method: "PATCH", body: JSON.stringify(note ? { note } : {}) });
+      const res = await af(`${API}/order-amendments/${a.id}/${action}`, { method: "PATCH", body: JSON.stringify(note ? { note } : {}) });
       const d = await res.json();
       if (!res.ok) {
-        if (res.status === 409) { toast.error(d.error || "The Sales Order changed since this amendment was requested."); await load(); onDecided?.(); return; }
+        if (res.status === 409) {
+          // P1-1: the backend already sends a human message in `error` for
+          // every conflict reason (including the apply_active_do_amendment
+          // RPC's 6 reason codes) — the reason-code map is only a fallback
+          // for the rare case that ever omits `error`.
+          toast.error(d.error || ACTIVE_DO_REASON_MESSAGES[d.reason] || "The Sales Order changed since this amendment was requested.");
+          await load(); onDecided?.(); return;
+        }
         throw new Error(d.error || "Failed to update amendment");
       }
-      toast.success(action === "approve" ? "Amendment approved — Sales Order updated." : "Amendment rejected — Sales Order left unchanged.");
+      // P1-1: approval may have superseded and regenerated a Delivery Order —
+      // surface exactly which one(s), using this row's own active_do_snapshot
+      // to resolve the old DO's number (no extra fetch).
+      if (action === "approve" && Array.isArray(d.new_delivery_orders) && d.new_delivery_orders.length > 0) {
+        const snapshot = a.active_do_snapshot || [];
+        const lines = d.new_delivery_orders.map(nd => {
+          const old = snapshot.find(s => s.delivery_order_id === nd.old_do_id);
+          const oldLabel = old?.do_number || nd.old_do_id;
+          return `${oldLabel} superseded — new Delivery Order ${nd.new_do_number} created`;
+        });
+        toast.success(`Amendment approved. ${lines.join(" · ")}`);
+      } else {
+        toast.success(action === "approve" ? "Amendment approved — Sales Order updated." : "Amendment rejected — Sales Order left unchanged.");
+      }
       await load();
       // App.js's nav badge reads a separate /dashboard/bootstrap count —
       // nudge it too so the badge clears immediately, not just on next
