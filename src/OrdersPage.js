@@ -128,6 +128,7 @@ function printDeliveryNote(doData, order, co) {
     .foot { display: flex; border-top: 1px solid #111; }
     .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
     .foot .col + .col { border-left: 1px solid #111; }
+    .foot .remarks-text { white-space: pre-wrap; overflow-wrap: break-word; }
     .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
   </style></head><body>
   <div class="sheet">
@@ -146,7 +147,7 @@ function printDeliveryNote(doData, order, co) {
       <tbody>${itemRows}</tbody>
     </table>
     <div class="foot">
-      <div class="col"><b>Remarks:</b><br>${esc(order.remark || "")}</div>
+      <div class="col"><b>Remarks:</b><br><span class="remarks-text">${esc(doData.remark || order.remark || "")}</span></div>
       <div class="col"><div class="sigline">Received By (Customer)</div></div>
       <div class="col"><div class="sigline">Delivered By</div></div>
     </div>
@@ -758,7 +759,10 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
     } catch {}
     setDoPick(pick);
     setDoDate(viewingOrder?.delivery_date && viewingOrder.delivery_date !== "TBC" ? viewingOrder.delivery_date : "");
-    setDoRemark("");
+    // P0 hotfix: default to the sales order's own delivery remark/instructions
+    // so staff don't have to remember to retype it for every shipment — still
+    // fully editable/clearable here.
+    setDoRemark(viewingOrder?.remark || "");
     setDoOverride(false);
     setDoModalOpen(true);
   };
@@ -779,7 +783,12 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
     setDoSaving(true);
     try {
       const headers = await authHeaders();
-      const payload = { items, delivery_date: doDate || null, remark: doRemark || null, override_arrival: doOverride };
+      // Send the literal typed value — including a genuine "" if the user
+      // deliberately cleared the prefilled remark — rather than coercing
+      // blank to null. The backend treats null/omitted as "inherit the SO's
+      // remark" and any provided value (including "") as an explicit
+      // override, so this is what lets a deliberate clear actually stick.
+      const payload = { items, delivery_date: doDate || null, remark: doRemark, override_arrival: doOverride };
       let res = await fetch(`${API}/sales-orders/${viewingOrder.id}/delivery-orders`, { method: "POST", headers, body: JSON.stringify(payload) });
       let d = await res.json();
       // Fix #7: soft-blocked date — retry once with a dispatcher-entered

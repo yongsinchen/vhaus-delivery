@@ -93,6 +93,7 @@ function printDeliveryOrder(o, company = {}) {
     .foot { display: flex; border-top: 1px solid #111; }
     .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
     .foot .col + .col { border-left: 1px solid #111; }
+    .foot .remarks-text { white-space: pre-wrap; overflow-wrap: break-word; }
     .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
   </style></head><body>
   <div class="sheet">
@@ -114,7 +115,7 @@ function printDeliveryOrder(o, company = {}) {
       <tbody>${itemRows}</tbody>
     </table>
     <div class="foot">
-      <div class="col"><b>Remarks:</b><br>${esc(o.remark || "")}</div>
+      <div class="col"><b>Remarks:</b><br><span class="remarks-text">${esc(o.remark || "")}</span></div>
       <div class="col"><div class="sigline">Received By (Customer)</div></div>
       <div class="col"><div class="sigline">Delivered By</div></div>
     </div>
@@ -224,10 +225,21 @@ async function exportDeliveryOrderExcel(o, company = {}) {
   });
   descTexts.push("Total Amount");
 
-  // Footer — remarks + signatures (below the Total Amount line).
+  // Footer — remarks + signatures (below the Total Amount line). Remark text
+  // wraps within the merged cell rather than clipping — row height is sized
+  // to fit both explicit newlines and word-wrap at the merged column width so
+  // a long delivery instruction is never cut off when opened in Excel.
   let fr = totalRow + 2;
   ws.getCell(`A${fr}`).value = "Remarks:"; ws.getCell(`A${fr}`).font = { bold: true };
-  ws.mergeCells(`B${fr}:D${fr}`); ws.getCell(`B${fr}`).value = o.remark || "";
+  ws.getCell(`A${fr}`).alignment = { vertical: "top" };
+  ws.mergeCells(`B${fr}:D${fr}`);
+  const remarkText = o.remark || "";
+  const remarkCell = ws.getCell(`B${fr}`);
+  remarkCell.value = remarkText;
+  remarkCell.alignment = { wrapText: true, vertical: "top" };
+  const REMARK_CHARS_PER_LINE = 70; // approx chars that fit the merged B:D width at this font size
+  const wrappedLineCount = remarkText.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / REMARK_CHARS_PER_LINE)), 0);
+  ws.getRow(fr).height = Math.max(15, wrappedLineCount * 15);
   fr += 2;
   ws.mergeCells(`A${fr}:B${fr}`); ws.getCell(`A${fr}`).value = "Received By (Customer)";
   ws.mergeCells(`C${fr}:D${fr}`); ws.getCell(`C${fr}`).value = "Delivered By";
@@ -627,13 +639,19 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             {detail && <div><span className="font-semibold">Service: </span>{detail}</div>}
           </div>
         );
-      })() : (
-        o.remark && (
-          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded px-2 py-1 text-[11px] mt-1">
-            <span className="font-semibold">Remark: </span>{o.remark}
+      })() : (() => {
+        // P0 hotfix: a DO-based stop must show ITS OWN delivery_orders.remark —
+        // not the legacy orders row's remark — since a single SO can spawn
+        // multiple DOs whose remarks can diverge from each other and from the
+        // legacy row. Non-DO (legacy) stops have no dord, so they keep falling
+        // back to the legacy order's remark as before.
+        const stopRemark = dord ? (dord.remark || "") : (o.remark || "");
+        return stopRemark && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded px-2 py-1 text-[11px] mt-1 whitespace-pre-wrap break-words">
+            <span className="font-semibold">Remark: </span>{stopRemark}
           </div>
-        )
-      )}
+        );
+      })()}
       {!isLocked ? (
         <input value={notes} onChange={e => setNotes(e.target.value)}
           onBlur={e => saveNotes(e.target.value)}
@@ -791,7 +809,20 @@ function TeamPrintView({ team, onClose, company }) {
                               ? (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)
                               : (item.item_status==="done"?<span style={{color:"#059669",fontWeight:"bold"}}>✓ Done</span>:<span style={{color:"#6b7280"}}>Pending</span>))
                           : (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)}</td>
-                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>{o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (o.remark&&<div>{o.remark}</div>)}{sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}</td>}
+                        {isFirst&&(() => {
+                          // P0 hotfix: a DO-based row must print ITS OWN delivery_orders.remark
+                          // — not the legacy orders row's remark — since a single SO can spawn
+                          // multiple DOs whose remarks can diverge from each other and from the
+                          // legacy row. Non-DO (legacy) rows have no sc.delivery_orders, so they
+                          // keep falling back to the legacy order's remark as before.
+                          const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
+                          return (
+                            <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>
+                              {o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
+                              {sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}
+                            </td>
+                          );
+                        })()}
                       </tr>
                     ))}
                   </tbody></table>

@@ -41,6 +41,18 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
         for (const s of (rec.suggested_items_for_next_do || [])) prefill[s.sales_order_item_id] = String(s.quantity);
       } catch { /* recommendation is best-effort */ }
       setPick(prefill);
+      // P0 hotfix: default the Remark field to the sales order's own delivery
+      // remark/instructions so staff don't have to remember to retype it for
+      // every shipment — still fully editable/clearable here. This endpoint's
+      // response has no `remark` of its own, so fetch the SO directly for it;
+      // best-effort, a failure here just leaves the field blank.
+      try {
+        const soRes = await fetch(`${API}/sales-orders/${salesOrderId}`, { headers });
+        if (soRes.ok) {
+          const soData = await soRes.json();
+          setRemark(soData?.order?.remark || "");
+        }
+      } catch { /* prefill is best-effort */ }
     } catch { setDoData(null); toast.error("Network error"); onClose(); }
     finally { setLoading(false); }
   }, [salesOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,7 +71,12 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
     setSaving(true);
     try {
       const headers = await authHeaders();
-      const payload = { items, delivery_date: date || null, remark: remark || null, override_arrival: override };
+      // Send the literal typed value — including a genuine "" if the user
+      // deliberately cleared a prefilled remark — rather than coercing blank
+      // to null. The backend treats null/omitted as "inherit the SO's
+      // remark" and any provided value (including "") as an explicit
+      // override, so this is what lets a deliberate clear actually stick.
+      const payload = { items, delivery_date: date || null, remark, override_arrival: override };
       let res = await fetch(`${API}/sales-orders/${salesOrderId}/delivery-orders`, { method: "POST", headers, body: JSON.stringify(payload) });
       let d = await res.json();
       // Soft-blocked date — retry once with a dispatcher-entered reason.
