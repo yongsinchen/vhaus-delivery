@@ -60,6 +60,35 @@ const waNumber = (phone, country, address) => {
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
+// -- Unassigned-panel remark/note strip -------------------------------
+// Renders a single genuine delivery/service instruction field (never an
+// audit-trail field like sales_orders.notes / order amendment history) with
+// a 3-line clamp and an inline "Show more" — expands in place, no
+// drawer/navigation. Renders nothing when there's no text so cards never
+// show an empty "Remark:" label.
+function RemarkNote({ label, text, className = "" }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!text) return null;
+  // Best-effort "is this actually going to overflow 3 clamped lines"
+  // heuristic (no DOM measurement available at render time) — long enough
+  // in characters, or enough line breaks, that a 3-line clamp likely hides
+  // content, so the Show more toggle is worth offering.
+  const isLong = text.length > 140 || (text.match(/\n/g) || []).length >= 3;
+  return (
+    <div className={`text-[11px] rounded px-2 py-1 mt-1 border ${className}`}>
+      <p className={`whitespace-pre-wrap break-words ${expanded ? "" : "line-clamp-3"}`}>
+        <span className="font-semibold">{label}: </span>{text}
+      </p>
+      {isLong && (
+        <button type="button" onClick={e => { e.stopPropagation(); setExpanded(p => !p); }}
+          className="mt-0.5 underline font-medium opacity-80 hover:opacity-100">
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Print one Delivery Order — its OWN shipment lines (delivery_order_items), not
 // the whole sales order. `company` supplies the printed header/logo.
 function printDeliveryOrder(o, company = {}) {
@@ -369,6 +398,7 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
       draggable={!isLocked} onDragStart={() => !isLocked && onDragStart()}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5">
+          <span className="text-xs bg-indigo-200 text-indigo-800 font-bold px-1.5 py-0.5 rounded">TRIP</span>
           <span className="font-bold text-purple-700 text-xs">{trip.so_number}</span>
           <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${tripStatusColor(trip.status)}`}>
             Trip {trip.trip_no}/{trip.total_trips}
@@ -1789,6 +1819,20 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     return aTime.localeCompare(bTime);
   });
 
+  // Group the (already-sorted) pool by operational type for the Unassigned
+  // panel — SO / DO / Service / Trips, in that order. Filtering an already
+  // sorted array preserves each item's relative order, so the existing
+  // time-slot ordering is kept WITHIN each group. Live counts (badge next to
+  // each header) come from these same filtered arrays, so they always match
+  // what's actually rendered after the current date/filter state — never a
+  // stale global count.
+  const unassignedGroups = [
+    { key: "so", label: "SALES ORDERS", items: combinedUnassigned.filter(i => i._type === "order") },
+    { key: "do", label: "DELIVERY ORDERS", items: combinedUnassigned.filter(i => i._type === "do") },
+    { key: "service", label: "SERVICE", items: combinedUnassigned.filter(i => i._type === "service") },
+    { key: "trip", label: "TRIPS", items: combinedUnassigned.filter(i => i._type === "trip") },
+  ];
+
   // -- CRUD: Teams ------------------------------------------------------
   const createTeam = async (payload) => {
     return await withLoading("Creating team…", async () => {
@@ -1951,6 +1995,141 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     ));
     loadData();
   }, [draggingAssigned, teams, loadData, canMoveAcrossTeams, reassignSchedule]);
+
+  // One Unassigned-panel card, by type. Pulled out of the grouped render below
+  // so the same card markup renders under whichever type-section it belongs
+  // to; behavior (drag, assign, print, preview) is unchanged from before the
+  // SO/DO/Service/Trips grouping.
+  const renderUnassignedCard = (item) => {
+    if (item._type === "do") {
+      // Delivery Order card (Phase 2B) — one shipment of a sales order
+      const so = item.sales_orders || {};
+      const doItems = (item.delivery_order_items || []).filter(i => i.status !== "cancelled");
+      return (
+        <div key={`do-${item.id}`} className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
+          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "do" })}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1">
+              <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">DO</span>
+              <span className="font-bold text-violet-700 text-xs">{item.do_number}</span>
+              <span className="text-xs text-gray-400">{so.order_number}</span>
+              {item.status === "failed" && <span className="text-xs bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded">FAILED — retry</span>}
+            </div>
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
+              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "do", item }); }} title="View details" className="text-gray-400 hover:text-violet-600 leading-none">👁</button>
+            </span>
+          </div>
+          <p className="text-xs font-medium text-gray-700">{so.customer_name}</p>
+          <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
+          {item.delivery_date && <p className="text-xs text-indigo-600 font-medium">target {item.delivery_date}</p>}
+          <p className="text-xs text-gray-400 mt-1 truncate">{doItems.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</p>
+          {/* DO Remark hotfix: this card's OWN delivery_orders.remark — never
+              a fallback to the sales order's remark (a single SO can spawn
+              multiple DOs with diverging remarks; see StopRow's identical
+              dord-first rule). Renders nothing when empty. */}
+          <RemarkNote label="Remark" text={item.remark || ""} className="bg-yellow-50 border-yellow-200 text-yellow-800" />
+          <div className="flex items-center gap-1 mt-1.5">
+            <button onClick={() => printDeliveryOrder(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Print / Save as PDF">📄 PDF</button>
+            <button onClick={() => exportDeliveryOrderExcel(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Download as Excel">📊 Excel</button>
+          </div>
+          {!readOnly && teams.length > 0 && (
+            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "do"); }}
+              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+              <option value="">Assign to team...</option>
+              {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending" || deriveTeamStatus(t.schedules) === "Confirmed").map(t => (
+                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      );
+    }
+    if (item._type === "trip") {
+      return (
+        <TripCard key={`trip-${item.id}`} trip={item} teams={teams} isLocked={readOnly}
+          onAssign={assignItem} onDragStart={() => setDragOrder({ ...item, _type: "trip" })} />
+      );
+    }
+    if (item._type === "service") {
+      const items = parseItems(item.items);
+      return (
+        <div key={`service-${item.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
+          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1">
+              <span className="text-xs bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
+              <span className="font-bold text-purple-700 text-xs">{item.so_number}</span>
+              {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
+            </div>
+            <span className="flex items-center gap-1.5">
+              {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
+              {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "service", item }); }} title="View details" className="text-gray-400 hover:text-purple-600 leading-none">👁</button>
+            </span>
+          </div>
+          <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
+          <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
+          {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
+          <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+          {/* Service operational instruction — orders.service_note, a field
+              distinct from any audit-trail note. Never labeled "Remark". */}
+          <RemarkNote label="Service Note" text={item.service_note || ""} className="bg-violet-50 border-violet-200 text-violet-800" />
+          {!readOnly && teams.length > 0 && (
+            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
+              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+              <option value="">Assign to team...</option>
+              {teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; }).map(t => (
+                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}{deriveTeamStatus(t.schedules) === "Confirmed" ? " (confirmed)" : ""}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      );
+    }
+    // Regular delivery order (whole SO, not yet split into DOs)
+    const items = parseItems(item.items);
+    return (
+      <div key={`order-${item.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
+        draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1">
+            <span className="text-xs bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded">SO</span>
+            <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
+          </div>
+          <span className="flex items-center gap-1.5">
+            {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
+            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+            <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "order", item }); }} title="View details" className="text-gray-400 hover:text-blue-600 leading-none">👁</button>
+          </span>
+        </div>
+        <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
+        <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
+        {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
+        <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
+        {/* sales_orders.remark, projected one-way onto this legacy orders row
+            by syncSalesOrderToDelivery — this card represents the whole SO
+            before it's split into Delivery Orders. */}
+        <RemarkNote label="Remark" text={item.remark || ""} className="bg-yellow-50 border-yellow-200 text-yellow-800" />
+        {/* Generate a Delivery Order for this sales order. Once
+            created, the SO drops from the pool (it schedules per
+            DO) and appears as a DO card that can be printed. */}
+        {!readOnly && item.sales_order_id && (
+          <button onClick={() => setDoModal({ salesOrderId: item.sales_order_id, orderNumber: item.so_number, date })}
+            className="mt-2 w-full text-xs bg-violet-600 text-white rounded px-1 py-1 hover:bg-violet-700 font-medium">🚚 Generate DO</button>
+        )}
+        {!readOnly && teams.length > 0 && (
+          <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
+            className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
+            <option value="">Assign to team...</option>
+            {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending").map(t => (
+              <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
+            ))}
+          </select>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 relative">
@@ -2127,131 +2306,27 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               {!readOnly && draggingAssigned && (
                 <p className="text-xs text-orange-500 mt-1 font-medium">Drop here to unassign</p>
               )}
-              <div className="flex gap-2 mt-1 flex-wrap">
-                <span className="text-xs text-gray-500">Delivery</span>
-                <span className="text-xs text-purple-600">Service</span>
-                <span className="text-xs text-purple-400">Trips</span>
-              </div>
             </div>
-            <div className="p-3 space-y-2 max-h-screen overflow-y-auto">
+            {/* Grouped by operational type (SO / DO / Service / Trips) instead
+                of one mixed list — each section header carries a live count of
+                what's actually visible below it (post date/filter), and a
+                group with nothing to show is hidden entirely rather than
+                rendered with a "0" header. Sticky group headers scroll within
+                this panel's own overflow-y-auto container, never the page. */}
+            <div className="p-3 space-y-1 max-h-screen overflow-y-auto">
               {combinedUnassigned.length === 0
                 ? <p className="text-xs text-gray-400 text-center py-4">All assigned!</p>
-                : combinedUnassigned.map(item => {
-                    if (item._type === "do") {
-                      // Delivery Order card (Phase 2B) — one shipment of a sales order
-                      const so = item.sales_orders || {};
-                      const doItems = (item.delivery_order_items || []).filter(i => i.status !== "cancelled");
-                      return (
-                        <div key={`do-${item.id}`} className="bg-violet-50 border border-violet-200 rounded-lg p-2 cursor-grab"
-                          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "do" })}>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">DO</span>
-                              <span className="font-bold text-violet-700 text-xs">{item.do_number}</span>
-                              <span className="text-xs text-gray-400">{so.order_number}</span>
-                              {item.status === "failed" && <span className="text-xs bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded">FAILED — retry</span>}
-                            </div>
-                            <span className="flex items-center gap-1.5">
-                              <span className="text-xs text-violet-500 font-medium">{doItems.length} item{doItems.length !== 1 ? "s" : ""}</span>
-                              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "do", item }); }} title="View details" className="text-gray-400 hover:text-violet-600 leading-none">👁</button>
-                            </span>
-                          </div>
-                          <p className="text-xs font-medium text-gray-700">{so.customer_name}</p>
-                          <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
-                          {item.delivery_date && <p className="text-xs text-indigo-600 font-medium">target {item.delivery_date}</p>}
-                          <p className="text-xs text-gray-400 mt-1 truncate">{doItems.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</p>
-                          <div className="flex items-center gap-1 mt-1.5">
-                            <button onClick={() => printDeliveryOrder(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Print / Save as PDF">📄 PDF</button>
-                            <button onClick={() => exportDeliveryOrderExcel(item, company)} className="flex-1 text-xs border border-gray-300 rounded px-1 py-1 hover:bg-white" title="Download as Excel">📊 Excel</button>
-                          </div>
-                          {!readOnly && teams.length > 0 && (
-                            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "do"); }}
-                              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                              <option value="">Assign to team...</option>
-                              {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending" || deriveTeamStatus(t.schedules) === "Confirmed").map(t => (
-                                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      );
-                    }
-                    if (item._type === "trip") {
-                      return (
-                        <TripCard key={`trip-${item.id}`} trip={item} teams={teams} isLocked={readOnly}
-                          onAssign={assignItem} onDragStart={() => setDragOrder({ ...item, _type: "trip" })} />
-                      );
-                    }
-                    if (item._type === "service") {
-                      const items = parseItems(item.items);
-                      return (
-                        <div key={`service-${item.id}`} className="bg-purple-50 border border-purple-200 rounded-lg p-2 cursor-grab"
-                          draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
-                              <span className="font-bold text-purple-700 text-xs">{item.so_number}</span>
-                              {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
-                            </div>
-                            <span className="flex items-center gap-1.5">
-                              {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-                              {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
-                              <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "service", item }); }} title="View details" className="text-gray-400 hover:text-purple-600 leading-none">👁</button>
-                            </span>
-                          </div>
-                          <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
-                          <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
-                          {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
-                          {item.service_note && <p className="text-xs text-purple-600 mt-0.5 truncate">{item.service_note}</p>}
-                          <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                          {!readOnly && teams.length > 0 && (
-                            <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
-                              className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                              <option value="">Assign to team...</option>
-                              {teams.filter(t => { const st = deriveTeamStatus(t.schedules); return st === "Pending" || st === "Confirmed"; }).map(t => (
-                                <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}{deriveTeamStatus(t.schedules) === "Confirmed" ? " (confirmed)" : ""}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      );
-                    }
-                    // Regular delivery order
-                    const items = parseItems(item.items);
-                    return (
-                      <div key={`order-${item.id}`} className="bg-orange-50 border border-orange-200 rounded-lg p-2 cursor-grab"
-                        draggable={!readOnly} onDragStart={() => !readOnly && setDragOrder({ ...item, _type: "order" })}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
-                          <span className="flex items-center gap-1.5">
-                            {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-                            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
-                            <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "order", item }); }} title="View details" className="text-gray-400 hover:text-blue-600 leading-none">👁</button>
-                          </span>
-                        </div>
-                        <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
-                        <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
-                        {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
-                        <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
-                        {/* Generate a Delivery Order for this sales order. Once
-                            created, the SO drops from the pool (it schedules per
-                            DO) and appears as a DO card that can be printed. */}
-                        {!readOnly && item.sales_order_id && (
-                          <button onClick={() => setDoModal({ salesOrderId: item.sales_order_id, orderNumber: item.so_number, date })}
-                            className="mt-2 w-full text-xs bg-violet-600 text-white rounded px-1 py-1 hover:bg-violet-700 font-medium">🚚 Generate DO</button>
-                        )}
-                        {!readOnly && teams.length > 0 && (
-                          <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
-                            className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
-                            <option value="">Assign to team...</option>
-                            {teams.filter(t => deriveTeamStatus(t.schedules) === "Pending").map(t => (
-                              <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name} {t.area ? `(${t.area})` : ""}</option>
-                            ))}
-                          </select>
-                        )}
+                : unassignedGroups.map(group => group.items.length === 0 ? null : (
+                    <div key={group.key} className="mb-3">
+                      <div className="sticky top-0 z-10 -mx-3 px-3 py-1 mb-1.5 bg-white/95 backdrop-blur-sm border-b border-gray-100 flex items-center justify-between">
+                        <h4 className="text-[11px] font-bold text-gray-500 tracking-wide">{group.label}</h4>
+                        <span className="text-[11px] font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{group.items.length}</span>
                       </div>
-                    );
-                  })}
+                      <div className="space-y-2">
+                        {group.items.map(item => renderUnassignedCard(item))}
+                      </div>
+                    </div>
+                  ))}
             </div>
           </div>
         </div>
