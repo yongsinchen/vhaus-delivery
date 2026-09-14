@@ -11,6 +11,12 @@ const af = async (url, opts = {}) => {
   return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 const fmt = d => d ? new Date(d + "T00:00").toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "-";
+// P0 hotfix: Original/Requested date display must never show "null"/"undefined"
+// for a not-yet-populated delivery_date_requests.original_date (the P1-2
+// write path that snapshots it isn't wired into POST /delivery-date-requests
+// yet — every existing and new row has it NULL today) — show "TBC / Not Set"
+// instead, same as any other genuinely unset date on this page.
+const fmtOrTBC = d => d ? fmt(d) : "TBC / Not Set";
 const todayStr = new Date().toISOString().slice(0, 10);
 
 const STATUS = {
@@ -167,6 +173,26 @@ function DeliveryDateRequestsPage() {
     );
   };
 
+  // P0 hotfix: show the Original (snapshot at submission time, from
+  // delivery_date_requests.original_date) alongside the Requested date, on
+  // every card AND the detail modal — never derived from the live SO's
+  // current delivery_date (that can have moved since submission; original_date
+  // is the frozen "before" value this request was actually made against).
+  // NULL original_date renders "TBC / Not Set", never null/undefined/Invalid Date.
+  const DateChange = ({ original, requested }) => (
+    <div className="flex items-center gap-3 flex-wrap mt-1">
+      <div>
+        <div className="text-xs text-gray-400">Original Delivery Date</div>
+        <b className="text-sm text-gray-600">{fmtOrTBC(original)}</b>
+      </div>
+      <span className="text-gray-300">→</span>
+      <div>
+        <div className="text-xs text-gray-400">Requested Delivery Date</div>
+        <b className="text-sm text-gray-900">{fmtOrTBC(requested)}</b>
+      </div>
+    </div>
+  );
+
   const Card = ({ r }) => (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -181,7 +207,7 @@ function DeliveryDateRequestsPage() {
             )}
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
-          <p className="text-sm mt-1"><span className="text-gray-400">Requested date:</span> <b className="text-gray-900">{fmt(r.requested_date)}</b></p>
+          <DateChange original={r.original_date} requested={r.requested_date} />
           <Availability load={r.requested_date_load} />
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
@@ -368,12 +394,18 @@ function DeliveryDateRequestsPage() {
                   <Info label="Customer" value={o?.customer_name || detailReq.customer_name} />
                   <Info label="Contact" value={o?.customer_contact} />
                   <Info label="Address" value={o?.customer_address || o?.delivery_address} />
+                  <Info label="Requested by" value={detailReq.requested_by_name} />
                   <Info label="Order status" value={o?.status} />
                   <Info label="Order amount" value={money(o?.order_amount ?? o?.total)} />
-                  <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">Requested date</span><b className="text-gray-900">{fmt(detailReq.requested_date)}</b></div>
+                  <DateChange original={detailReq.original_date} requested={detailReq.requested_date} />
                 </div>
                 <Availability load={detailReq.requested_date_load} />
-                {detailReq.remark && <p className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">📝 {detailReq.remark}</p>}
+                {detailReq.remark && (
+                  <div>
+                    <div className="text-xs font-medium text-gray-500 mb-1">Request Remark</div>
+                    <p className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">📝 {detailReq.remark}</p>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-1.5">Items {items.length > 0 ? `(${items.length})` : ""}</p>
