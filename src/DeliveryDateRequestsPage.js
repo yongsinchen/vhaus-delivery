@@ -60,6 +60,13 @@ function DeliveryDateRequestsPage() {
   const [reqDate, setReqDate] = useState("");
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
+  // P1-2: this order's active Delivery Orders (0/1/many — never guessed).
+  // "Active" mirrors doLib.isOperationallyActive() server-side: not
+  // superseded, and in a non-terminal status. Loaded whenever `picked`
+  // changes; cleared alongside it.
+  const [activeDos, setActiveDos] = useState(null); // null = not loaded yet, [] = loaded, none active
+  const [selectedDoId, setSelectedDoId] = useState(null);
+  const ACTIVE_DO_STATUSES = ["draft", "scheduled", "out_for_delivery", "arrived"];
   const search = async (term) => {
     setQ(term);
     if (term.trim().length < 2) { setResults([]); return; }
@@ -67,16 +74,39 @@ function DeliveryDateRequestsPage() {
     const d = await res.json();
     setResults(Array.isArray(d) ? d : []);
   };
+  const pickOrder = async (o) => {
+    setPicked(o); setResults([]); setActiveDos(null); setSelectedDoId(null);
+    if (!o.so_number) { setActiveDos([]); return; }
+    try {
+      const res = await af(`${API}/delivery-orders?so_number=${encodeURIComponent(o.so_number)}`);
+      const d = await res.json();
+      const dos = (d.delivery_orders || []).filter(dord => !dord.superseded_at && ACTIVE_DO_STATUSES.includes(dord.status));
+      setActiveDos(dos);
+      if (dos.length === 1) setSelectedDoId(dos[0].id);
+    } catch (e) { setActiveDos([]); }
+  };
+  const doItemSummary = (dord) => (dord.delivery_order_items || [])
+    .filter(i => i.status !== "cancelled")
+    .map(i => `${i.product_name || i.product_code || "item"} x${i.quantity}`)
+    .join(", ");
+  const doTeamName = (dord) => {
+    const sched = (dord.delivery_schedules || []).find(s => !["delivered", "failed"].includes(String(s.status || "").toLowerCase()));
+    return sched?.delivery_teams?.driver?.name || (sched?.delivery_teams ? "Assigned team" : null);
+  };
   const submitRequest = async () => {
     if (!picked) { toast.warning("Pick an order first"); return; }
     if (!reqDate) { toast.warning("Choose a delivery date"); return; }
+    if ((activeDos || []).length > 1 && !selectedDoId) { toast.warning("Select which Delivery Order to reschedule"); return; }
     setSaving(true);
     try {
-      const res = await af(`${API}/delivery-date-requests`, { method: "POST", body: JSON.stringify({ order_id: picked.id, requested_date: reqDate, remark }) });
+      const res = await af(`${API}/delivery-date-requests`, {
+        method: "POST",
+        body: JSON.stringify({ order_id: picked.id, requested_date: reqDate, remark, delivery_order_id: selectedDoId || undefined }),
+      });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Failed");
-      toast.success("Request sent for approval");
-      setPicked(null); setQ(""); setResults([]); setReqDate(""); setRemark("");
+      toast.success(d.request?.status === "approved" ? "Auto-approved — 10+ days out" : "Request sent for approval");
+      setPicked(null); setQ(""); setResults([]); setReqDate(""); setRemark(""); setActiveDos(null); setSelectedDoId(null);
       load();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
@@ -199,15 +229,25 @@ function DeliveryDateRequestsPage() {
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-violet-700">SO {r.so_number}</span>
+            {/* P1-2: DO-scoped request — show exactly which shipment this
+                targets so the approver never has to guess. */}
+            {r.delivery_order_id && (
+              <span className="text-xs bg-violet-100 text-violet-700 font-bold px-1.5 py-0.5 rounded">{r.delivery_orders?.do_number || "DO"}</span>
+            )}
             <Badge s={r.status} />
             {r.status === "approved" && (
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.has_delivery_order ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>
                 {r.has_delivery_order ? "DO created" : "Awaiting DO"}
               </span>
             )}
+            {r.auto_approved && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700">Auto-approved</span>}
           </div>
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
+          {r.delivery_order_id && r.delivery_orders?.superseded_at && (
+            <p className="text-xs text-red-600 mt-1">⚠️ This Delivery Order was superseded since this request was made — it can no longer be applied as-is.</p>
+          )}
           <DateChange original={r.original_date} requested={r.requested_date} />
+          {r.original_team_name && <p className="text-xs text-gray-400 mt-0.5">Original team: {r.original_team_name}</p>}
           <Availability load={r.requested_date_load} />
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
@@ -261,9 +301,39 @@ function DeliveryDateRequestsPage() {
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
           <h2 className="text-sm font-bold text-gray-700">New request</h2>
           {picked ? (
-            <div className="flex items-center justify-between bg-violet-50 rounded-xl px-3 py-2">
-              <span className="text-sm"><b className="text-violet-700">SO {picked.so_number}</b> · {picked.customer_name}</span>
-              <button onClick={() => { setPicked(null); setQ(""); }} className="text-xs text-gray-400 hover:text-red-500">change</button>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between bg-violet-50 rounded-xl px-3 py-2">
+                <span className="text-sm"><b className="text-violet-700">SO {picked.so_number}</b> · {picked.customer_name}</span>
+                <button onClick={() => { setPicked(null); setQ(""); setActiveDos(null); setSelectedDoId(null); }} className="text-xs text-gray-400 hover:text-red-500">change</button>
+              </div>
+              {/* P1-2: 0 active DO -> nothing shown here (SO-level request).
+                  1 active DO -> auto-selected, shown for clarity, not chosen.
+                  2+ active DO -> mandatory selector, submit stays disabled
+                  until one is picked. A superseded DO never appears — the
+                  fetch already filters to isOperationallyActive's semantic. */}
+              {activeDos === null ? (
+                <p className="text-xs text-gray-400">Checking this order's deliveries…</p>
+              ) : activeDos.length === 1 ? (
+                <div className="text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
+                  <b className="text-violet-700">{activeDos[0].do_number}</b> — current {fmt(activeDos[0].delivery_date)}
+                  {doTeamName(activeDos[0]) ? ` — ${doTeamName(activeDos[0])}` : ""}
+                  {doItemSummary(activeDos[0]) ? <div className="text-gray-400 mt-0.5">{doItemSummary(activeDos[0])}</div> : null}
+                </div>
+              ) : activeDos.length > 1 ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-gray-600">Select Delivery Order to reschedule:</p>
+                  {activeDos.map(dord => (
+                    <label key={dord.id} className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 border cursor-pointer ${selectedDoId === dord.id ? "border-violet-400 bg-violet-50" : "border-gray-200 hover:bg-gray-50"}`}>
+                      <input type="radio" name="do-select" className="mt-0.5" checked={selectedDoId === dord.id} onChange={() => setSelectedDoId(dord.id)} />
+                      <span>
+                        <b className="text-violet-700">{dord.do_number}</b> — current {fmt(dord.delivery_date)}
+                        {doTeamName(dord) ? ` — ${doTeamName(dord)}` : ""}
+                        {doItemSummary(dord) ? <div className="text-gray-400 mt-0.5">{doItemSummary(dord)}</div> : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="relative">
@@ -272,7 +342,7 @@ function DeliveryDateRequestsPage() {
               {results.length > 0 && (
                 <div className="absolute z-10 mt-1 w-full bg-white rounded-xl border border-gray-200 shadow-lg max-h-56 overflow-y-auto">
                   {results.map(o => (
-                    <button key={o.id} onClick={() => { setPicked(o); setResults([]); }} className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 border-b border-gray-50 last:border-0">
+                    <button key={o.id} onClick={() => pickOrder(o)} className="w-full text-left px-3 py-2 text-sm hover:bg-violet-50 border-b border-gray-50 last:border-0">
                       <b className="text-violet-700">SO {o.so_number}</b> <span className="text-gray-600">· {o.customer_name}</span>
                       {o.delivery_date && <span className="text-xs text-gray-400 ml-1">(current: {o.delivery_date})</span>}
                     </button>
@@ -293,7 +363,7 @@ function DeliveryDateRequestsPage() {
             <textarea value={remark} onChange={e => setRemark(e.target.value)} rows={2} placeholder="e.g. customer requested Saturday; big lorry needed…"
               className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
           </div>
-          <button onClick={submitRequest} disabled={saving || !picked || !reqDate}
+          <button onClick={submitRequest} disabled={saving || !picked || !reqDate || ((activeDos || []).length > 1 && !selectedDoId)}
             className="px-5 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
             {saving ? "Sending…" : "Send for approval"}
           </button>
@@ -385,6 +455,9 @@ function DeliveryDateRequestsPage() {
               <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-violet-700">SO {detailReq.so_number}</span>
+                  {detailReq.delivery_order_id && (
+                    <span className="text-xs bg-violet-100 text-violet-700 font-bold px-1.5 py-0.5 rounded">{detailReq.delivery_orders?.do_number || "DO"}</span>
+                  )}
                   <Badge s={detailReq.status} />
                 </div>
                 <button onClick={() => setDetailReq(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
@@ -397,6 +470,7 @@ function DeliveryDateRequestsPage() {
                   <Info label="Requested by" value={detailReq.requested_by_name} />
                   <Info label="Order status" value={o?.status} />
                   <Info label="Order amount" value={money(o?.order_amount ?? o?.total)} />
+                  <Info label="Original team" value={detailReq.original_team_name} />
                   <DateChange original={detailReq.original_date} requested={detailReq.requested_date} />
                 </div>
                 <Availability load={detailReq.requested_date_load} />
