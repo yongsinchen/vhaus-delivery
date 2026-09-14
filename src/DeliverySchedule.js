@@ -485,9 +485,15 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
   const readiness = stopReadiness(items);
   const preferredTime = o.time_slot || "";
   const isLegacy = String(schedule.id).startsWith("legacy-");
+  // P1-1 stabilization: a superseded DO is retired regardless of what its own
+  // status column reads (apply_active_do_amendment() never touches it) — this
+  // stop must never present as a normal live delivery. Confirmed root cause
+  // of SO 56190's dead DO being re-scheduled after the fact: this board had
+  // no awareness of superseded_at at all.
+  const isSuperseded = !!(dord && dord.superseded_at);
   // Fix #8: a DO can be rescheduled until it's completed/cancelled — no more
   // cancel+recreate to move a shipment's date.
-  const canReschedule = dord && !DO_TERMINAL_STATUSES.includes(String(dord.status || "").toLowerCase());
+  const canReschedule = dord && !isSuperseded && !DO_TERMINAL_STATUSES.includes(String(dord.status || "").toLowerCase());
   // Fix #4: reassigning a stop to another team on the same date — only other
   // teams still open for assignment are offered.
   const reassignTargets = (teams || []).filter(t => t.id !== teamId && ["Pending", "Confirmed"].includes(deriveTeamStatus(t.schedules)));
@@ -545,13 +551,22 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             <span className="text-[11px] text-gray-400 font-medium">#{index + 1}</span>
             <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
             {dord && <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1 py-0.5 rounded" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>}
+            {isSuperseded && (
+              <span className="text-[10px] bg-gray-200 text-gray-500 font-medium px-1.5 py-0.5 rounded-full" title={`Superseded ${dord.superseded_at}`}>
+                Superseded{dord.superseded_by?.do_number ? ` → ${dord.superseded_by.do_number}` : ""}
+              </span>
+            )}
             {!isLocked && (
               <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs ml-auto" title="Unassign">×</button>
             )}
           </div>
           {/* Fix #4 / #8: reassign to another team, or reschedule a DO's date,
-              without unassign+recreate. Both hidden once the stop is locked. */}
-          {!isLocked && !isLegacy && (onReassign || canReschedule) && (
+              without unassign+recreate. Both hidden once the stop is locked,
+              and also hidden for a superseded DO — it is retired, never a
+              valid target for reassignment/reschedule (backend rejects both
+              independently of this — see POST /delivery-schedules and
+              PATCH /delivery-orders/:id). */}
+          {!isLocked && !isLegacy && !isSuperseded && (onReassign || canReschedule) && (
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               {onReassign && (
                 showReassign ? (
@@ -1628,7 +1643,14 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
         dosRes.ok ? dosRes.json() : Promise.resolve({ delivery_orders: [] }),
       ]);
-      const allActiveDos = dosData.delivery_orders || [];
+      // P1-1 stabilization: a superseded DO (superseded_at set) is retired —
+      // its own status can still read "draft"/"scheduled" (the supersession
+      // RPC never touches it; superseded_at is the sole authoritative
+      // retirement flag), so it must be excluded here BEFORE any status
+      // filtering, or it re-enters the assignable pool looking exactly like
+      // its live replacement. This was the confirmed root cause of SO
+      // 56190's superseded DO getting rescheduled after the fact.
+      const allActiveDos = (dosData.delivery_orders || []).filter(d => !d.superseded_at);
       // Pool: drafts + failed attempts awaiting reschedule (Phase 5)
       setUnassignedDos(allActiveDos.filter(d => d.status === "draft" || d.status === "failed"));
       setActiveDoSoNumbers(new Set(allActiveDos.map(d => d.sales_orders?.order_number).filter(Boolean)));
