@@ -2223,11 +2223,18 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               <button onClick={() => setShowReadiness(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
             </div>
             <div className="p-4 space-y-2 max-h-[70vh] overflow-y-auto">
+              {/* P1: a split SO can now produce one card PER active Delivery
+                  Order (each judged from its own items/packing) alongside a
+                  legacy whole-order card for an SO with no DO yet — never
+                  both for the same SO. Key on delivery_order_id first since
+                  order_id can be null (no legacy link) or shared by two DOs
+                  under the same order. */}
               {(readiness.orders || []).map(o => (
-                <div key={o.order_id} className={`rounded-xl border p-3 ${o.is_ready ? "border-emerald-200 bg-emerald-50" : o.alerts.some(a => a.severity === "high") ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
+                <div key={o.delivery_order_id || o.order_id} className={`rounded-xl border p-3 ${o.is_ready ? "border-emerald-200 bg-emerald-50" : o.alerts.some(a => a.severity === "high") ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-violet-700">{o.so_number}</span>
+                      {o.do_number && <span className="text-xs bg-violet-100 text-violet-700 font-bold px-1.5 py-0.5 rounded">{o.do_number}</span>}
                       <span className="text-sm text-gray-700">{o.customer_name}</span>
                       <span className="text-xs text-gray-400">{o.delivery_date}</span>
                     </div>
