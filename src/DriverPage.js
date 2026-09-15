@@ -10,6 +10,10 @@ const STATUS_STYLE = {
   scheduled: { bg: "bg-gray-100", text: "text-gray-600", label: "Scheduled" },
   Confirmed: { bg: "bg-blue-100", text: "text-blue-700", label: "Confirmed" },
   "Out for Delivery": { bg: "bg-indigo-100", text: "text-indigo-700", label: "On the Way" },
+  // P1-3: a DO-tied stop now moves scheduled -> out_for_delivery directly
+  // (lowercase, canonical) — legacy stops still pass through Title Case
+  // "Out for Delivery" above. Both map to the same visual style.
+  out_for_delivery: { bg: "bg-indigo-100", text: "text-indigo-700", label: "On the Way" },
   arrived: { bg: "bg-amber-100", text: "text-amber-700", label: "Arrived" },
   delivered: { bg: "bg-emerald-100", text: "text-emerald-700", label: "Delivered" },
   failed: { bg: "bg-red-100", text: "text-red-600", label: "Failed" },
@@ -248,7 +252,7 @@ function DriverPage() {
                           {actionLoading === sc.id ? "Updating..." : "🚛 Start Delivery"}
                         </button>
                       )}
-                      {sc.status === "Out for Delivery" && (
+                      {["Out for Delivery", "out_for_delivery"].includes(sc.status) && (
                         <button onClick={() => updateStatus(sc.id, "arrived")} disabled={actionLoading === sc.id}
                           className="w-full py-3 rounded-xl text-sm font-bold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
                           {actionLoading === sc.id ? "Updating..." : "📍 Arrived at Location"}
@@ -276,15 +280,29 @@ function DriverPage() {
                           </button>
                         </>
                       )}
-                      {sc.status === "scheduled" && (
+                      {/* P1-3: "Confirm Stop" is acknowledgement-only for a
+                          DO-tied stop — the backend never persists it as a
+                          real transition (see normalizeDriverStatusForDelivery
+                          Order), so skip straight to Start Delivery instead of
+                          a step that would otherwise do nothing observable.
+                          Legacy (non-DO) stops keep the original Confirm ->
+                          Start two-step exactly as before. */}
+                      {sc.status === "scheduled" && (dord ? (
+                        <button onClick={() => updateStatus(sc.id, "Out for Delivery")} disabled={actionLoading === sc.id}
+                          className="w-full py-3 rounded-xl text-sm font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                          {actionLoading === sc.id ? "Updating..." : "🚛 Start Delivery"}
+                        </button>
+                      ) : (
                         <button onClick={() => updateStatus(sc.id, "Confirmed")} disabled={actionLoading === sc.id}
                           className="w-full py-3 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
                           {actionLoading === sc.id ? "Updating..." : "✓ Confirm Stop"}
                         </button>
-                      )}
+                      ))}
                       {/* Failed delivery (Phase 5) — DO stops only. Closes this
-                          attempt with a reason; admin reschedules from the pool. */}
-                      {dord && ["Out for Delivery", "arrived"].includes(sc.status) && (
+                          attempt with a reason; admin reschedules from the pool.
+                          DO-tied stops always carry the lowercase canonical
+                          value here (never Title Case) after the P1-3 fix. */}
+                      {dord && ["out_for_delivery", "arrived"].includes(sc.status) && (
                         <button onClick={() => {
                           const reason = window.prompt("Why did this delivery fail? (customer not home, refused, access issue…)");
                           if (reason === null) return; // cancelled prompt

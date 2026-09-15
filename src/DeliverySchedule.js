@@ -8,6 +8,13 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
+// P1-3: a superseded DO is retired regardless of its own status column
+// (superseded_at is authoritative) — this is the exact predicate
+// TeamPrintView uses to exclude a stale schedule row pointing at one from
+// the operational Team Print Schedule. Exported as its own function (not
+// inlined) so it's directly unit-testable without rendering the component.
+export const isSupersededPrintRow = (sc) => !!sc?.delivery_orders?.superseded_at;
+
 // URGENT fix — Delivery Schedule print order. TeamPrintView used to build its
 // rows straight from `team.schedules` in whatever array order it received,
 // trusting the caller (loadData()'s own ascending sort_order sort) to have
@@ -777,6 +784,13 @@ export function TeamPrintView({ team, onClose, company }) {
   sortSchedulesForPrint(team.schedules).forEach(sc => {
     const o = sc.orders;
     if (!o) return;
+    // P1-3: a superseded DO is retired regardless of its own status column
+    // (superseded_at is authoritative, per the P1-1 stabilization rule) —
+    // if historical/edge-case data still leaves a schedule row pointing at
+    // one, it must never print as an ordinary, actionable delivery.
+    // Excluded entirely from the operational Team Print Schedule rather
+    // than printed-but-labeled, per the confirmed P1-3 design choice.
+    if (isSupersededPrintRow(sc)) return;
     // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
     // number. Fix #1: carry product_code + supplier_name so the printed sheet
     // matches the on-screen Code/Supplier columns for DO lines too.
