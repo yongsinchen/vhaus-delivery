@@ -8,6 +8,40 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
+// URGENT fix — Delivery Schedule print order. TeamPrintView used to build its
+// rows straight from `team.schedules` in whatever array order it received,
+// trusting the caller (loadData()'s own ascending sort_order sort) to have
+// already put them in the correct operational sequence — it never sorted on
+// its own. That is fragile: print is the one place a wrong order is a real
+// operational problem (a driver working the sheet top-to-bottom), so it must
+// be correct independent of array position, per the canonical sequence field
+// (sort_order), not an assumption about how it arrived.
+//
+// This comparator is PRINT-ONLY — never applied to the on-screen team list or
+// to loadData()'s own sort, which stay exactly as they were (the on-screen
+// order was already confirmed correct; only print needs hardening). It
+// mirrors the on-screen sort's slot-then-sort_order precedence, with one
+// deliberate improvement scoped to print only: a missing/null sort_order is
+// treated as "after every real sequence number" (never before Sequence 1),
+// since `(a.sort_order || 0)` would otherwise let a null-sort_order stop sort
+// ahead of Sequence 1 — the on-screen sort keeps its existing behavior here,
+// unchanged, since fixing it wasn't asked for and it's out of scope.
+export function compareSequenceForPrint(a, b) {
+  const slotA = (a.slot || a.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
+  const slotB = (b.slot || b.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
+  if (slotA !== slotB) return slotA.localeCompare(slotB);
+  const soA = a.sort_order == null ? Infinity : a.sort_order;
+  const soB = b.sort_order == null ? Infinity : b.sort_order;
+  return soA - soB;
+}
+
+// Sorts a team's schedules into the canonical print sequence — ascending by
+// compareSequenceForPrint — WITHOUT mutating the input array (print must
+// never affect the on-screen list or any other consumer of team.schedules).
+export function sortSchedulesForPrint(schedules) {
+  return (schedules || []).slice().sort(compareSequenceForPrint);
+}
+
 const statusColor = s => ({
   "Pending": "bg-yellow-100 text-yellow-800",
   "Confirmed": "bg-green-100 text-green-800",
@@ -714,7 +748,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
 const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .print-area, .print-area * { visibility: visible !important; } .print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4 landscape; margin: 8mm; } .order-block { page-break-inside: avoid; } .no-print { display: none !important; } }`;
 
 // -- Team Print View ---------------------------------------------------
-function TeamPrintView({ team, onClose, company }) {
+export function TeamPrintView({ team, onClose, company }) {
   const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
@@ -736,7 +770,11 @@ function TeamPrintView({ team, onClose, company }) {
   const dateStr = team.team_date || "-";
   const vehicleStr = [team.vehicle_plate, team.driver_name, team.area].filter(Boolean).join(" / ");
   const allRows = [];
-  (team.schedules || []).forEach(sc => {
+  // URGENT fix: sort by the canonical sequence field here, defensively —
+  // never trust team.schedules' incoming array order for print (see
+  // sortSchedulesForPrint's header comment). The on-screen list and
+  // loadData()'s own sort are completely untouched.
+  sortSchedulesForPrint(team.schedules).forEach(sc => {
     const o = sc.orders;
     if (!o) return;
     // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
