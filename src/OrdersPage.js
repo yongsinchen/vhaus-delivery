@@ -44,6 +44,28 @@ const STATUS_LABEL = {
 };
 const statusLabel = (s) => STATUS_LABEL[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
+// "Ordered" ticks on the items of a viewed SO — a personal checklist for
+// "have I placed this line with the supplier yet?". Deliberately NOT tied to
+// arrival/delivery state (those come from supplier DOs via /item-arrival);
+// nothing here is sent to the backend. Stored per browser and scoped to the
+// signed-in user so a shared terminal doesn't show one person's ticks to the next.
+const orderedMarksKey = (userId, orderId) => `pulseItemOrdered:${userId || "anon"}:${orderId}`;
+const readOrderedMarks = (userId, orderId) => {
+  try {
+    const v = JSON.parse(localStorage.getItem(orderedMarksKey(userId, orderId)) || "[]");
+    return new Set(Array.isArray(v) ? v : []);
+  } catch { return new Set(); }
+};
+const writeOrderedMarks = (userId, orderId, marks) => {
+  try {
+    const key = orderedMarksKey(userId, orderId);
+    if (marks.size === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify([...marks]));
+  } catch { /* private mode / quota — the ticks just don't persist */ }
+};
+// Item ids are stable for saved lines; fall back to position for anything unsaved.
+const itemMarkId = (it, i) => String(it?.id ?? `idx:${i}`);
+
 // Delivery Order (shipment) statuses — Phase 2B
 const DO_STATUS_STYLE = {
   draft: "bg-gray-100 text-gray-600",
@@ -521,6 +543,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [viewShowProposed, setViewShowProposed] = useState(false); // rejected/conflict: expand the proposed version
   const [viewShowChanges, setViewShowChanges] = useState(false);   // rejected/conflict: expand the before→after change list
   const [orderServices, setOrderServices] = useState(null); // services linked to the viewed order
+  const [orderedMarks, setOrderedMarks] = useState(() => new Set()); // item ids ticked "ordered" on the viewed order — see orderedMarksKey
   const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
   // Delivery Orders (Phase 2B) — shipments of the viewed sales order
@@ -878,11 +901,21 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       await withLoading("Loading order…", async () => {
         const { order: full, legacy_order, pending_amendment } = await getFullOrder(o);
         setViewArrival(parseLegacyArrival(legacy_order));
+        setOrderedMarks(readOrderedMarks(user?.id, full?.id ?? o.id));
         setViewingOrder(full);
         setPendingAmendment(pending_amendment);
         await Promise.all([loadDeliveryOrders(o.id), loadOrderServices(full)]);
       });
     } catch (e) { toast.error("Failed to load order: " + e.message); }
+  };
+
+  // Tick / untick an item's personal "ordered" reminder. Local only — it does
+  // not touch arrival, delivery, or anything the backend knows about.
+  const toggleOrderedMark = (orderId, markId) => {
+    const next = new Set(orderedMarks);
+    if (next.has(markId)) next.delete(markId); else next.add(markId);
+    setOrderedMarks(next);
+    writeOrderedMarks(user?.id, orderId, next);
   };
 
   // Services linked to this order (matched by so_number via the legacy order).
@@ -1658,12 +1691,26 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{view.delivery_time_slot || "-"}</p></div>
                   </div>
 
-                  {/* Items */}
+                  {/* Items — each row doubles as a personal "ordered" tick (see orderedMarksKey) */}
                   <div>
-                    <p className="text-xs font-bold text-gray-500 mb-2">ITEMS ({items.length})</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-bold text-gray-500">ITEMS ({items.length})</p>
+                      <p className="text-[10px] text-gray-400">
+                        {items.filter((it, i) => orderedMarks.has(itemMarkId(it, i))).length}/{items.length} marked ordered · your reminder only
+                      </p>
+                    </div>
                     <div className="space-y-1.5">
-                      {items.map((it, i) => (
-                        <div key={it.id || i} className="bg-white border border-gray-100 rounded-xl p-2.5 flex items-center justify-between">
+                      {items.map((it, i) => {
+                        const markId = itemMarkId(it, i);
+                        const isOrdered = orderedMarks.has(markId);
+                        const toggle = () => toggleOrderedMark(o.id, markId);
+                        return (
+                        <div key={it.id || i} role="button" tabIndex={0} aria-pressed={isOrdered}
+                          title={isOrdered ? "Marked as ordered — click to undo" : "Click to mark as ordered"}
+                          onClick={toggle}
+                          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+                          className={`border rounded-xl p-2.5 flex items-center justify-between gap-2.5 cursor-pointer select-none transition-colors focus:outline-none focus:ring-2 focus:ring-violet-300 ${isOrdered ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100/60" : "bg-white border-gray-100 hover:bg-gray-50"}`}>
+                          <span className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center text-[11px] font-bold ${isOrdered ? "bg-emerald-600 border-emerald-600 text-white" : "border-gray-300 text-transparent"}`}>✓</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
                               {it.product_code && <span className="text-xs font-mono text-violet-600">{it.product_code}</span>}
@@ -1680,9 +1727,10 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                           <div className="text-right flex-shrink-0 ml-3">
                             <p className="text-sm font-bold text-gray-900">{money(it.unit_price)} × {it.quantity || 1}</p>
                             <p className="text-xs text-gray-400">{money((Number(it.unit_price) || 0) * (Number(it.quantity) || 1))}</p>
+                            <p className={`text-[10px] font-medium ${isOrdered ? "text-emerald-600" : "text-gray-300"}`}>{isOrdered ? "Ordered" : "Not ordered"}</p>
                           </div>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   </div>
 
