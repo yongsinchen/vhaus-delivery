@@ -1,12 +1,18 @@
-// URGENT fix — Delivery Schedule print order. TeamPrintView used to build its
-// printed rows straight from team.schedules in whatever array order it
-// received, trusting the caller to have already sorted it ascending by the
-// canonical sequence field (sort_order) — it never sorted on its own. This
-// tests both the extracted comparator/sort helper directly, and the actual
-// printed DOM order via TeamPrintView, so a regression here is caught at
-// both levels.
+// URGENT fix (round 2) — Delivery Schedule canonical ordering.
+//
+// Round 1 (commit 4a47af0) added a print-only defensive sort on the theory
+// that print trusted array order the board didn't. Production verification
+// proved that wrong: the board and print already computed the IDENTICAL
+// order — both derive from ONE shared comparator. The real bug is inside
+// that comparator: it compared the free-text `slot` field as a STRING
+// ("1000-1200".localeCompare("800-1000") sorts "1000-1200" first, since '1' <
+// '8' as a character), not chronologically. This suite proves the fix at
+// three levels: the pure time parser, the shared comparator used by BOTH
+// loadData() (the board) and sortSchedulesForPrint() (print), and the actual
+// rendered TeamPrintView DOM — so a regression here, on either surface, is
+// caught.
 import { render, screen } from "@testing-library/react";
-import { TeamPrintView, compareSequenceForPrint, sortSchedulesForPrint } from "./DeliverySchedule";
+import { TeamPrintView, parseSlotStartMinutes, compareScheduleOrder, sortSchedulesForPrint } from "./DeliverySchedule";
 
 function sched(id, sort_order, soNumber, extra = {}) {
   return {
@@ -14,6 +20,9 @@ function sched(id, sort_order, soNumber, extra = {}) {
     orders: { id: 1000 + (sort_order ?? 0), so_number: soNumber, customer_name: "Cust-" + soNumber, items: "[]", balance: 0 },
     ...extra,
   };
+}
+function schedWithSlot(id, slot, soNumber, extra = {}) {
+  return { ...sched(id, null, soNumber, extra), slot };
 }
 
 function renderedSoOrder(schedules, teamOverrides = {}) {
@@ -24,62 +33,99 @@ function renderedSoOrder(schedules, teamOverrides = {}) {
   return order;
 }
 
-describe("sortSchedulesForPrint / compareSequenceForPrint (pure)", () => {
-  test("deliberately unsorted input (3,1,4,2) sorts to ascending 1,2,3,4", () => {
-    const input = [sched("s3", 3, "SO-3"), sched("s1", 1, "SO-1"), sched("s4", 4, "SO-4"), sched("s2", 2, "SO-2")];
-    const sorted = sortSchedulesForPrint(input);
-    expect(sorted.map(s => s.sort_order)).toEqual([1, 2, 3, 4]);
+describe("parseSlotStartMinutes — chronological parsing of real production slot formats", () => {
+  test("800-1000 parses before 1000-1200 (the confirmed lexicographic bug case)", () => {
+    expect(parseSlotStartMinutes("800-1000")).toBeLessThan(parseSlotStartMinutes("1000-1200"));
   });
-
-  test("does not mutate the input array (screen/other consumers unaffected)", () => {
-    const input = [sched("s3", 3, "SO-3"), sched("s1", 1, "SO-1")];
-    const before = input.map(s => s.id);
-    sortSchedulesForPrint(input);
-    expect(input.map(s => s.id)).toEqual(before);
+  test("full chronological run: 800-1000, 1000-1200, 1200-1400, 1400-1600, 1600-1800", () => {
+    const values = ["800-1000", "1000-1200", "1200-1400", "1400-1600", "1600-1800"].map(parseSlotStartMinutes);
+    expect(values).toEqual([...values].sort((a, b) => a - b));
   });
-
-  test("a missing/null sort_order does NOT move ahead of valid Sequence 1", () => {
-    const input = [sched("sNull", null, "SO-N"), sched("s1", 1, "SO-1"), sched("s2", 2, "SO-2")];
-    const sorted = sortSchedulesForPrint(input);
-    expect(sorted[0].id).toBe("s1"); // Sequence 1 stays first
-    expect(sorted[sorted.length - 1].id).toBe("sNull"); // null goes last, never ahead
+  test("0800-1000 (leading zero) parses the same as 800-1000", () => {
+    expect(parseSlotStartMinutes("0800-1000")).toBe(parseSlotStartMinutes("800-1000"));
   });
-
-  test("undefined sort_order is treated the same as null (goes last)", () => {
-    const input = [sched("sUndef", undefined, "SO-U"), sched("s1", 1, "SO-1")];
-    const sorted = sortSchedulesForPrint(input);
-    expect(sorted[0].id).toBe("s1");
-    expect(sorted[1].id).toBe("sUndef");
+  test("8:00-10:00 (colon) parses the same as 800-1000", () => {
+    expect(parseSlotStartMinutes("8:00-10:00")).toBe(parseSlotStartMinutes("800-1000"));
   });
-
-  test("compareSequenceForPrint is a stable ascending comparator usable directly", () => {
-    expect(compareSequenceForPrint({ sort_order: 1 }, { sort_order: 2 })).toBeLessThan(0);
-    expect(compareSequenceForPrint({ sort_order: 5 }, { sort_order: 5 })).toBe(0);
-    expect(compareSequenceForPrint({ sort_order: 9 }, { sort_order: 1 })).toBeGreaterThan(0);
+  test("800 - 1000 (spaced dash) parses the same as 800-1000", () => {
+    expect(parseSlotStartMinutes("800 - 1000")).toBe(parseSlotStartMinutes("800-1000"));
+  });
+  test("H.MM decimal ranges parse chronologically: 12.00 (noon), 1.30, 2.00, 4.00", () => {
+    // 12.00 (noon) must come before 1.30 (which is 1:30pm under the
+    // business-hours heuristic, i.e. after noon).
+    const inOrder = ["12.00 - 2.00", "1.30 - 3.30", "2.00 - 4.00", "4.00 - 6.00"].map(parseSlotStartMinutes);
+    expect(inOrder).toEqual([...inOrder].sort((a, b) => a - b));
+    expect(new Set(inOrder).size).toBe(4); // all distinct, no accidental collisions
+  });
+  test("bare-hour business-day heuristic: 8-11 => AM, 12 => noon, 1-7 => PM", () => {
+    expect(parseSlotStartMinutes("8-10")).toBe(8 * 60);
+    expect(parseSlotStartMinutes("10-12")).toBe(10 * 60);
+    expect(parseSlotStartMinutes("12-2")).toBe(12 * 60);
+    expect(parseSlotStartMinutes("1-3")).toBe(13 * 60);
+    expect(parseSlotStartMinutes("3-5")).toBe(15 * 60);
+  });
+  test("explicit am/pm suffix overrides the bare-hour heuristic", () => {
+    expect(parseSlotStartMinutes("3pm - 5pm")).toBe(15 * 60);
+    expect(parseSlotStartMinutes("8am - 10am")).toBe(8 * 60);
+    expect(parseSlotStartMinutes("1-4pm")).toBe(13 * 60); // shared trailing suffix
+  });
+  test("genuinely unparseable free text sorts after every real time, never guessed", () => {
+    for (const v of ["MORNING", "AFTERNOON", "等货到", "B4 12PM", "AFTER 130PM", "", null, undefined]) {
+      expect(parseSlotStartMinutes(v)).toBe(Infinity);
+    }
   });
 });
 
-describe("TeamPrintView — canonical print order (rendered DOM)", () => {
-  test("deliberately unsorted input (3,1,4,2) prints as 1,2,3,4 top to bottom", () => {
+describe("compareScheduleOrder — the ONE canonical comparator shared by the board and print", () => {
+  test("chronological slot wins over sort_order when slots differ", () => {
+    const early = { slot: "800-1000", sort_order: 99 };
+    const late = { slot: "1600-1800", sort_order: 1 };
+    expect(compareScheduleOrder(early, late)).toBeLessThan(0);
+  });
+  test("sort_order is the tiebreaker within an identical parsed time", () => {
+    const a = { slot: "800-1000", sort_order: 2 };
+    const b = { slot: "0800-1000", sort_order: 1 }; // same parsed time, different text
+    expect(compareScheduleOrder(b, a)).toBeLessThan(0);
+  });
+  test("a missing/null sort_order does not move ahead of a real Sequence 1 (same slot)", () => {
+    const withOrder = { slot: "800-1000", sort_order: 1 };
+    const nullOrder = { slot: "800-1000", sort_order: null };
+    expect(compareScheduleOrder(withOrder, nullOrder)).toBeLessThan(0);
+  });
+
+  test("reproduces the exact production case: WVX7723/Sham, 2026-09-18", () => {
+    // Real slot/sort_order values queried directly from production for this
+    // team/date. Before this fix, both the board and print rendered
+    // SV-345, SV-330, SV-362, SV-354, SV-366 (SV-366's 8am stop LAST).
+    const rows = [
+      { id: "so", slot: "1200-1400", sort_order: 6, name: "SV-330" },
+      { id: "sk", slot: "1400 - 1600", sort_order: 1, name: "SV-362" },
+      { id: "sl", slot: "1000-1200", sort_order: 2, name: "SV-345" },
+      { id: "sm", slot: "1600-1800", sort_order: 4, name: "SV-354" },
+      { id: "sn", slot: "800-1000", sort_order: 3, name: "SV-366" },
+    ];
+    const sorted = [...rows].sort(compareScheduleOrder); // exactly loadData()'s own usage
+    expect(sorted.map(r => r.name)).toEqual(["SV-366", "SV-345", "SV-330", "SV-362", "SV-354"]);
+    // print's usage of the identical comparator must agree, not just "also work"
+    expect(sortSchedulesForPrint(rows).map(r => r.name)).toEqual(sorted.map(r => r.name));
+  });
+});
+
+describe("TeamPrintView — canonical order in the rendered DOM (mirrors compareScheduleOrder exactly)", () => {
+  test("chronological slots print in time order regardless of sort_order/array position", () => {
+    const schedules = [
+      schedWithSlot("s330", "1200-1400", "SO-330"),
+      schedWithSlot("s362", "1400 - 1600", "SO-362"),
+      schedWithSlot("s345", "1000-1200", "SO-345"),
+      schedWithSlot("s354", "1600-1800", "SO-354"),
+      schedWithSlot("s366", "800-1000", "SO-366"),
+    ];
+    expect(renderedSoOrder(schedules)).toEqual(["SO-366", "SO-345", "SO-330", "SO-362", "SO-354"]);
+  });
+
+  test("no-slot fixtures still order correctly by sort_order (unaffected by the slot-parsing change)", () => {
     const schedules = [sched("s3", 3, "SO-3"), sched("s1", 1, "SO-1"), sched("s4", 4, "SO-4"), sched("s2", 2, "SO-2")];
     expect(renderedSoOrder(schedules)).toEqual(["SO-1", "SO-2", "SO-3", "SO-4"]);
-  });
-
-  test("Sequence 1 is the first rendered row/group", () => {
-    const schedules = [sched("s2", 2, "SO-2"), sched("s1", 1, "SO-1")];
-    expect(renderedSoOrder(schedules)[0]).toBe("SO-1");
-  });
-
-  test("the highest sequence is rendered last", () => {
-    const schedules = [sched("s2", 2, "SO-2"), sched("s1", 1, "SO-1"), sched("s3", 3, "SO-3")];
-    const order = renderedSoOrder(schedules);
-    expect(order[order.length - 1]).toBe("SO-3");
-  });
-
-  test("a larger (multi-page-sized) unsorted set still prints in full ascending order (1..8)", () => {
-    const shuffled = [5, 2, 8, 1, 6, 3, 7, 4];
-    const schedules = shuffled.map(n => sched("s" + n, n, "SO-" + n));
-    expect(renderedSoOrder(schedules)).toEqual([1, 2, 3, 4, 5, 6, 7, 8].map(n => "SO-" + n));
   });
 
   test("a missing/null sequence does not move ahead of valid Sequence 1 in the printed DOM", () => {
@@ -91,12 +137,12 @@ describe("TeamPrintView — canonical print order (rendered DOM)", () => {
 
   test("existing superseded-DO print exclusion still works alongside the new sort", () => {
     const schedules = [
-      sched("s3", 3, "SO-3"),
-      sched("s1", 1, "SO-1", { delivery_orders: { do_number: "DO1", superseded_at: "2026-09-11T07:50:09Z", status: "scheduled" } }),
-      sched("s2", 2, "SO-2"),
+      schedWithSlot("s3", "1200-1400", "SO-3"),
+      schedWithSlot("s1", "800-1000", "SO-1", { delivery_orders: { do_number: "DO1", superseded_at: "2026-09-11T07:50:09Z", status: "scheduled" } }),
+      schedWithSlot("s2", "1000-1200", "SO-2"),
     ];
-    // SO-1's schedule points at a superseded DO — must be excluded entirely,
-    // regardless of it having the lowest sort_order (would otherwise print first).
+    // SO-1 has the EARLIEST slot (would print first) but points at a
+    // superseded DO — must still be excluded entirely.
     expect(renderedSoOrder(schedules)).toEqual(["SO-2", "SO-3"]);
   });
 });

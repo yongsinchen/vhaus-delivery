@@ -15,38 +15,97 @@ const af = async (url, opts = {}) => { const token = await getToken(); const cid
 // inlined) so it's directly unit-testable without rendering the component.
 export const isSupersededPrintRow = (sc) => !!sc?.delivery_orders?.superseded_at;
 
-// URGENT fix — Delivery Schedule print order. TeamPrintView used to build its
-// rows straight from `team.schedules` in whatever array order it received,
-// trusting the caller (loadData()'s own ascending sort_order sort) to have
-// already put them in the correct operational sequence — it never sorted on
-// its own. That is fragile: print is the one place a wrong order is a real
-// operational problem (a driver working the sheet top-to-bottom), so it must
-// be correct independent of array position, per the canonical sequence field
-// (sort_order), not an assumption about how it arrived.
+// URGENT fix (round 2) — Delivery Schedule canonical ordering.
 //
-// This comparator is PRINT-ONLY — never applied to the on-screen team list or
-// to loadData()'s own sort, which stay exactly as they were (the on-screen
-// order was already confirmed correct; only print needs hardening). It
-// mirrors the on-screen sort's slot-then-sort_order precedence, with one
-// deliberate improvement scoped to print only: a missing/null sort_order is
-// treated as "after every real sequence number" (never before Sequence 1),
-// since `(a.sort_order || 0)` would otherwise let a null-sort_order stop sort
-// ahead of Sequence 1 — the on-screen sort keeps its existing behavior here,
-// unchanged, since fixing it wasn't asked for and it's out of scope.
-export function compareSequenceForPrint(a, b) {
-  const slotA = (a.slot || a.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
-  const slotB = (b.slot || b.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
-  if (slotA !== slotB) return slotA.localeCompare(slotB);
+// Round 1 (commit 4a47af0) added a print-only defensive sort, on the theory
+// that TeamPrintView trusted array order it shouldn't have. Production
+// verification proved that theory wrong: the board and print already
+// computed the IDENTICAL order (both ultimately keyed off this same
+// slot-then-sort_order comparator) — there was no divergence between them.
+// The real bug is in the comparator itself, shared by both surfaces: `slot`
+// is free text ("800-1000", "1200-1400", "MORNING", "等货到", "10-12" — 74
+// distinct formats seen in production), and comparing it as a STRING
+// (`slotA.localeCompare(slotB)`) is lexicographic, not chronological —
+// "1000-1200" sorts before "800-1000" because "1" < "8" as a character,
+// even though 8am is obviously earlier than 10am. Confirmed live for
+// WVX7723/Sham on 2026-09-18: both the board and print rendered
+// SV-345(1000-1200), SV-330(1200-1400), SV-362(1400-1600), SV-354(1600-1800),
+// SV-366(800-1000) — the 8am stop dead last.
+//
+// Fixed at the ONE shared source: compareScheduleOrder() below, parsing each
+// slot's START time into minutes-since-midnight for a real numeric/
+// chronological comparison, used identically by loadData()'s own sort (the
+// board) and by sortSchedulesForPrint() (print) — never two copies that can
+// diverge again. sort_order remains the tiebreaker within an identical
+// parsed time (or when neither side has a usable time at all).
+//
+// parseSlotStartMinutes() handles every numeric-ish format actually seen in
+// production: "800-1000" / "0800-1000" / "8:00-10:00" / "800 - 1000" (3-4
+// digit 24h, with or without a leading zero or spaced dash), "H.MM - H.MM"
+// decimal ranges ("1.30 - 3.30"), and a bare hour with or without an am/pm
+// suffix ("10-12", "3pm - 5pm", "1-4pm"). A bare hour with no am/pm marker
+// is disambiguated by a documented business-hours rule matching every
+// unambiguous example already in production (a delivery day runs ~8am-7pm):
+// 8-11 => AM, 12 => noon, 1-7 => PM. Free text with no leading number at all
+// (MORNING, AFTERNOON, 等货到, "B4 12PM", "AFTER 130PM") is a genuinely
+// unparseable value, NOT guessed at — it sorts after every row with a real
+// parsed time (Infinity), tie-broken by sort_order like anything else,
+// exactly how a missing slot already behaved before this fix.
+export function parseSlotStartMinutes(slotRaw) {
+  const s = String(slotRaw || "").trim();
+  if (!s) return Infinity;
+  const m = s.match(/^(\d{1,4})(?:[.:](\d{2}))?/);
+  if (!m) return Infinity; // no leading number at all — e.g. MORNING, 等货到, B4 12PM
+
+  const wholeStr = m[1];
+  const explicitMinute = m[2] != null ? Number(m[2]) : null;
+
+  // 3-4 digit value with NO explicit .MM/:MM suffix is an unambiguous 24h
+  // HHMM value ("800" -> 8:00, "1200" -> 12:00, "1330" -> 13:30) — never
+  // needs the am/pm heuristic below.
+  if (explicitMinute == null && wholeStr.length >= 3) {
+    const n = Number(wholeStr);
+    const hh = Math.floor(n / 100), mm = n % 100;
+    if (hh <= 23 && mm <= 59) return hh * 60 + mm;
+  }
+
+  // Bare 1-2 digit hour, with an explicit .MM/:MM minute or none — apply the
+  // am/pm suffix if present in the source text, else the business-hours
+  // heuristic documented above.
+  const hour = Number(wholeStr);
+  const minute = explicitMinute ?? 0;
+  if (!(hour >= 1 && hour <= 12)) return Infinity;
+  const suffixMatch = s.slice(m[0].length).match(/^\s*(am|pm)/i) || s.match(/(am|pm)\s*$/i);
+  const suffix = suffixMatch ? suffixMatch[1].toLowerCase() : null;
+  if (suffix === "am") return (hour % 12) * 60 + minute;
+  if (suffix === "pm") return (hour % 12 + 12) * 60 + minute;
+  if (hour >= 8 && hour <= 11) return hour * 60 + minute;       // AM
+  if (hour === 12) return 12 * 60 + minute;                     // noon
+  return (hour + 12) * 60 + minute;                             // 1-7 => PM
+}
+
+// The ONE canonical Delivery Schedule ordering — used by loadData()'s sort
+// (the board) and by sortSchedulesForPrint() (print). Ascending by parsed
+// slot start time (unparseable/missing slots sort last, never guessed),
+// then by sort_order ascending (a missing/null sort_order also sorts last,
+// never ahead of a real Sequence 1).
+export function compareScheduleOrder(a, b) {
+  const timeA = parseSlotStartMinutes(a.slot || a.orders?.time_slot);
+  const timeB = parseSlotStartMinutes(b.slot || b.orders?.time_slot);
+  if (timeA !== timeB) return timeA - timeB;
   const soA = a.sort_order == null ? Infinity : a.sort_order;
   const soB = b.sort_order == null ? Infinity : b.sort_order;
   return soA - soB;
 }
 
-// Sorts a team's schedules into the canonical print sequence — ascending by
-// compareSequenceForPrint — WITHOUT mutating the input array (print must
-// never affect the on-screen list or any other consumer of team.schedules).
+// Sorts a team's schedules into the canonical order — ascending by
+// compareScheduleOrder — WITHOUT mutating the input array. Used defensively
+// by print (never trust incoming array order for something a driver works
+// top-to-bottom off a printed sheet) even though loadData() already sorts
+// the same way — two call sites, one shared comparator, never two copies
+// that can drift apart again.
 export function sortSchedulesForPrint(schedules) {
-  return (schedules || []).slice().sort(compareSequenceForPrint);
+  return (schedules || []).slice().sort(compareScheduleOrder);
 }
 
 const statusColor = s => ({
@@ -1711,15 +1770,14 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       const schedulesList = schedulesData.schedules || (Array.isArray(schedulesData) ? schedulesData : []);
 
       const enriched = teamsList.map(team => {
+        // URGENT fix (round 2): canonical chronological ordering, shared with
+        // print — see compareScheduleOrder's header comment. Previously
+        // sorted the slot as raw text (lexicographic, not chronological),
+        // which is the confirmed root cause of an 8am stop rendering after a
+        // 10am/12pm/2pm/4pm stop on both the board and the printed sheet.
         const teamSchedules = schedulesList
           .filter(s => s.team_id === team.id)
-          .sort((a, b) => {
-            // Sort by time slot first (e.g. "9am" < "10am" < "2pm"), then sort_order
-            const slotA = (a.slot || a.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
-            const slotB = (b.slot || b.orders?.time_slot || "zzz").toLowerCase().replace(/[^0-9.:apm]/g, "");
-            if (slotA !== slotB) return slotA.localeCompare(slotB);
-            return (a.sort_order || 0) - (b.sort_order || 0);
-          });
+          .sort(compareScheduleOrder);
         const v = vehicles.find(v => v.id === team.vehicle_id);
         return {
           ...team,
