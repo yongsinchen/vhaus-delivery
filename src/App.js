@@ -62,13 +62,39 @@ const timeAgo = (iso) => {
 };
 
 // toDb removed — dashboard writes now go through backend API
-const fromDb = o => ({
+
+// URGENT FIX: normalize orders.items to a real array ONCE, at this single
+// DB-row boundary — every .some()/.map()/.filter() downstream then always
+// receives a stable array, never a string/object/null. Root cause of a
+// production login-blocking crash ("t.some is not a function"): a stray row
+// had a DOUBLE-JSON-ENCODED items column (raw DB value '"[]"'), so
+// JSON.parse() succeeded but returned the STRING "[]", not an array — the
+// old `typeof o.items === "string" ? JSON.parse(...) : (o.items || [])`
+// only handled the outer string case and never verified what JSON.parse()
+// actually produced. Any array-shaped value (or a JSON string that decodes
+// to one) still passes through unchanged; anything else (a mis-encoded
+// string, an object, a stray non-array value) falls back to [] instead of
+// crashing every dashboard load that includes the row. Logs once so a real
+// data-quality anomaly stays visible instead of being silently swallowed.
+export function normalizeOrderItems(raw, orderId) {
+  let v = raw;
+  if (typeof v === "string") {
+    try { v = JSON.parse(v || "[]"); } catch { v = []; }
+  }
+  if (!Array.isArray(v)) {
+    if (v != null) console.warn(`[fromDb] order ${orderId ?? "?"} has a non-array items value after parsing — defaulting to []`, v);
+    return [];
+  }
+  return v;
+}
+
+export const fromDb = o => ({
   id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
   address: o.address, contact: o.contact, orderDate: o.order_date, salesman: o.salesman,
   orderAmount: o.order_amount, balance: o.balance, deliveryDate: o.delivery_date,
   timeSlot: o.time_slot, plateNo: o.plate_no, type: o.type, serviceNote: o.service_note,
   svNumber: o.sv_number, remark: o.remark, status: o.status,
-  items: typeof o.items === "string" ? JSON.parse(o.items || "[]") : (o.items || []),
+  items: normalizeOrderItems(o.items, o.id),
   photoUrl: o.photo_url || null,
   linkedSo: o.linked_so || null,
 });
