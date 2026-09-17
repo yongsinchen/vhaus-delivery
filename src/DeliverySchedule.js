@@ -447,6 +447,281 @@ const itemDisplayName = (item) => {
   return { text: NO_DESC, isFallback: true };
 };
 
+// Tolerant items parser for the printed/exported schedule — accepts either a
+// JSON string or an already-parsed array, never throws on malformed legacy data.
+const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
+
+// THE canonical row set for one team's operational schedule — the single
+// source that BOTH the printed sheet (TeamPrintView) and the Excel export
+// (exportTeamScheduleExcel) render from. Extracted out of TeamPrintView so the
+// two surfaces can never drift apart: every business rule below applies
+// identically to paper and to Excel, and a fix to one is a fix to both.
+//
+// Rules preserved verbatim from the print implementation:
+//  - canonical chronological ordering via sortSchedulesForPrint (never trust
+//    the incoming array order — see compareScheduleOrder's header comment);
+//  - a superseded DO is excluded entirely, not printed-but-labeled (P1-3);
+//  - a DO stop contributes ONLY that shipment's items, tagged with the DO
+//    number, with cancelled lines dropped;
+//  - each DO line is paired to at most ONE legacy JSON item when resolving the
+//    supplier arrival date, consuming the match so a single arrival cannot
+//    bleed onto every line sharing a code/name (mirrors the backend's
+//    syncArrivalsToSalesOrderItems 1:1 pairing);
+//  - a Service order with no line items surfaces its service detail as the
+//    Item, with the RPC's "Linked to SO: <n> |" prefix stripped.
+//
+// Returns a flat row list; the rows of one stop share `o`/`sc` and carry
+// `isFirst`/`rowspan` so a renderer can span the stop-level columns.
+export function buildTeamScheduleRows(team) {
+  const allRows = [];
+  sortSchedulesForPrint(team?.schedules).forEach(sc => {
+    const o = sc.orders;
+    if (!o) return;
+    if (isSupersededPrintRow(sc)) return;
+
+    const jsonItems = parseItemsSafe(o.items);
+    const usedJson = new Set();
+    const arrivalFor = (line) => {
+      const code = String(line.product_code || "").toLowerCase().trim();
+      const name = String(line.product_name || "").toLowerCase().trim();
+      for (let k = 0; k < jsonItems.length; k++) {
+        if (usedJson.has(k)) continue;
+        const ji = jsonItems[k];
+        const jCode = String(ji.itemCode || "").toLowerCase().trim();
+        const jName = String(ji.itemName || "").toLowerCase().trim();
+        const codeHit = code && jCode && code === jCode;
+        const nameHit = name && jName && (jName === name || jName.startsWith(name + " "));
+        if (codeHit || nameHit) { usedJson.add(k); return ji.arrivalDate || null; }
+      }
+      return null;
+    };
+    let items = sc.delivery_orders
+      ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
+          itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
+          supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+          arrivalDate: arrivalFor(i),
+        }))
+      : parseItemsSafe(o.items);
+    if (o.type === "Service" && items.length === 0) {
+      const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
+      items = [{ itemName: detail || "Service" }];
+    }
+    const displayItems = items.length > 0 ? items : [{}];
+    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
+  });
+  return allRows;
+}
+
+// The 16 operational columns of the team schedule, shared by print and Excel.
+// `Check`, `Naik`, `Sent` and `JB Sent` are intentionally blank — they are
+// filled in by hand on the printed sheet (and typed into on the exported one).
+const TEAM_SCHEDULE_COLUMNS = ["SO / Customer","Salesman","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"];
+
+// The Arrival PG cell, resolved identically for print and Excel. Service
+// Claim lines (action 3) gate on the claimed part actually arriving; other
+// service lines report their own done/pending state; stock lines show the
+// supplier arrival date or a loud "No arrival".
+// `color` is a CSS hex (or null for default ink); Excel converts it to ARGB.
+function arrivalCellFor(item) {
+  if (item.service_item && Number(item.action_type) !== 3) {
+    return item.item_status === "done"
+      ? { text: "✓ Done", color: "#059669", bold: true }
+      : { text: "Pending", color: "#6b7280", bold: false };
+  }
+  return item.arrivalDate
+    ? { text: String(item.arrivalDate), color: null, bold: false }
+    : { text: "No arrival", color: "#ff0000", bold: true };
+}
+
+// CSS hex (#rrggbb) -> ExcelJS ARGB (FFrrggbb).
+const argb = css => (css ? "FF" + css.replace("#", "").toUpperCase() : null);
+
+// Column widths, in Excel character units, proportional to the printed sheet's
+// percentage colgroup so the exported file reads like the paper one.
+const TEAM_SCHEDULE_COL_WIDTHS = [19.5, 7.5, 5.5, 4.5, 4.5, 8.5, 4.5, 10.5, 25.5, 4.5, 8.5, 8.5, 7.5, 7.5, 9, 9];
+// Stop-level columns (1-based) that span all of a stop's item rows — the same
+// cells the printed sheet gives a rowSpan to.
+const TEAM_SCHEDULE_MERGE_COLS = [1, 2, 3, 6, 16];
+
+// Export ONE team's schedule for ONE date as a real .xlsx, mirroring the
+// printed operational sheet: same rows (via buildTeamScheduleRows), same 16
+// columns, same green header, same vertical spans per stop, and the same
+// deliberately blank Check / Naik / JB Sent columns to write into. ExcelJS is
+// imported lazily so it only loads when someone actually exports.
+export async function exportTeamScheduleExcel(team, company = {}) {
+  const ExcelJS = (await import("exceljs")).default;
+  const rows = buildTeamScheduleRows(team);
+  const dateStr = team?.team_date || "-";
+  const vehicleStr = [team?.vehicle_plate, team?.driver_name, team?.area].filter(Boolean).join(" / ");
+  const COLS = TEAM_SCHEDULE_COLUMNS.length;
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Schedule", {
+    pageSetup: {
+      paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      printTitlesRow: "4:4", // repeat the header on every printed page
+      margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 },
+    },
+  });
+  TEAM_SCHEDULE_COL_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  const thin = { style: "thin", color: { argb: "FF000000" } };
+  const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
+
+  // Title block — mirrors the printed header.
+  ws.mergeCells(1, 1, 1, COLS);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = (company?.name || "").trim() ? `${company.name.trim()} Delivery Schedule` : "Delivery Schedule";
+  titleCell.font = { bold: true, size: 14 };
+  titleCell.alignment = { horizontal: "center" };
+  ws.mergeCells(2, 1, 2, COLS);
+  const subCell = ws.getCell(2, 1);
+  subCell.value = `Date: ${dateStr}    |    Vehicle: ${vehicleStr || "-"}`;
+  subCell.font = { size: 11, color: { argb: "FF444444" } };
+  subCell.alignment = { horizontal: "center" };
+
+  // Header row.
+  const HEAD = 4;
+  TEAM_SCHEDULE_COLUMNS.forEach((h, i) => {
+    const c = ws.getCell(HEAD, i + 1);
+    c.value = h;
+    c.font = { bold: true, size: 10 };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
+    c.border = boxAll;
+    c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+  ws.getRow(HEAD).height = 26;
+  ws.views = [{ state: "frozen", ySplit: HEAD }];
+
+  if (rows.length === 0) {
+    ws.mergeCells(HEAD + 1, 1, HEAD + 1, COLS);
+    const empty = ws.getCell(HEAD + 1, 1);
+    empty.value = "No orders assigned.";
+    empty.alignment = { horizontal: "center" };
+    empty.font = { color: { argb: "FF888888" } };
+    empty.border = boxAll;
+  }
+
+  // Group rows by stop, exactly as the printed sheet does.
+  const groups = [];
+  let cur = null;
+  rows.forEach(row => {
+    if (row.isFirst) { cur = { sc: row.sc, o: row.o, rows: [] }; groups.push(cur); }
+    if (cur) cur.rows.push(row);
+  });
+
+  const ITEM_CHARS_PER_LINE = 25;  // approx chars fitting the Item column width
+  const INFO_CHARS_PER_LINE = 22;  // approx chars fitting the SO / Customer column
+  const wrapLines = (text, per) => String(text || "").split("\n")
+    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / per)), 0);
+
+  let r = HEAD + 1;
+  groups.forEach(g => {
+    const { o, sc, rows: gRows } = g;
+    const first = r;
+    const span = gRows.length;
+    const hasBalance = parseFloat(o.balance) > 0;
+
+    // SO / Customer — one rich-text block matching the printed cell.
+    const infoParts = [{ font: { bold: true, size: 10 }, text: String(o.so_number || "") }];
+    if (o.customer_name) infoParts.push({ font: { size: 10 }, text: "\n" + o.customer_name });
+    if (o.contact) infoParts.push({ font: { size: 10, color: { argb: "FF555555" } }, text: "\n" + o.contact });
+    if (o.address) infoParts.push({ font: { size: 9, color: { argb: "FF555555" } }, text: "\n" + o.address });
+    if (hasBalance) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FFFF0000" } }, text: `\nBal: RM ${o.balance}` });
+    if (sc.slot) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FF1E40AF" } }, text: `\nSlot: ${sc.slot}` });
+    const infoText = infoParts.map(p => p.text).join("");
+
+    // Remark — a DO stop shows ITS OWN remark, never the legacy order's (P0).
+    const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
+    const remarkParts = [];
+    if (o.type === "Service") {
+      if (o.linked_so) remarkParts.push({ font: { size: 10 }, text: `Linked SO: ${o.linked_so}` });
+    } else if (rowRemark) {
+      remarkParts.push({ font: { size: 10 }, text: rowRemark });
+    }
+    if (sc.notes) remarkParts.push({ font: { size: 10, italic: true, color: { argb: "FF555555" } }, text: (remarkParts.length ? "\n" : "") + sc.notes });
+    const remarkText = remarkParts.map(p => p.text).join("");
+
+    gRows.forEach(({ item, idx }, i) => {
+      const row = r + i;
+      const isFirstRow = i === 0;
+      const name = Object.keys(item).length ? itemDisplayName(item) : { text: "", isFallback: false };
+      const arrival = arrivalCellFor(item);
+
+      const put = (col, value, opts = {}) => {
+        const c = ws.getCell(row, col);
+        c.value = value;
+        c.border = boxAll;
+        c.font = { size: 10, ...(opts.font || {}) };
+        c.alignment = { vertical: "top", ...(opts.alignment || {}) };
+        return c;
+      };
+
+      if (isFirstRow) {
+        put(1, infoParts.length ? { richText: infoParts } : "", { alignment: { wrapText: true, vertical: "top" } });
+        put(2, o.salesman || "-", { font: { size: 9 } });
+        put(3, sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", {
+          font: { size: 9, color: { argb: sc.trip_no > 1 ? "FF6B7280" : "FF059669" } },
+          alignment: { horizontal: "center", vertical: "top" },
+        });
+        put(6, team?.vehicle_plate || "-", { alignment: { horizontal: "center", vertical: "top" } });
+        put(16, remarkParts.length ? { richText: remarkParts } : "", { alignment: { wrapText: true, vertical: "top" } });
+      } else {
+        // Cells inside a vertical merge still need their borders drawn.
+        TEAM_SCHEDULE_MERGE_COLS.forEach(col => { ws.getCell(row, col).border = boxAll; });
+      }
+
+      put(4, "", { alignment: { horizontal: "center" } });  // Check — filled by hand
+      put(5, "", { alignment: { horizontal: "center" } });  // Naik  — filled by hand
+      put(7, idx + 1, { alignment: { horizontal: "center" } });
+      put(8, item.itemCode || "");
+      put(9, name.text, {
+        font: name.isFallback ? { size: 10, italic: true, color: { argb: "FFFF0000" } } : { size: 10 },
+        alignment: { wrapText: true, vertical: "top" },
+      });
+      put(10, item.unit || "", { alignment: { horizontal: "center" } });
+      put(11, item.supplier || "");
+      put(12, item.itemOrderDate || "", { alignment: { horizontal: "center" } });
+      put(13, item.supplierSentDate || "", { alignment: { horizontal: "center" } });
+      put(14, "", { alignment: { horizontal: "center" } });  // JB Sent — filled by hand
+      put(15, arrival.text, {
+        font: { size: 10, bold: arrival.bold, ...(arrival.color ? { color: { argb: argb(arrival.color) } } : {}) },
+        alignment: { horizontal: "center" },
+      });
+
+      // Give the row enough height for a wrapped item name.
+      ws.getRow(row).height = Math.max(15, wrapLines(name.text, ITEM_CHARS_PER_LINE) * 13);
+    });
+
+    TEAM_SCHEDULE_MERGE_COLS.forEach(col => { if (span > 1) ws.mergeCells(first, col, first + span - 1, col); });
+
+    // Excel cannot auto-fit a merged cell: if the stop's info or remark needs
+    // more lines than the stop has item rows, grow the first row to cover the
+    // shortfall so nothing is clipped.
+    const needed = Math.max(wrapLines(infoText, INFO_CHARS_PER_LINE), wrapLines(remarkText, INFO_CHARS_PER_LINE));
+    if (needed > span) {
+      const firstRow = ws.getRow(first);
+      firstRow.height = Math.max(firstRow.height || 15, (needed - span + 1) * 13);
+    }
+
+    r += span;
+  });
+
+  const stamp = ws.getCell(r + 1, 1);
+  stamp.value = `Printed: ${new Date().toLocaleString("en-MY", { timeZone: "Asia/Kuala_Lumpur" })}`;
+  stamp.font = { size: 9, color: { argb: "FF888888" } };
+
+  const safe = s => String(s || "").replace(/[^\w.-]/g, "_");
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Schedule-${safe(team?.vehicle_plate || "Team")}-${safe(dateStr)}.xlsx`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // Fix #3: schedule status casing is inconsistent — the admin dropdown writes
 // Title Case ("Confirmed", "Out for Delivery", "Delivered") while the driver
 // app and DO lifecycle write lowercase ("scheduled", "arrived",
@@ -815,7 +1090,6 @@ const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .p
 
 // -- Team Print View ---------------------------------------------------
 export function TeamPrintView({ team, onClose, company }) {
-  const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
     if (!printArea) return;
@@ -835,66 +1109,10 @@ export function TeamPrintView({ team, onClose, company }) {
   };
   const dateStr = team.team_date || "-";
   const vehicleStr = [team.vehicle_plate, team.driver_name, team.area].filter(Boolean).join(" / ");
-  const allRows = [];
-  // URGENT fix: sort by the canonical sequence field here, defensively —
-  // never trust team.schedules' incoming array order for print (see
-  // sortSchedulesForPrint's header comment). The on-screen list and
-  // loadData()'s own sort are completely untouched.
-  sortSchedulesForPrint(team.schedules).forEach(sc => {
-    const o = sc.orders;
-    if (!o) return;
-    // P1-3: a superseded DO is retired regardless of its own status column
-    // (superseded_at is authoritative, per the P1-1 stabilization rule) —
-    // if historical/edge-case data still leaves a schedule row pointing at
-    // one, it must never print as an ordinary, actionable delivery.
-    // Excluded entirely from the operational Team Print Schedule rather
-    // than printed-but-labeled, per the confirmed P1-3 design choice.
-    if (isSupersededPrintRow(sc)) return;
-    // Phase 2B: DO schedules print ONLY that shipment's items, tagged with the DO
-    // number. Fix #1: carry product_code + supplier_name so the printed sheet
-    // matches the on-screen Code/Supplier columns for DO lines too.
-    // Resolve each DO line's supplier arrival date from the legacy order's items
-    // JSON (where the supplier-DO OCR records arrivalDate), matched on code/name,
-    // so the printed "Arrival PG" column shows when each line arrived instead of
-    // always printing "No arrival" — mirrors the on-screen StopRow resolution.
-    // Pair each DO line to ONE legacy JSON item, consuming each match so a
-    // single arrival can't bleed onto every line that shares a code/name (that
-    // printed a not-arrived line as "arrived"). Mirrors the backend's
-    // syncArrivalsToSalesOrderItems 1:1 pairing.
-    const jsonItems = parseItemsSafe(o.items);
-    const usedJson = new Set();
-    const arrivalFor = (line) => {
-      const code = String(line.product_code || "").toLowerCase().trim();
-      const name = String(line.product_name || "").toLowerCase().trim();
-      for (let k = 0; k < jsonItems.length; k++) {
-        if (usedJson.has(k)) continue;
-        const ji = jsonItems[k];
-        const jCode = String(ji.itemCode || "").toLowerCase().trim();
-        const jName = String(ji.itemName || "").toLowerCase().trim();
-        const codeHit = code && jCode && code === jCode;
-        const nameHit = name && jName && (jName === name || jName.startsWith(name + " "));
-        if (codeHit || nameHit) { usedJson.add(k); return ji.arrivalDate || null; }
-      }
-      return null;
-    };
-    let items = sc.delivery_orders
-      ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
-          itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
-          supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
-          arrivalDate: arrivalFor(i),
-        }))
-      : parseItemsSafe(o.items);
-    // Service orders have no line items (inert order, items='[]'); surface the
-    // service detail as the Item so it prints in the Item column instead of
-    // only landing in Remark. Strip the "Linked to SO: <n> |" prefix the RPC
-    // writes into service_note/remark.
-    if (o.type === "Service" && items.length === 0) {
-      const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
-      items = [{ itemName: detail || "Service" }];
-    }
-    const displayItems = items.length > 0 ? items : [{}];
-    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
-  });
+  // Rows come from the ONE shared builder, so the printed sheet and the Excel
+  // export are guaranteed to contain the same stops, in the same order, with
+  // the same exclusions — see buildTeamScheduleRows for the rules it applies.
+  const allRows = buildTeamScheduleRows(team);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-start justify-center pt-6 px-4 pb-6 overflow-y-auto">
@@ -904,6 +1122,8 @@ export function TeamPrintView({ team, onClose, company }) {
           <h3 className="font-bold text-gray-800">Print Preview — {team.vehicle_plate || "Team"}</h3>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
+            {/* Same rows as the preview below — see buildTeamScheduleRows. */}
+            <button onClick={() => exportTeamScheduleExcel(team, company).catch(() => {})} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700" title="Download as Excel">Excel</button>
             <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Print</button>
           </div>
         </div>
@@ -926,7 +1146,7 @@ export function TeamPrintView({ team, onClose, company }) {
             return (<>
               {/* Header table */}
               <table style={TS}>{COL}<thead><tr style={{backgroundColor:"#c6efce",textAlign:"center"}}>
-                {["SO / Customer","Salesman","Trip","Check","Naik","Plate NO","No.","Code","Item","Unit","Supplier","Order Date","Sent","JB Sent","Arrival PG","Remark"].map(h=>(
+                {TEAM_SCHEDULE_COLUMNS.map(h=>(
                   <th key={h} style={{...BD,whiteSpace:"nowrap",fontWeight:"bold"}}>{h}</th>
                 ))}
               </tr></thead></table>
@@ -960,11 +1180,14 @@ export function TeamPrintView({ team, onClose, company }) {
                         <td style={{...BD,textAlign:"center"}}>{item.itemOrderDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}>{item.supplierSentDate||""}</td>
                         <td style={{...BD,textAlign:"center"}}></td>
-                        <td style={{...BD,textAlign:"center"}}>{item.service_item
-                          ? (Number(item.action_type)===3
-                              ? (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)
-                              : (item.item_status==="done"?<span style={{color:"#059669",fontWeight:"bold"}}>✓ Done</span>:<span style={{color:"#6b7280"}}>Pending</span>))
-                          : (item.arrivalDate?item.arrivalDate:<span style={{color:"red",fontWeight:"bold"}}>No arrival</span>)}</td>
+                        {(() => {
+                          // Shared with the Excel export via arrivalCellFor so the
+                          // two surfaces can never disagree about arrival state.
+                          const a = arrivalCellFor(item);
+                          return <td style={{...BD,textAlign:"center"}}>
+                            {a.color ? <span style={{color:a.color,...(a.bold?{fontWeight:"bold"}:{})}}>{a.text}</span> : a.text}
+                          </td>;
+                        })()}
                         {isFirst&&(() => {
                           // P0 hotfix: a DO-based row must print ITS OWN delivery_orders.remark
                           // — not the legacy orders row's remark — since a single SO can spawn
@@ -2068,6 +2291,18 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } catch (e) { toast.error(e.message); }
   }, [withLoading, toast, loadData]);
 
+  // Download one vehicle team's schedule for the selected date as .xlsx. Uses
+  // the same rows as the Print preview (buildTeamScheduleRows), so the file and
+  // the paper sheet always agree. team_date falls back to the board's selected
+  // date exactly as the Print button does.
+  const exportTeamSchedule = useCallback(async (team) => {
+    try {
+      await withLoading("Building Excel…", async () => {
+        await exportTeamScheduleExcel({ ...team, team_date: team.team_date || date }, company);
+      });
+    } catch (e) { toast.error("Failed to export Excel: " + e.message); }
+  }, [withLoading, toast, date, company]);
+
   // Fix #4: reassign a stop to another team without unassign+recreate.
   const reassignSchedule = useCallback(async (scheduleId, newTeamId) => {
     try {
@@ -2567,6 +2802,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           )}
                         </div>
                         <button onClick={() => setPrintTeam({ ...team, team_date: team.team_date || date })} className="text-gray-400 hover:text-gray-700 text-xs" title="Print">Print</button>
+                        <button onClick={() => exportTeamSchedule(team)} className="text-gray-400 hover:text-green-700 text-xs" title="Download this vehicle's schedule as Excel">Excel</button>
                         {!readOnly && !isLocked && !isConfirmed && (
                           <button onClick={() => deleteTeam(team.id)} className="text-gray-400 hover:text-red-500 text-xs">Delete</button>
                         )}
