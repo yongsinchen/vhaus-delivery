@@ -722,6 +722,99 @@ export async function exportTeamScheduleExcel(team, company = {}) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Reads a cell as plain text whether it holds a string, a number, a formula
+// result or the rich text the exporter writes.
+const xlsxCellText = (cell) => {
+  const v = cell?.value;
+  if (v == null) return "";
+  if (typeof v === "object") {
+    if (Array.isArray(v.richText)) return v.richText.map(p => p.text).join("");
+    if (v.text != null) return String(v.text);
+    if (v.result != null) return String(v.result);
+    return "";
+  }
+  return String(v);
+};
+
+// Parses a schedule workbook (one produced by exportTeamScheduleExcel) and
+// returns the stops it names.
+//
+// ONLY the SO / DO identifiers are read. The file's own Date and Vehicle
+// header is deliberately IGNORED — an import never carries a team or a date
+// across, it just names which stops to act on; the board's currently selected
+// date is the context, and the vehicle becomes none. That is what keeps a
+// re-imported file from silently moving deliveries to another day or lorry.
+export async function parseTeamScheduleWorkbook(file) {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws = wb.getWorksheet("Schedule") || wb.worksheets[0];
+  if (!ws) throw new Error("That file has no worksheet in it.");
+
+  // Locate the header row rather than assuming row 4, so a file with an extra
+  // note pasted above the table still imports.
+  let headRow = 0;
+  const lastRow = Math.max(ws.rowCount || 0, 1);
+  for (let r = 1; r <= Math.min(lastRow, 30); r++) {
+    if (xlsxCellText(ws.getCell(r, 1)).trim().toLowerCase() === "so / customer") { headRow = r; break; }
+  }
+  if (!headRow) {
+    throw new Error('This does not look like a Delivery Schedule export — no "SO / Customer" column was found.');
+  }
+
+  const refs = [];
+  const seen = new Set();
+  for (let r = headRow + 1; r <= lastRow; r++) {
+    // Only the first line of the stop cell is the identifier; customer, phone
+    // and address follow it in the same cell.
+    const first = xlsxCellText(ws.getCell(r, 1)).split("\n")[0].trim();
+    if (!first) continue;
+    const low = first.toLowerCase();
+    if (low.startsWith("printed:") || low === "no orders assigned.") continue;
+    // A DO stop is written as "SO-123 · DO-9" by the exporter.
+    const [soRaw, doRaw] = first.split("·").map(s => (s || "").trim());
+    if (!soRaw) continue;
+    const label = doRaw ? `${soRaw} · ${doRaw}` : soRaw;
+    // Merged stop cells report the master's value on every spanned row, so the
+    // same stop is seen once per item line — count it once.
+    if (seen.has(label)) continue;
+    seen.add(label);
+    refs.push({ soNumber: soRaw, doNumber: doRaw || null, label, row: r });
+  }
+  return { refs, sheetName: ws.name };
+}
+
+// Works out what an import would do against the stops currently on the board.
+//
+// Matching is deliberately STRICT: a reference naming a Delivery Order matches
+// only that DO's stop, and a reference with no DO matches only a whole-order
+// stop. A single SO can be split across several DOs with diverging contents, so
+// a loose match could unassign the wrong shipment — an unmatched row is
+// reported instead of guessed at.
+//
+// Stops already out for delivery or delivered are separated out rather than
+// attempted: the backend refuses to delete them (isLockedScheduleStatus), and
+// showing that up front is honest about what the import will leave alone.
+export function planScheduleImport(refs, teams) {
+  const toUnassign = [], locked = [], notFound = [];
+  (refs || []).forEach(ref => {
+    let hit = null, hitTeam = null;
+    for (const t of (teams || [])) {
+      for (const sc of (t.schedules || [])) {
+        if (sc.orders?.so_number !== ref.soNumber) continue;
+        if (ref.doNumber ? sc.delivery_orders?.do_number !== ref.doNumber : !!sc.delivery_orders) continue;
+        hit = sc; hitTeam = t; break;
+      }
+      if (hit) break;
+    }
+    if (!hit) { notFound.push(ref); return; }
+    const entry = { ref, schedule: hit, team: hitTeam, status: normalizeScheduleStatus(hit.status) };
+    if (entry.status === "Out for Delivery" || entry.status === "Delivered") locked.push(entry);
+    else toUnassign.push(entry);
+  });
+  return { toUnassign, locked, notFound };
+}
+
 // Fix #3: schedule status casing is inconsistent — the admin dropdown writes
 // Title Case ("Confirmed", "Out for Delivery", "Delivered") while the driver
 // app and DO lifecycle write lowercase ("scheduled", "arrived",
@@ -1210,6 +1303,157 @@ export function TeamPrintView({ team, onClose, company }) {
             </>);
           })()}
           <div style={{ marginTop:"8px", fontSize:"9px", color:"#888", textAlign:"right" }}>Printed: {new Date().toLocaleString("en-MY", { timeZone: "Asia/Kuala_Lumpur" })}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -- Import Schedule Modal ---------------------------------------------
+// Takes a schedule workbook and returns the stops it names to the unassigned
+// pool for the date currently on the board — the vehicle becomes none.
+//
+// The file supplies ONLY which stops to act on. Its Date and Vehicle header is
+// ignored by design (see parseTeamScheduleWorkbook), so importing can never
+// move a delivery to another day or silently put it on a different lorry.
+//
+// Every change goes through DELETE /delivery-schedules/:id — the exact call the
+// board's own per-stop Unassign (×) makes. That endpoint is the authority: it
+// refuses stops already out for delivery or delivered, resets a Delivery Order
+// back to draft so it can be re-scheduled, never resurrects a superseded DO,
+// snaps the legacy order's delivery_date back to this date's pool, and is
+// idempotent. Nothing here re-implements any of those rules.
+function ImportScheduleModal({ date, teams, onClose, onDone }) {
+  const toast = useToast();
+  const [fileName, setFileName] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [plan, setPlan] = useState(null);
+  const [applying, setApplying] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [result, setResult] = useState(null);
+
+  const pickFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be picked again after a retry
+    if (!file) return;
+    setFileName(file.name); setPlan(null); setResult(null); setParsing(true);
+    try {
+      const { refs } = await parseTeamScheduleWorkbook(file);
+      if (refs.length === 0) toast.error("No delivery stops were found in that file.");
+      else setPlan(planScheduleImport(refs, teams));
+    } catch (err) {
+      toast.error(err.message || "Could not read that file.");
+    }
+    setParsing(false);
+  };
+
+  // Applied one stop at a time, deliberately: each is an independent write, and
+  // a partial failure must report exactly which stops did not move.
+  const apply = async () => {
+    if (!plan || plan.toUnassign.length === 0) return;
+    setApplying(true);
+    setProgress({ done: 0, total: plan.toUnassign.length });
+    const failed = [];
+    let ok = 0;
+    for (let i = 0; i < plan.toUnassign.length; i++) {
+      const entry = plan.toUnassign[i];
+      try {
+        const res = await af(`${API}/delivery-schedules/${entry.schedule.id}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        ok++;
+      } catch (err) {
+        failed.push({ label: entry.ref.label, message: err.message || "Failed" });
+      }
+      setProgress({ done: i + 1, total: plan.toUnassign.length });
+    }
+    setApplying(false);
+    setResult({ ok, failed });
+    onDone();
+  };
+
+  const Section = ({ title, tone, items, render }) => items.length === 0 ? null : (
+    <div className={`rounded-lg border p-3 ${tone}`}>
+      <p className="text-xs font-semibold mb-1.5">{title} ({items.length})</p>
+      <div className="max-h-40 overflow-y-auto space-y-0.5">{items.map(render)}</div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-10 px-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl mb-8">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h3 className="font-bold text-gray-900">Import Delivery Schedule</h3>
+            <p className="text-xs text-gray-500">Returns the stops in the file to Unassigned for {date}</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {!result && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-900">
+              The file only says <b>which</b> stops to act on. Its own date and vehicle are ignored —
+              every matched stop is taken off its lorry and returned to the Unassigned pool for
+              <b> {date}</b>, ready to be re-assigned. Orders, items and delivery dates are not changed.
+            </div>
+          )}
+
+          {!result && (
+            <div>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-700">Schedule file (.xlsx)</span>
+                <input type="file" accept=".xlsx" onChange={pickFile} disabled={parsing || applying}
+                  className="mt-1 block w-full text-xs border rounded-lg px-3 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-gray-100 hover:file:bg-gray-200 disabled:opacity-50" />
+              </label>
+              {fileName && <p className="text-xs text-gray-500 mt-1">{fileName}</p>}
+              {parsing && <p className="text-xs text-gray-500 mt-2">Reading file…</p>}
+            </div>
+          )}
+
+          {plan && !result && (
+            <div className="space-y-2">
+              <Section title="Will be unassigned" tone="border-emerald-200 bg-emerald-50 text-emerald-900"
+                items={plan.toUnassign}
+                render={e => <p key={e.ref.label} className="text-xs">{e.ref.label} <span className="text-emerald-700">— from {e.team?.vehicle_plate || e.team?.driver_name || "team"}</span></p>} />
+              <Section title="Skipped — already out for delivery or delivered" tone="border-amber-200 bg-amber-50 text-amber-900"
+                items={plan.locked}
+                render={e => <p key={e.ref.label} className="text-xs">{e.ref.label} <span className="text-amber-700">— {e.status}</span></p>} />
+              <Section title="Not on this date's board" tone="border-gray-200 bg-gray-50 text-gray-700"
+                items={plan.notFound}
+                render={r => <p key={r.label} className="text-xs">{r.label}</p>} />
+              {plan.toUnassign.length === 0 && (
+                <p className="text-xs text-gray-500">Nothing to import — no stop in this file is currently assigned to a vehicle on {date}.</p>
+              )}
+            </div>
+          )}
+
+          {applying && (
+            <p className="text-xs text-gray-600">Unassigning {progress.done} of {progress.total}…</p>
+          )}
+
+          {result && (
+            <div className="space-y-2">
+              <p className="text-sm text-gray-800">
+                <b>{result.ok}</b> stop{result.ok === 1 ? "" : "s"} returned to Unassigned for {date}.
+              </p>
+              <Section title="Could not be unassigned" tone="border-red-200 bg-red-50 text-red-900"
+                items={result.failed}
+                render={f => <p key={f.label} className="text-xs">{f.label} — {f.message}</p>} />
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-6 py-4 border-t">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">
+            {result ? "Done" : "Cancel"}
+          </button>
+          {!result && (
+            <button onClick={apply} disabled={!plan || plan.toUnassign.length === 0 || applying || parsing}
+              className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+              {applying ? "Importing…" : plan ? `Unassign ${plan.toUnassign.length} stop${plan.toUnassign.length === 1 ? "" : "s"}` : "Import"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1940,6 +2184,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const canMoveAcrossTeams = ["master", "manager", "operation_manager", "company_admin"]
     .includes(String(currentUser?.role || "").toLowerCase());
   const [printTeam, setPrintTeam] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const [showAutoScheduler, setShowAutoScheduler] = useState(false);
 
   const [serviceOrders, setServiceOrders] = useState([]);
@@ -2526,6 +2771,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           )}
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
           <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
+          {!readOnly && <button onClick={() => setShowImport(true)} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-gray-50" title="Import a schedule file — its stops return to Unassigned with no vehicle">📥 Import</button>}
           {!readOnly && <button onClick={buildSmartPlan} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
@@ -2540,6 +2786,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       {showBlockedDates && <BlockedDatesModal blockedDates={blockedDates} onClose={() => setShowBlockedDates(false)} onRefresh={loadBlockedDates} />}
       {showAddTeam && <AddTeamModal activeVehicles={activeVehicles} onClose={() => setShowAddTeam(false)} onCreate={createTeam} onGoToVehicles={() => { setShowAddTeam(false); setShowVehicleModal(true); }} />}
       {printTeam && <TeamPrintView team={printTeam} onClose={() => setPrintTeam(null)} company={company} />}
+      {showImport && <ImportScheduleModal date={date} teams={teams} onClose={() => setShowImport(false)} onDone={loadData} />}
       {previewItem && <UnassignedPreviewModal data={previewItem} onClose={() => setPreviewItem(null)} />}
       {doModal && (
         <CreateDeliveryOrderModal
