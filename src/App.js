@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast } from "./UIComponents";
+import { globalMatchRow, mapSalesOrderHit, mergeGlobalResults } from "./globalSearch";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
@@ -1065,6 +1066,9 @@ export default function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalResults, setGlobalResults] = useState([]);
+  const [globalSearching, setGlobalSearching] = useState(false);   // backend search in flight
+  const globalSearchSeq = useRef(0);                               // ignore stale/out-of-order responses
+  const [pendingOpenOrderId, setPendingOpenOrderId] = useState(null); // Sales Order to open on the Orders page
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
 
@@ -1460,19 +1464,46 @@ export default function App() {
     } catch (e) { alert("Failed: " + e.message); }
     setPaymentSaving(false);
   };
+  // Instant local pass over the preloaded working set (orders + dashboard
+  // services), so typing feels immediate. The debounced effect below then
+  // supplements this with a live company-scoped backend Sales Order search so
+  // orders OUTSIDE the preloaded window (the SV-406/21892 class) are found too.
   const handleGlobalSearch = v => {
     setGlobalSearch(v);
-    if (!v.trim()) { setGlobalResults([]); return; }
+    if (!v.trim()) { setGlobalResults([]); setGlobalSearching(false); globalSearchSeq.current++; return; }
     const q = v.toLowerCase();
-    const matchRow = o => o.soNumber?.toLowerCase().includes(q) || o.svNumber?.toLowerCase().includes(q)
-      || o.customerName?.toLowerCase().includes(q) || o.contact?.includes(q)
-      || o.serviceNote?.toLowerCase().includes(q) || o.items?.some(i => i.itemName?.toLowerCase().includes(q));
-    // Orders first, then services (the dashboard's Service-type rows), each
-    // tagged so the result list can label and route them.
-    const orderHits = orders.filter(matchRow);
-    const serviceHits = services.filter(matchRow).map(s => ({ ...s, _isService: true }));
-    setGlobalResults([...orderHits, ...serviceHits]);
+    const orderHits = orders.filter(o => globalMatchRow(o, q));
+    const serviceHits = services.filter(o => globalMatchRow(o, q)).map(s => ({ ...s, _isService: true }));
+    setGlobalResults(mergeGlobalResults([...orderHits, ...serviceHits], []));
   };
+
+  // Live backend Sales Order search (fixes: an order not in the preloaded
+  // dashboard working set was previously unfindable in Global Search even
+  // though the Orders page finds it). Debounced; company scope is enforced
+  // server-side from the authenticated session (no client-supplied company_id).
+  // Stale/out-of-order responses are dropped via globalSearchSeq; closing the
+  // modal or switching company cancels the request; failures keep the local
+  // results and never crash the modal.
+  useEffect(() => {
+    const raw = globalSearch.trim();
+    if (!raw || !showSearch) { setGlobalSearching(false); return; }
+    const q = raw.toLowerCase();
+    const seq = ++globalSearchSeq.current;
+    setGlobalSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(raw)}&limit=20`);
+        const d = await res.json().catch(() => ({}));
+        if (seq !== globalSearchSeq.current) return; // a newer query (or company switch) superseded this one
+        const backendHits = (Array.isArray(d?.data) ? d.data : []).map(mapSalesOrderHit);
+        const orderHits = orders.filter(o => globalMatchRow(o, q));
+        const serviceHits = services.filter(o => globalMatchRow(o, q)).map(s => ({ ...s, _isService: true }));
+        setGlobalResults(mergeGlobalResults([...orderHits, ...serviceHits], backendHits));
+      } catch { /* keep the instant local results; never break the modal */ }
+      finally { if (seq === globalSearchSeq.current) setGlobalSearching(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [globalSearch, companyId, showSearch, orders, services]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setItem = (idx, k, v) => setForm(p => ({ ...p, items: p.items.map((it, i) => i===idx ? {...it,[k]:v} : it) }));
   const addItem = () => setForm(p => ({ ...p, items: [...p.items, { ...EMPTY_ITEM }] }));
@@ -1570,7 +1601,7 @@ export default function App() {
     if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
-    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} />;
+    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} openOrderId={pendingOpenOrderId} onOrderOpened={() => setPendingOpenOrderId(null)} />;
 
     // DELIVERIES
     if (page === "deliveries") return (
@@ -2026,7 +2057,7 @@ export default function App() {
             <p className="font-bold text-gray-900 text-sm">PulseOS</p>
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
+            <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); setGlobalSearching(false); globalSearchSeq.current++; }} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
             <button onClick={async () => { if (refreshing) return; setRefreshing(true); try { await loadOrders(); } finally { setRefreshing(false); } }} disabled={refreshing}
               className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm disabled:opacity-60">
               {refreshing ? <span className="w-4 h-4 border-2 border-gray-300 border-t-violet-600 rounded-full animate-spin" /> : "🔄"}
@@ -2133,12 +2164,13 @@ export default function App() {
             <div className="flex items-center gap-3 p-4 border-b">
               <span className="text-gray-400">🔍</span>
               <input autoFocus value={globalSearch} onChange={e=>handleGlobalSearch(e.target.value)} placeholder="Search SO/SV, customer, item, service..." className="flex-1 text-sm focus:outline-none" />
-              <button onClick={()=>setShowSearch(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold text-sm">×</button>
+              <button onClick={()=>{ setShowSearch(false); setGlobalSearch(""); setGlobalResults([]); setGlobalSearching(false); globalSearchSeq.current++; }} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold text-sm">×</button>
             </div>
             <div className="max-h-96 overflow-y-auto">
-              {globalSearch && globalResults.length===0 && <div className="text-center py-8 text-gray-400 text-sm">No results</div>}
+              {globalSearch && globalResults.length===0 && globalSearching && <div className="text-center py-8 text-gray-400 text-sm">Searching…</div>}
+              {globalSearch && globalResults.length===0 && !globalSearching && <div className="text-center py-8 text-gray-400 text-sm">No results</div>}
               {globalResults.map((o,i) => (
-                <div key={i} onClick={()=>{ if (o._isService) { setPage("services"); } else { handleView(o); } setShowSearch(false); }} className="px-4 py-3 hover:bg-violet-50 cursor-pointer border-b border-gray-50 last:border-0">
+                <div key={o._backendOrder ? `so-${o.id}` : (o._isService ? `sv-${o.id}` : `o-${o.id ?? i}`)} onClick={()=>{ if (o._isService) { setPage("services"); setShowSearch(false); } else if (o._backendOrder) { setPendingOpenOrderId(o.id); setPage("orders"); setShowSearch(false); } else { handleView(o); setShowSearch(false); } }} className="px-4 py-3 hover:bg-violet-50 cursor-pointer border-b border-gray-50 last:border-0">
                   <div className="flex items-center justify-between mb-0.5">
                     <span className="font-bold text-violet-700 text-sm flex items-center gap-1.5">
                       {o._isService && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 font-semibold">🔧 Service</span>}

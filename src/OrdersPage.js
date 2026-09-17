@@ -493,7 +493,7 @@ function ArrivalDateInput({ value, disabled, onChange, className }) {
   );
 }
 
-function OrdersPage({ onNavigateToAmendments } = {}) {
+function OrdersPage({ onNavigateToAmendments, openOrderId, onOrderOpened } = {}) {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -908,6 +908,16 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       });
     } catch (e) { toast.error("Failed to load order: " + e.message); }
   };
+
+  // Global Search (App.js) routes a Sales Order hit here by its stable id so it
+  // opens the SAME canonical detail drawer the Orders list opens — openView
+  // fetches /sales-orders/:id itself, so the id alone is enough. onOrderOpened
+  // clears the pending id so it fires once per navigation.
+  useEffect(() => {
+    if (!openOrderId) return;
+    openView({ id: openOrderId });
+    onOrderOpened?.();
+  }, [openOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tick / untick an item's personal "ordered" reminder. Local only — it does
   // not touch arrival, delivery, or anything the backend knows about.
