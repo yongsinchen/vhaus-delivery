@@ -479,7 +479,21 @@ function ServicePage() {
     try {
       await withLoading("Updating…", async () => {
         const res = await af(`${API}/service-cases/${id}`, { method: "PATCH", body: JSON.stringify(fields) });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Update failed"); }
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) { throw new Error(body.error || "Update failed"); }
+        // A date change that falls inside the 10-day protected window is NOT
+        // applied immediately — the backend queues it in the Delivery Dates
+        // approval queue (pending_date_request) and leaves the service on its
+        // current date until a manager approves. Without this message the
+        // detail simply re-renders on the old date and the edit looks like it
+        // did nothing ("cannot change the date"). Tell the user what happened;
+        // do NOT fake-apply the date.
+        const askedForDate = fields && (fields.delivery_date !== undefined || fields.due_date !== undefined);
+        if (body.pending_date_request) {
+          toast.success("Date change needs manager approval (it falls within the 10-day window). Submitted to the Delivery Dates approval queue — the service date will update once it is approved.");
+        } else if (askedForDate && fields.schedule_tbc !== true) {
+          toast.success("Date updated.");
+        }
         if (detail?.service) openDetail(detail.service);
         loadServices();
       });
