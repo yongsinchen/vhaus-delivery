@@ -424,9 +424,12 @@ function ServicePage() {
   const addServiceItem = async (serviceId) => {
     const description = window.prompt("Item description (e.g. Dining chair):");
     if (!description || !description.trim()) return;
+    const qtyRaw = window.prompt("Quantity:", "1");
+    if (qtyRaw === null) return; // cancelled
+    const quantity = Number(qtyRaw) > 0 ? Math.floor(Number(qtyRaw)) : 1;
     try {
       await withLoading("Adding item…", async () => {
-        await af(`${API}/service-cases/${serviceId}/items`, { method: "POST", body: JSON.stringify({ description: description.trim(), action_type: 2, quantity: 1 }) });
+        await af(`${API}/service-cases/${serviceId}/items`, { method: "POST", body: JSON.stringify({ description: description.trim(), action_type: 2, quantity }) });
         if (detail?.service) openDetail(detail.service);
         loadServices();
       });
@@ -1101,7 +1104,6 @@ function ServicePage() {
                             <div className="min-w-0">
                               <span className="text-xs font-bold text-gray-400 mr-1">{idx + 1}.</span>
                               <span className="text-sm font-medium text-gray-900">{it.description}</span>
-                              {Number(it.quantity) > 1 && <span className="text-xs text-gray-400 ml-1">× {Number(it.quantity)}</span>}
                             </div>
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${it.status === "done" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
                               {it.status === "done" ? "✓ Done" : "Pending"}
@@ -1112,6 +1114,12 @@ function ServicePage() {
                               className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white">
                               {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{ITEM_ACTION_ICON[k]} {v}</option>)}
                             </select>
+                            <label className="flex items-center gap-1 text-xs text-gray-500">
+                              Qty
+                              <input type="number" min="1" step="1" defaultValue={Number(it.quantity) || 1}
+                                onBlur={e => { const q = Number(e.target.value) > 0 ? Math.floor(Number(e.target.value)) : 1; if (q !== (Number(it.quantity) || 1)) updateServiceItem(it.id, { quantity: q }); else e.target.value = q; }}
+                                className="w-14 px-1.5 py-1 rounded-lg border border-gray-200 text-center" />
+                            </label>
                             <button onClick={() => updateServiceItem(it.id, { status: it.status === "done" ? "pending" : "done" })}
                               className={`text-xs px-3 py-1 rounded-lg ${it.status === "done" ? "bg-gray-100 text-gray-600" : "bg-emerald-600 text-white"}`}>
                               {it.status === "done" ? "Mark pending" : "Mark done"}

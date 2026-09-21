@@ -66,7 +66,17 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
     if (items.length === 0) { toast.warning("Select at least one item with quantity"); return; }
     for (const i of items) {
       const summary = (doData?.items || []).find(s => s.sales_order_item_id === i.sales_order_item_id);
-      if (summary && i.quantity > summary.remaining_qty) { toast.error(`${summary.product_name}: only ${summary.remaining_qty} remaining`); return; }
+      if (!summary) continue;
+      if (i.quantity > summary.remaining_qty) { toast.error(`${summary.product_name}: only ${summary.remaining_qty} remaining`); return; }
+      // Arrival-capped gate mirrors the backend's non-override check
+      // (validateDoRequest in lib/delivery-orders.js) — a partially-arrived
+      // item's remaining_qty (ordered-based) can exceed what has physically
+      // reached the warehouse; catch that here instead of round-tripping to
+      // a 400 the guard would reject anyway.
+      if (!override && i.quantity > summary.available_to_allocate_qty) {
+        toast.error(`${summary.product_name}: only ${summary.available_to_allocate_qty} arrived and available (ordered ${summary.ordered_qty}, arrived ${summary.arrived_qty})`);
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -108,15 +118,16 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
         </div>
         <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
           {!loading && openItems.length > 0 && (() => {
-            // Tick-all covers items that can actually be picked (arrived, or
-            // arrival overridden). Toggles between selecting all and clearing.
-            const selectable = openItems.filter(it => it.arrived || override);
+            // Tick-all covers items that can actually be picked (something
+            // physically arrived, or arrival overridden). Toggles between
+            // selecting all and clearing.
+            const selectable = openItems.filter(it => it.available_to_allocate_qty > 0 || override);
             const allPicked = selectable.length > 0 && selectable.every(it => Number(pick[it.sales_order_item_id]) > 0);
             return (
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-400">{selectable.length} of {openItems.length} item{openItems.length !== 1 ? "s" : ""} selectable</span>
                 <button type="button" disabled={selectable.length === 0}
-                  onClick={() => setPick(p => { const next = { ...p }; selectable.forEach(it => { next[it.sales_order_item_id] = allPicked ? "" : String(it.remaining_qty); }); return next; })}
+                  onClick={() => setPick(p => { const next = { ...p }; selectable.forEach(it => { next[it.sales_order_item_id] = allPicked ? "" : String(override ? it.remaining_qty : it.available_to_allocate_qty); }); return next; })}
                   className="text-xs font-medium text-violet-700 hover:text-violet-900 disabled:text-gray-300">
                   {allPicked ? "Clear all" : "✓ Tick all"}
                 </button>
@@ -129,32 +140,46 @@ export default function CreateDeliveryOrderModal({ salesOrderId, orderNumber, de
             <p className="text-sm text-gray-400 py-6 text-center">Nothing left to schedule — every item is already delivered or fully allocated.</p>
           ) : openItems.map(it => {
             const picked = pick[it.sales_order_item_id] || "";
-            const blocked = !it.arrived && !override;
+            // Arrival-capped gate/ceiling — mirrors the backend's non-override
+            // check (validateDoRequest in lib/delivery-orders.js): a request
+            // may allocate at most available_to_allocate_qty (physically
+            // arrived, minus delivered, minus already allocated), not the
+            // full ordered-based remaining_qty. Without override, a
+            // partially-arrived item (e.g. ordered 2, arrived 1) must cap at
+            // 1 here, not 2 — the backend would reject 2 either way, but
+            // letting the UI offer it first is the bug this fixes.
+            const cap = override ? it.remaining_qty : it.available_to_allocate_qty;
+            const blocked = cap <= 0;
+            const badge = it.arrived_qty >= it.ordered_qty
+              ? { text: "arrived", cls: "bg-emerald-100 text-emerald-700" }
+              : it.arrived_qty > 0
+                ? { text: `${it.arrived_qty}/${it.ordered_qty} arrived`, cls: "bg-amber-100 text-amber-700" }
+                : { text: "not arrived", cls: "bg-red-100 text-red-600" };
             return (
               <div key={it.sales_order_item_id} className={`flex items-center gap-2 rounded-xl border p-2.5 ${blocked ? "border-amber-200 bg-amber-50/50" : "border-gray-200"}`}>
                 <input type="checkbox" checked={Number(picked) > 0} disabled={blocked}
-                  onChange={e => setPick(p => ({ ...p, [it.sales_order_item_id]: e.target.checked ? String(it.remaining_qty) : "" }))} />
+                  onChange={e => setPick(p => ({ ...p, [it.sales_order_item_id]: e.target.checked ? String(cap) : "" }))} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">{it.product_name}{it.size ? ` (${it.size})` : ""}</p>
                   <p className="text-[10px] text-gray-400">
-                    {it.remaining_qty} of {it.ordered_qty} remaining
-                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-medium ${it.arrived ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{it.arrived ? "arrived" : "not arrived"}</span>
+                    {cap} of {it.remaining_qty} available
+                    <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-medium ${badge.cls}`}>{badge.text}</span>
                   </p>
                 </div>
-                <input type="number" min="1" max={it.remaining_qty} value={picked} disabled={blocked}
+                <input type="number" min="1" max={cap} value={picked} disabled={blocked}
                   onChange={e => {
                     const v = e.target.value; const n = Number(v);
-                    setPick(p => ({ ...p, [it.sales_order_item_id]: v === "" ? "" : String(Math.max(0, Math.min(it.remaining_qty, n || 0))) }));
+                    setPick(p => ({ ...p, [it.sales_order_item_id]: v === "" ? "" : String(Math.max(0, Math.min(cap, n || 0))) }));
                   }}
                   className="w-16 px-2 py-1.5 text-sm text-right rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400 disabled:bg-gray-50" />
               </div>
             );
           })}
-          {!loading && openItems.some(i => !i.arrived) && (
+          {!loading && openItems.some(i => i.available_to_allocate_qty < i.remaining_qty) && (
             <label className={`flex items-center gap-2 text-xs rounded-xl p-2.5 ${doData.can_override_arrival ? "text-amber-700 bg-amber-50 cursor-pointer" : "text-gray-400 bg-gray-50 cursor-not-allowed"}`}>
               <input type="checkbox" checked={override} disabled={!doData.can_override_arrival} onChange={e => setOverride(e.target.checked)} />
               {doData.can_override_arrival
-                ? "Override arrival check — schedule items that have not arrived yet"
+                ? "Override arrival check — schedule quantities beyond what has physically arrived"
                 : "Overriding arrival requires Manager approval."}
             </label>
           )}

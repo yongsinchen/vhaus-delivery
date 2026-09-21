@@ -627,7 +627,7 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     if (o.customer_name) infoParts.push({ font: { size: 10 }, text: "\n" + o.customer_name });
     if (o.contact) infoParts.push({ font: { size: 10, color: { argb: "FF555555" } }, text: "\n" + o.contact });
     if (o.address) infoParts.push({ font: { size: 9, color: { argb: "FF555555" } }, text: "\n" + o.address });
-    if (hasBalance) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FFFF0000" } }, text: `\nBal: RM ${o.balance}` });
+    if (hasBalance) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FFFF0000" } }, text: `\nBal: RM ${Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` });
     if (sc.slot) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FF1E40AF" } }, text: `\nSlot: ${sc.slot}` });
     const infoText = infoParts.map(p => p.text).join("");
 
@@ -929,7 +929,7 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
           </span>
           {trip.sv_number && <span className="text-xs text-purple-400">{trip.sv_number}</span>}
         </div>
-        {parseFloat(order.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {order.balance}</span>}
+        {parseFloat(order.balance) > 0 && <span className="text-red-500 text-xs font-medium">RM {Number(order.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
       </div>
       <p className="text-xs font-medium text-gray-700">{order.customer_name || "-"}</p>
       <p className="text-xs text-gray-400 leading-tight truncate">{order.address}</p>
@@ -1127,8 +1127,8 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
                 Trip {tripInfo.trip_no}/{tripInfo.total_trips}{tripInfo.trip_no === 1 ? " · comm" : ""}
               </span>
             )}
-            {o.order_amount != null && <span className="text-gray-600 text-[10px] font-bold">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-            {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {o.balance}</span>}
+            {o.order_amount != null && <span className="text-gray-600 text-[10px] font-bold">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+            {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
           </div>
           <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
           {o.contact && (
@@ -1313,7 +1313,7 @@ export function TeamPrintView({ team, onClose, company }) {
                           <div style={{fontWeight:"bold"}}>{o.so_number}</div><div>{o.customer_name}</div>
                           {o.contact&&<div style={{color:"#555"}}>{o.contact}</div>}
                           {o.address&&<div style={{color:"#555",fontSize:"9px",wordBreak:"break-word"}}>{o.address}</div>}
-                          {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {o.balance}</div>}
+                          {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                           {sc.slot&&<div style={{color:"#1e40af",fontWeight:"bold"}}>Slot: {sc.slot}</div>}
                         </td>}
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",fontSize:"9px"}}>{o.salesman||"-"}</td>}
@@ -1808,8 +1808,8 @@ function UnassignedPreviewModal({ data, onClose }) {
             <Row label="Address" value={address} />
             <Row label="Delivery date" value={dateStr} />
             <Row label="Time slot" value={item.time_slot} />
-            <Row label="Amount" value={amount != null && Number(amount) > 0 ? `RM ${Number(amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : null} />
-            <Row label="Balance" value={parseFloat(balance) > 0 ? `RM ${balance}` : null} />
+            <Row label="Amount" value={amount != null && Number(amount) > 0 ? `RM ${Number(amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
+            <Row label="Balance" value={parseFloat(balance) > 0 ? `RM ${Number(balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
           </div>
           {item.service_note && (
             <div>
@@ -2862,8 +2862,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
             </div>
             <span className="flex items-center gap-1.5">
-              {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-              {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+              {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+              {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {Number(item.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
               <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "service", item }); }} title="View details" className="text-gray-400 hover:text-purple-600 leading-none">👁</button>
             </span>
           </div>
@@ -2897,8 +2897,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
             <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
           </div>
           <span className="flex items-center gap-1.5">
-            {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</span>}
-            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {item.balance}</span>}
+            {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+            {parseFloat(item.balance) > 0 && <span className="text-red-500 text-xs font-medium">Bal RM {Number(item.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
             <button onClick={(e) => { e.stopPropagation(); setPreviewItem({ type: "order", item }); }} title="View details" className="text-gray-400 hover:text-blue-600 leading-none">👁</button>
           </span>
         </div>

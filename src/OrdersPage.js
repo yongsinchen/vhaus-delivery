@@ -843,8 +843,13 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
     // Client-side over-allocation guard (server enforces it authoritatively)
     for (const i of items) {
       const summary = (doData?.items || []).find(s => s.sales_order_item_id === i.sales_order_item_id);
-      if (summary && i.quantity > summary.remaining_qty) {
+      if (!summary) continue;
+      if (i.quantity > summary.remaining_qty) {
         toast.error(`${summary.product_name}: only ${summary.remaining_qty} remaining`);
+        return;
+      }
+      if (!doOverride && i.quantity > summary.available_to_allocate_qty) {
+        toast.error(`${summary.product_name}: only ${summary.available_to_allocate_qty} arrived and available (ordered ${summary.ordered_qty}, arrived ${summary.arrived_qty})`);
         return;
       }
     }
@@ -1748,7 +1753,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                         {doData.items.map(it => (
                           <div key={it.sales_order_item_id} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
                             <span className="flex-1 truncate text-gray-800">{it.product_name}{it.size ? ` (${it.size})` : ""}</span>
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${it.arrived ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{it.arrived ? "arrived" : "waiting"}</span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${it.arrived_qty >= it.ordered_qty ? "bg-emerald-100 text-emerald-700" : it.arrived_qty > 0 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-600"}`}>{it.arrived_qty >= it.ordered_qty ? "arrived" : it.arrived_qty > 0 ? `${it.arrived_qty}/${it.ordered_qty} arrived` : "waiting"}</span>
                             <span className="text-gray-500 whitespace-nowrap">{it.delivered_qty}/{it.ordered_qty} delivered{it.allocated_qty > 0 ? ` · ${it.allocated_qty} scheduled` : ""}{it.remaining_qty > 0 ? ` · ${it.remaining_qty} left` : ""}</span>
                           </div>
                         ))}
@@ -1860,34 +1865,49 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
             <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
               {doData.items.filter(i => i.remaining_qty > 0).map(it => {
                 const picked = doPick[it.sales_order_item_id] || "";
-                const blocked = !it.arrived && !doOverride;
+                // Arrival-capped gate/ceiling — mirrors the backend's
+                // non-override check (validateDoRequest in
+                // lib/delivery-orders.js): at most available_to_allocate_qty
+                // (physically arrived, minus delivered, minus already
+                // allocated) may be picked without override, not the full
+                // ordered-based remaining_qty. A partially-arrived item
+                // (ordered 2, arrived 1) must cap at 1 here — the backend
+                // rejects 2 either way, but offering it in the UI first is
+                // the bug this fixes (URGENT Issue 3).
+                const cap = doOverride ? it.remaining_qty : it.available_to_allocate_qty;
+                const blocked = cap <= 0;
+                const badge = it.arrived_qty >= it.ordered_qty
+                  ? { text: "arrived", cls: "bg-emerald-100 text-emerald-700" }
+                  : it.arrived_qty > 0
+                    ? { text: `${it.arrived_qty}/${it.ordered_qty} arrived`, cls: "bg-amber-100 text-amber-700" }
+                    : { text: "not arrived", cls: "bg-red-100 text-red-600" };
                 return (
                   <div key={it.sales_order_item_id} className={`flex items-center gap-2 rounded-xl border p-2.5 ${blocked ? "border-amber-200 bg-amber-50/50" : "border-gray-200"}`}>
                     <input type="checkbox" checked={Number(picked) > 0} disabled={blocked}
-                      onChange={e => setDoPick(p => ({ ...p, [it.sales_order_item_id]: e.target.checked ? String(it.remaining_qty) : "" }))} />
+                      onChange={e => setDoPick(p => ({ ...p, [it.sales_order_item_id]: e.target.checked ? String(cap) : "" }))} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{it.product_name}{it.size ? ` (${it.size})` : ""}</p>
                       <p className="text-[10px] text-gray-400">
-                        {it.remaining_qty} of {it.ordered_qty} remaining
-                        <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-medium ${it.arrived ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{it.arrived ? "arrived" : "not arrived"}</span>
+                        {cap} of {it.remaining_qty} available
+                        <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-medium ${badge.cls}`}>{badge.text}</span>
                       </p>
                     </div>
-                    <input type="number" min="1" max={it.remaining_qty} value={picked} disabled={blocked}
+                    <input type="number" min="1" max={cap} value={picked} disabled={blocked}
                       onChange={e => {
                         const v = e.target.value;
-                        // clamp to remaining — over-allocation prevented at input level
+                        // clamp to the arrival-capped ceiling — over-allocation prevented at input level
                         const n = Number(v);
-                        setDoPick(p => ({ ...p, [it.sales_order_item_id]: v === "" ? "" : String(Math.max(0, Math.min(it.remaining_qty, n || 0))) }));
+                        setDoPick(p => ({ ...p, [it.sales_order_item_id]: v === "" ? "" : String(Math.max(0, Math.min(cap, n || 0))) }));
                       }}
                       className="w-16 px-2 py-1.5 text-sm text-right rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400 disabled:bg-gray-50" />
                   </div>
                 );
               })}
-              {doData.items.some(i => i.remaining_qty > 0 && !i.arrived) && (
+              {doData.items.some(i => i.remaining_qty > 0 && i.available_to_allocate_qty < i.remaining_qty) && (
                 <label className={`flex items-center gap-2 text-xs rounded-xl p-2.5 ${doData.can_override_arrival ? "text-amber-700 bg-amber-50 cursor-pointer" : "text-gray-400 bg-gray-50 cursor-not-allowed"}`}>
                   <input type="checkbox" checked={doOverride} disabled={!doData.can_override_arrival} onChange={e => setDoOverride(e.target.checked)} />
                   {doData.can_override_arrival
-                    ? "Override arrival check — schedule items that have not arrived yet"
+                    ? "Override arrival check — schedule quantities beyond what has physically arrived"
                     : "Overriding arrival requires Manager approval."}
                 </label>
               )}
