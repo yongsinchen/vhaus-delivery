@@ -1516,7 +1516,13 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       <div className="space-y-2">
         {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
         {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
-        {!loading && orders.map(o => (
+        {!loading && orders.map(o => {
+          // Same total/balance formula as the detail view. sales_orders.deposit
+          // is the amount paid to date (kept in sync with customer payments).
+          const listTotal = (Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0));
+          const listBal = listTotal - (Number(o.deposit) || 0);
+          const balanceDue = listBal > 0.005 && !["draft", "cancelled"].includes(o.status);
+          return (
           <div key={o.id} onClick={() => openView(o)}
             className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
             <div className="flex items-start justify-between gap-3">
@@ -1536,7 +1542,14 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold text-gray-900">RM {((Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0))).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <p className="font-bold text-gray-900">RM {listTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                {balanceDue && (
+                  <p title={`Balance not fully collected — RM ${money(listBal)} outstanding`}
+                    className="inline-flex items-center gap-1 mt-0.5 text-[11px] font-medium text-red-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    Bal RM {money(listBal)}
+                  </p>
+                )}
                 <div className="flex items-center gap-1 mt-1 justify-end">
                   <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); printSO(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
@@ -1557,7 +1570,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Pagination */}
