@@ -152,6 +152,9 @@ const UPCOMING_DAYS = 7;
 const localYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const daysBetween = (fromYmd, toYmd) => Math.round((new Date(`${toYmd}T00:00:00`) - new Date(`${fromYmd}T00:00:00`)) / 86400000);
 const dayLabel = (n) => (n === 0 ? "Today" : n === 1 ? "Tomorrow" : `In ${n} days`);
+// Order-placement reminder: SOs delivering within this many days (or already
+// past their date) flag whether every item has been ticked "ordered".
+const ORDER_ITEMS_REMIND_DAYS = 45;
 const DAY_CHIP = (n) => (n === 0 ? "bg-[#b8894d] text-white" : n === 1 ? "bg-[#dcc195] text-[#5c4322]" : "bg-[#efe3cc] text-[#7a5c34]");
 
 // P1-1: submitted-at / reviewed-at timestamps on amendment banners.
@@ -1001,7 +1004,16 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
         const { order: full, legacy_order, pending_amendment } = await getFullOrder(o);
         setViewArrival(parseLegacyArrival(legacy_order));
         setViewLegacy(legacy_order || null);
-        setOrderedMarks(readOrderedMarks(user?.id, full?.id ?? o.id));
+        // Drop ticks for items no longer on the order, so the list's
+        // "all ordered" reminder (which only knows the item count) stays true.
+        const markOrderId = full?.id ?? o.id;
+        let marks = readOrderedMarks(user?.id, markOrderId);
+        if (!pending_amendment || pending_amendment.status !== "pending") {
+          const live = new Set((full?.sales_order_items || []).map((it, i) => itemMarkId(it, i)));
+          const pruned = new Set([...marks].filter(m => live.has(m)));
+          if (pruned.size !== marks.size) { writeOrderedMarks(user?.id, markOrderId, pruned); marks = pruned; }
+        }
+        setOrderedMarks(marks);
         setViewingOrder(full);
         setPendingAmendment(pending_amendment);
         setOrderServiceReqs([]);
@@ -1675,6 +1687,15 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
           const listTotal = orderTotal(o);
           const listBal = orderBalance(o);
           const balanceDue = hasBalanceDue(o);
+          // Order-placement reminder: delivery within ORDER_ITEMS_REMIND_DAYS
+          // (or overdue) on a live SO → red until every item is ticked
+          // "ordered" in the SO view (per-user ticks), then green.
+          const itemCount = o._item_count || (o.sales_order_items || []).length || 0;
+          const dd = /^\d{4}-\d{2}-\d{2}/.test(o.delivery_date || "") ? o.delivery_date.slice(0, 10) : null;
+          const remindOrder = itemCount > 0 && dd && daysBetween(today, dd) <= ORDER_ITEMS_REMIND_DAYS
+            && !["draft", "cancelled", "delivered"].includes(o.status);
+          const tickedCount = remindOrder ? Math.min(readOrderedMarks(user?.id, o.id).size, itemCount) : 0;
+          const allOrdered = remindOrder && tickedCount >= itemCount;
           return (
           <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)}
             className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
@@ -1687,7 +1708,16 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
                 <p className="text-xs text-gray-400">
-                  {o._item_count || (o.sales_order_items || []).length || 0} item{(o._item_count || (o.sales_order_items || []).length || 0) !== 1 ? "s" : ""}
+                  {remindOrder ? (
+                    <span className={`font-semibold ${allOrdered ? "text-emerald-600" : "text-red-600"}`}
+                      title={allOrdered
+                        ? "All items marked ordered"
+                        : `Delivery in ${Math.max(0, daysBetween(today, dd))} day(s) — ${itemCount - tickedCount} item(s) not marked ordered yet. Open the SO and tick each item once placed.`}>
+                      {allOrdered ? "✓" : "⚠"} {itemCount} item{itemCount !== 1 ? "s" : ""}{allOrdered ? "" : ` (${tickedCount}/${itemCount} ordered)`}
+                    </span>
+                  ) : (
+                    <>{itemCount} item{itemCount !== 1 ? "s" : ""}</>
+                  )}
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
                   {o.order_date ? ` · 🧾 ${o.order_date}` : ""}
