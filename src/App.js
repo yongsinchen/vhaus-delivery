@@ -97,6 +97,7 @@ export const fromDb = o => ({
   items: normalizeOrderItems(o.items, o.id),
   photoUrl: o.photo_url || null,
   linkedSo: o.linked_so || null,
+  customerId: o.customer_id || null,
 });
 
 // ── Recent Delivery Updates (delivery activity feed) ────────────────
@@ -1080,6 +1081,20 @@ export default function App() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentSaving, setPaymentSaving] = useState(false);
+  // URGENT FIX — Finance cross-order payment allocation. paymentAllocations
+  // is the editable, previewed distribution across the primary order (always
+  // first) + any other outstanding orders for the SAME resolved customer_id.
+  // Nothing posts until Finance confirms; the backend re-validates everything
+  // (company, customer, fresh balance) regardless of what's previewed here.
+  const [paymentOtherOrders, setPaymentOtherOrders] = useState([]);
+  const [paymentAllocations, setPaymentAllocations] = useState([]);
+  const [paymentError, setPaymentError] = useState(null);
+  const paymentSavingRef = useRef(false); // synchronous guard — blocks a double-click before re-render
+  // One stable key per "open Record Payment" action, reused across every
+  // retry of that SAME attempt (double-click, or a timed-out request retry)
+  // — opening the modal again (a genuinely new attempt) mints a new one.
+  const paymentIdempotencyKeyRef = useRef(null);
+  const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
   const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");
@@ -1118,7 +1133,7 @@ export default function App() {
 
   // ── Data loading ────────────────────────────────────────────────
   // Exactly the columns fromDb() maps — keep the two lists in sync
-  const ORDER_COLS = "id, created_at, so_number, customer_name, address, contact, order_date, salesman, order_amount, balance, delivery_date, time_slot, plate_no, type, service_note, sv_number, remark, status, items, photo_url, linked_so, company_id";
+  const ORDER_COLS = "id, created_at, so_number, customer_name, address, contact, order_date, salesman, order_amount, balance, delivery_date, time_slot, plate_no, type, service_note, sv_number, remark, status, items, photo_url, linked_so, company_id, customer_id";
   // Dashboard window: how far back closed orders stay in the startup fetch.
   // Older months are fetched on demand when the calendar navigates to them.
   const ORDER_WINDOW_DAYS = 120;
@@ -1443,21 +1458,127 @@ export default function App() {
     else alert("Failed: "+(d.error||"Unknown"));
     setConverting(false);
   };
+  // Deterministic suggestion order when neither the business nor this
+  // codebase defines a payment-allocation priority: oldest order_date first,
+  // then created_at, then immutable id — a UI suggestion only, never posted
+  // without Finance reviewing/confirming it (see recordPayment below).
+  const sortOldestFirst = (list) => [...list].sort((a, b) => {
+    const ad = a.orderDate || a.deliveryDate || "", bd = b.orderDate || b.deliveryDate || "";
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    const ac = a.created_at || "", bc = b.created_at || "";
+    if (ac !== bc) return ac < bc ? -1 : 1;
+    return String(a.id) < String(b.id) ? -1 : 1;
+  });
+
+  // A fresh open (the button below) mints a new idempotency key — a
+  // genuinely new payment attempt. reloadPaymentPreview() below also calls
+  // this function (to rebuild the preview after a stale_balance rejection)
+  // but does NOT go through this wrapper, so that retry correctly keeps
+  // reusing the same key (nothing was ever written under it — the rejected
+  // attempt never reached the insert).
+  const openPaymentModalFresh = (o) => {
+    paymentIdempotencyKeyRef.current = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return openPaymentModal(o);
+  };
+
+  const openPaymentModal = async (o) => {
+    setPaymentModal(o); setPaymentAmount(""); setPaymentMethod("Cash"); setPaymentError(null);
+    setPaymentAllocations([{ order_id: o.id, soNumber: o.soNumber, customerName: o.customerName, balance: Number(o.balance) || 0, amount: 0 }]);
+    setPaymentOtherOrders([]);
+    if (!o.customerId) return; // no resolvable customer — single-order flow only, matches prior behavior
+    try {
+      const res = await authFetch(`${BACKEND}/customers/${o.customerId}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const others = sortOldestFirst((d.orders || [])
+        .filter(x => x.id !== o.id && Number(x.balance) > 0 && x.status !== "Cancelled" && x.type !== "Service")
+        .map(x => ({ id: x.id, soNumber: x.so_number, customerName: x.customer_name, balance: Number(x.balance) || 0, orderDate: x.order_date, deliveryDate: x.delivery_date, created_at: x.created_at })));
+      setPaymentOtherOrders(others);
+    } catch { /* best-effort suggestion only — single-order flow still works if this fails */ }
+  };
+
+  // Recompute the suggested allocation whenever the entered amount changes:
+  // fill the primary order first (up to its own balance), then spill the
+  // remainder across other outstanding orders oldest-first — each still
+  // capped at its own balance. Purely a starting point; every row stays
+  // editable, and nothing is posted until Confirm Payment.
+  const recomputeSuggestedAllocations = (amountStr, others) => {
+    const total = parseFloat(amountStr) || 0;
+    let remaining = total;
+    const rows = [];
+    const primary = paymentAllocations[0];
+    const primaryAmt = Math.min(remaining, primary.balance);
+    remaining = Math.round((remaining - primaryAmt) * 100) / 100;
+    rows.push({ ...primary, amount: primaryAmt });
+    for (const o of others) {
+      const amt = remaining > 0 ? Math.min(remaining, o.balance) : 0;
+      remaining = Math.round((remaining - amt) * 100) / 100;
+      rows.push({ order_id: o.id, soNumber: o.soNumber, customerName: o.customerName, balance: o.balance, amount: amt });
+    }
+    setPaymentAllocations(rows);
+  };
+
+  const updatePaymentAmount = (v) => { setPaymentAmount(v); setPaymentError(null); recomputeSuggestedAllocations(v, paymentOtherOrders); };
+  const updateAllocationRow = (idx, v) => {
+    setPaymentError(null);
+    setPaymentAllocations(rows => rows.map((r, i) => i === idx ? { ...r, amount: parseFloat(v) || 0 } : r));
+  };
+
+  const paymentTotalAllocated = Math.round(paymentAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  const paymentUnallocated = Math.round(((parseFloat(paymentAmount) || 0) - paymentTotalAllocated) * 100) / 100;
+
+  const closePaymentModal = () => {
+    setPaymentModal(null); setPaymentAmount(""); setPaymentMethod("Cash");
+    setPaymentAllocations([]); setPaymentOtherOrders([]); setPaymentError(null);
+  };
+
+  const reloadPaymentPreview = async () => {
+    // Server rejected as stale — reload the current order's balance and the
+    // other-orders list, then rebuild the preview. Never silently reapply
+    // the old amounts against numbers that may no longer be valid.
+    if (!paymentModal) return;
+    const { data: fresh } = await supabase.from("orders").select("balance").eq("id", paymentModal.id).maybeSingle();
+    const refreshedModal = { ...paymentModal, balance: fresh?.balance ?? paymentModal.balance };
+    setOrders(p => p.map(o => o.id === paymentModal.id ? { ...o, balance: refreshedModal.balance } : o));
+    await openPaymentModal(refreshedModal);
+    if (paymentAmount) recomputeSuggestedAllocations(paymentAmount, paymentOtherOrders);
+  };
+
   const recordPayment = async () => {
+    if (paymentSavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     if (!paymentModal || !paymentAmount) return;
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return alert("Invalid amount.");
+    if (paymentUnallocated !== 0) return; // Confirm button is disabled for this too — defense in depth
+    paymentSavingRef.current = true;
     setPaymentSaving(true);
+    setPaymentError(null);
     try {
+      const allocations = paymentAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
       const res = await authFetch(`${BACKEND}/payments/record`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: paymentModal.id, amount, payment_method: paymentMethod }),
+        body: JSON.stringify({ customer_id: paymentModal.customerId || null, amount, payment_method: paymentMethod, allocations, idempotency_key: paymentIdempotencyKeyRef.current }),
       });
-      if (!res.ok) { const d = await res.json(); alert("Failed: " + (d.error || "Unknown")); setPaymentSaving(false); return; }
-      const newBalance = Math.max(0, parseFloat(paymentModal.balance||0) - amount).toFixed(2);
-      setOrders(p => p.map(o => o.id===paymentModal.id ? {...o,balance:newBalance} : o));
-      setPaymentModal(null); setPaymentAmount(""); setPaymentMethod("Cash");
-    } catch (e) { alert("Failed: " + e.message); }
+      const d = await res.json();
+      if (!res.ok) {
+        if (d.code === "stale_balance") {
+          setPaymentError(`${d.error} Reloading latest balances…`);
+          await reloadPaymentPreview();
+        } else {
+          setPaymentError(d.error || "Failed to record payment");
+        }
+        paymentSavingRef.current = false;
+        setPaymentSaving(false);
+        return;
+      }
+      // Update every affected order's balance locally (server already
+      // recomputed the authoritative value via recomputeOrderPaid — refresh
+      // from the response's allocations against what we knew pre-payment).
+      const balanceDeltas = new Map(allocations.map(a => [a.order_id, a.amount]));
+      setOrders(p => p.map(o => balanceDeltas.has(o.id) ? { ...o, balance: Math.max(0, (Number(o.balance) || 0) - balanceDeltas.get(o.id)).toFixed(2) } : o));
+      closePaymentModal();
+    } catch (e) { setPaymentError(e.message); }
+    paymentSavingRef.current = false;
     setPaymentSaving(false);
   };
   const handleGlobalSearch = v => {
@@ -1635,7 +1756,7 @@ export default function App() {
                             {o.contact && <a href={`https://wa.me/6${o.contact.replace(/[^0-9]/g, "").replace(/^0/, "")}`} target="_blank" rel="noreferrer" className="flex-1 text-center text-xs bg-emerald-50 text-emerald-700 py-1.5 rounded-xl hover:bg-emerald-100 font-medium">💬 Arrange Delivery</a>}
                           </div>
                         ) : can("recordPayment") && parseFloat(o.balance) > 0 && (
-                          <button onClick={e=>{e.stopPropagation();setPaymentModal(o);}} className="mt-3 w-full text-xs bg-emerald-600 text-white py-1.5 rounded-xl hover:bg-emerald-700">💰 Record Payment</button>
+                          <button onClick={e=>{e.stopPropagation();openPaymentModalFresh(o);}} className="mt-3 w-full text-xs bg-emerald-600 text-white py-1.5 rounded-xl hover:bg-emerald-700">💰 Record Payment</button>
                         )}
                       </div>
                     ))}
@@ -2221,18 +2342,48 @@ export default function App() {
       {/* Payment modal */}
       {paymentModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full">
+          <div className="bg-white rounded-2xl shadow-xl p-6 max-w-sm w-full max-h-[90vh] overflow-y-auto">
             <h3 className="font-bold text-gray-900 mb-1">Record Payment</h3>
-            <p className="text-sm text-gray-500 mb-1">SO <span className="font-semibold text-violet-700">{paymentModal.soNumber}</span> — {paymentModal.customerName}</p>
-            <p className="text-sm text-gray-500 mb-4">Balance: <span className="font-bold text-red-600">RM {paymentModal.balance}</span></p>
-            <input type="number" value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} placeholder="Amount (RM)" autoFocus className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-3" />
+            <p className="text-sm text-gray-500 mb-4">SO <span className="font-semibold text-violet-700">{paymentModal.soNumber}</span> — {paymentModal.customerName}</p>
+            <input type="number" value={paymentAmount} onChange={e=>updatePaymentAmount(e.target.value)} placeholder="Payment Received (RM)" autoFocus className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-3" />
             <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
             <select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-4">
               {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
+
+            {parseFloat(paymentAmount) > 0 && (
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Allocate to Orders</label>
+                <div className="space-y-2">
+                  {paymentAllocations.map((a, i) => (
+                    <div key={a.order_id} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 truncate">{i === 0 ? "This order — " : ""}{a.soNumber}{a.customerName ? ` — ${a.customerName}` : ""}</p>
+                        <p className="text-[11px] text-gray-400">Outstanding {money(a.balance)}</p>
+                      </div>
+                      <input type="number" value={a.amount || ""} onChange={e=>updateAllocationRow(i, e.target.value)}
+                        className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                    </div>
+                  ))}
+                </div>
+                {paymentOtherOrders.length > 0 && (
+                  <p className="text-[11px] text-gray-400 mt-2">Suggested oldest-order-first — every row is editable before you confirm.</p>
+                )}
+                <div className="border-t border-gray-100 mt-3 pt-3 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-500">Payment Received</span><span className="font-semibold">{money(paymentAmount)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Total Allocated</span><span className="font-semibold">{money(paymentTotalAllocated)}</span></div>
+                  <div className="flex justify-between"><span className={paymentUnallocated !== 0 ? "text-red-600 font-semibold" : "text-gray-500"}>Unallocated</span><span className={`font-semibold ${paymentUnallocated !== 0 ? "text-red-600" : ""}`}>{money(paymentUnallocated)}</span></div>
+                </div>
+                {paymentUnallocated !== 0 && (
+                  <p className="text-xs text-red-600 mt-2">Total Allocated must equal Payment Received before you can confirm. Adjust the allocation above.</p>
+                )}
+              </div>
+            )}
+            {paymentError && <p className="text-xs text-red-600 mb-3">{paymentError}</p>}
+
             <div className="flex gap-3 justify-end">
-              <button onClick={()=>{setPaymentModal(null);setPaymentAmount("");setPaymentMethod("Cash");}} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
-              <button onClick={recordPayment} disabled={paymentSaving} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50">{paymentSaving?"Saving...":"Record Payment"}</button>
+              <button onClick={closePaymentModal} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
+              <button onClick={recordPayment} disabled={paymentSaving || !paymentAmount || paymentUnallocated !== 0} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50">{paymentSaving?"Saving...":"Confirm Payment"}</button>
             </div>
           </div>
         </div>

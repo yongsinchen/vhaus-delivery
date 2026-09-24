@@ -392,6 +392,7 @@ function CustomerPage() {
       {payModal && (
         <RecordPaymentModal customer={payModal.customer} orders={payModal.orders} company={company}
           onClose={() => setPayModal(null)}
+          reloadOrders={async () => { const r = await af(`${API}/customers/${payModal.customer.id}`); return (await r.json()).orders || []; }}
           onRecorded={() => { setPayModal(null); if (detail) openDetail(detail.customer); }} />
       )}
 

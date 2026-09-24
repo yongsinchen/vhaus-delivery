@@ -575,6 +575,24 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [viewArrival, setViewArrival] = useState(null);
   const [viewLegacy, setViewLegacy] = useState(null); // legacy orders row { id, balance, customer_id } — payments record against it
   const [payOpen, setPayOpen] = useState(false);      // Record Payment modal for the viewed SO
+  const [payOtherOrders, setPayOtherOrders] = useState([]); // this SO's customer's OTHER outstanding orders, for cross-order allocation
+
+  // Opening Record Payment from a specific SO makes THAT SO the "initiating"
+  // order (shown/allocated first — see RecordPaymentModal's initiatingOrderId),
+  // but the customer may have other outstanding orders too. Best-effort: only
+  // fetched when this order resolves to a real customer_id (an unlinked
+  // legacy order falls back to single-order-only payment, same as before).
+  const openRecordPayment = async () => {
+    setPayOpen(true);
+    setPayOtherOrders([]);
+    const custId = viewLegacy?.customer_id;
+    if (!custId) return;
+    try {
+      const res = await fetch(`${API}/customers/${custId}`, { headers: await authHeaders() });
+      const d = await res.json();
+      setPayOtherOrders((d.orders || []).filter(o => o.id !== viewLegacy.id));
+    } catch { /* best-effort — falls back to single-order payment */ }
+  };
   // P1-1 — Active Delivery Order Amendment: the most recent sales_order_amendments
   // row for the order currently open in either the view drawer or the edit
   // drawer (null when there's none). `order`/`legacy_order` from
@@ -1888,7 +1906,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                     {disc > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Discount</p><p className="text-sm font-bold text-red-600">-{money(disc)}</p></div>}
                     <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Deposit</p><p className="text-sm font-bold text-emerald-600">{money(dep)}</p></div>
                     {canPay ? (
-                      <button type="button" onClick={() => setPayOpen(true)} title="Record a payment for this SO"
+                      <button type="button" onClick={openRecordPayment} title="Record a payment for this SO"
                         className="rounded-xl p-2.5 text-center bg-red-50 hover:bg-red-100 ring-1 ring-red-200 hover:ring-red-300 transition-colors cursor-pointer">
                         <p className="text-xs text-gray-400">Balance</p>
                         <p className="text-sm font-bold text-red-600">{money(bal)}</p>
@@ -2132,7 +2150,9 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       )}
 
       {/* Record Payment for the viewed SO — same modal as the Customers page,
-          allocated to this SO's legacy orders row. */}
+          allocated to this SO's legacy orders row plus (when this order
+          resolves to a real customer_id) any of that customer's other
+          outstanding orders, with this SO shown/allocated first. */}
       {payOpen && viewingOrder && viewLegacy?.id && (
         <RecordPaymentModal
           customer={{ id: viewLegacy.customer_id || null, name: viewingOrder.customer_name, phone: viewingOrder.customer_contact }}
@@ -2140,7 +2160,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
             id: viewLegacy.id, so_number: viewingOrder.order_number, order_date: viewingOrder.order_date,
             balance: viewLegacy.balance != null ? Number(viewLegacy.balance) : orderBalance(viewingOrder),
             order_amount: orderTotal(viewingOrder),
-          }]}
+          }, ...payOtherOrders]}
+          initiatingOrderId={viewLegacy.id}
           company={companyInfo}
           onClose={() => setPayOpen(false)}
           onRecorded={async () => {

@@ -6,6 +6,9 @@
 // Props:
 //   customer  { id?, name, phone } — id may be null (payment still links via order)
 //   orders    [{ id (legacy orders.id), so_number, balance, order_amount, order_date }]
+//   initiatingOrderId  optional — the order Record Payment was opened FROM
+//                       (e.g. the Orders SO view); shown/allocated first,
+//                       ahead of the oldest-first suggestion for the rest.
 //   company   receipt header ({ name, reg, address, hotline, email, website, logo })
 //   onClose   () => void
 //   onRecorded () => void — called after a successful record (inside the loading overlay)
@@ -13,6 +16,7 @@ import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
+import { allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2 } from "./paymentAllocation";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -21,55 +25,61 @@ const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFract
 const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
 
 export const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate", "2C2P", "eZbeli"];
+export { allocsFor, tagOutstanding, defaultKind } from "./paymentAllocation";
 
-// Allocation rows for the chosen kind. Deposit collection is only offered on
-// orders that have NO deposit yet (a new order); once an order has a deposit,
-// only its balance can be collected.
-const allocsFor = (orders, kind) => (orders || [])
-  .filter(o => (kind === "deposit" ? !o._hasDeposit : o._hasDeposit))
-  .map(o => ({ order_id: o.id, so_number: o.so_number, balance: Number(o.balance), amount: "" }));
-
-export default function RecordPaymentModal({ customer, orders, company, onClose, onRecorded }) {
+// reloadOrders (optional) — async () => fresh orders array; used to rebuild the
+// allocation preview when the server rejects a payment as stale_balance.
+export default function RecordPaymentModal({ customer, orders, initiatingOrderId, company, onClose, onRecorded, reloadOrders }) {
   const toast = useToast();
   const { withLoading } = useLoading();
 
-  // Tag each outstanding order: does it already have a deposit paid? (Anything
-  // paid means balance < the full order amount.) Deposit collection applies to
-  // orders with none yet; balance collection to those that already have one.
-  const [withBalance] = useState(() => (orders || []).filter(o => Number(o.balance) > 0)
-    .map(o => ({ ...o, _hasDeposit: Number(o.balance) < (Number(o.order_amount) || 0) })));
-  const initialKind = withBalance.some(o => !o._hasDeposit) ? "deposit" : "balance"; // default to deposit only if a no-deposit order exists
+  const [withBalance, setWithBalance] = useState(() => tagOutstanding(orders));
+  const initialKind = defaultKind(withBalance);
 
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payKind, setPayKind] = useState(initialKind); // "deposit" | "balance" — descriptive label on the payment
   const [payRef, setPayRef] = useState("");
   const [payAdmin, setPayAdmin] = useState(""); // instalment admin charges
-  const [payAllocations, setPayAllocations] = useState(() => allocsFor(withBalance, initialKind));
+  const [payAllocations, setPayAllocations] = useState(() => allocsFor(withBalance, initialKind, initiatingOrderId));
   const [payProofs, setPayProofs] = useState([]); // uploaded proof URLs
   const [payUploading, setPayUploading] = useState(false);
   const [paySaving, setPaySaving] = useState(false); // drives button label/disabled
   const paySavingRef = useRef(false); // synchronous guard — blocks a double-click before re-render
+  // One stable key for this Record Payment ATTEMPT — generated once when the
+  // modal mounts (i.e. once per "open Record Payment" action) and reused
+  // across every retry of the SAME attempt (a double-click, or the browser
+  // retrying a timed-out request). Closing and reopening the modal — a
+  // genuinely NEW attempt — remounts the component and mints a new key.
+  const idempotencyKeyRef = useRef(typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const switchPayKind = (kind) => {
     setPayKind(kind);
-    setPayAllocations(allocsFor(withBalance, kind));
+    setPayAllocations(allocsFor(withBalance, kind, initiatingOrderId));
     setPayAmount("");
   };
 
+  // Fills orders oldest-first, each capped at its own outstanding balance —
+  // a starting suggestion only. Finance can edit any row; Confirm stays
+  // disabled until Total Allocated exactly equals Payment Received (never
+  // silently discarding a remainder, never overflowing onto one order).
   const autoAllocate = (total) => {
-    let remaining = Number(total) || 0;
-    setPayAllocations(prev => prev.map(a => {
-      const alloc = Math.min(remaining, a.balance);
-      remaining -= alloc;
-      return { ...a, amount: alloc > 0 ? String(alloc) : "" };
-    }));
+    setPayAllocations(prev => autoAllocateInto(prev, total));
   };
+
+  const payTotalAllocated = round2(payAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+  const payUnallocated = round2((Number(payAmount) || 0) - payTotalAllocated);
+
+  // Every allocation row must be a valid non-negative number (an empty row
+  // means "not allocating to this order" — 0 or blank, never negative).
+  const hasInvalidAllocation = payAllocations.some(a => a.amount !== "" && (!Number.isFinite(Number(a.amount)) || Number(a.amount) < 0));
 
   const submitPayment = async () => {
     if (paySavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
+    if (payUnallocated !== 0) { toast.warning("Total Allocated must equal Payment Received before you can confirm."); return; } // defense in depth — Confirm is already disabled for this
+    if (hasInvalidAllocation) { toast.warning("Every allocation amount must be zero or positive."); return; } // defense in depth — Confirm is already disabled for this
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
     if ((payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && !payRef.trim()) { toast.warning("Please enter the approval code"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
@@ -77,9 +87,33 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
     setPaySaving(true);
     try {
       await withLoading("Recording payment…", async () => {
-        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
+        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind, idempotency_key: idempotencyKeyRef.current }) });
         const d = await res.json();
-        if (!d.payment) throw new Error(d.error || "Failed");
+        if (!d.payment) {
+          if (d.code === "idempotency_conflict") {
+            // Should not happen from a normal double-click (paySavingRef
+            // already blocks that) or a same-payload retry (the backend
+            // replays it) — only from a genuinely different payment somehow
+            // reusing this attempt's key. Fail closed, exactly like the
+            // backend: never silently treat it as a success.
+            throw new Error(d.error || "This payment attempt could not be verified as a retry of itself — please close and reopen to try again.");
+          }
+          if (d.code === "stale_balance") {
+            // Server rejected as stale — never silently reapply old numbers.
+            // Reload current orders/balances and rebuild the allocation
+            // preview before Finance tries again. Without a reloader, clear
+            // the suggested amounts so the stale figures can't be resubmitted.
+            if (reloadOrders) {
+              const fresh = tagOutstanding(await reloadOrders());
+              const kind = defaultKind(fresh);
+              setWithBalance(fresh); setPayKind(kind); setPayAllocations(allocsFor(fresh, kind, initiatingOrderId)); setPayAmount("");
+              throw new Error(`${d.error} Balances reloaded — please review the allocation again.`);
+            }
+            setPayAllocations(prev => prev.map(a => ({ ...a, amount: "" }))); setPayAmount("");
+            throw new Error(`${d.error} Please close and reopen to load the current balance.`);
+          }
+          throw new Error(d.error || "Failed");
+        }
         // Payment is PENDING Finance approval, but the OR is assigned at
         // collection so the salesman can print it now for the customer.
         toast.success(`${money(total)} recorded — pending Finance verification`);
@@ -212,7 +246,7 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-2">Allocate to Orders</label>
-            <p className="text-xs text-gray-400 mb-2">Amount auto-distributed to oldest orders first. Adjust manually if needed.</p>
+            <p className="text-xs text-gray-400 mb-2">{initiatingOrderId != null ? "Amount auto-distributed to this order first, then oldest orders first. Adjust manually if needed." : "Amount auto-distributed to oldest orders first. Adjust manually if needed."}</p>
             <div className="space-y-2">
               {payAllocations.map((a, i) => (
                 <div key={a.order_id} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2">
@@ -220,19 +254,28 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
                     <span className="text-xs font-bold text-violet-700">{a.so_number}</span>
                     <span className="text-xs text-red-500 ml-2">Bal: {money(a.balance)}</span>
                   </div>
-                  <input type="number" value={a.amount} onChange={e => {
-                    const next = [...payAllocations]; next[i] = { ...next[i], amount: e.target.value }; setPayAllocations(next);
+                  <input type="number" min="0" value={a.amount} onChange={e => {
+                    const v = e.target.value;
+                    const clamped = v === "" ? "" : String(Math.max(0, Number(v) || 0));
+                    const next = [...payAllocations]; next[i] = { ...next[i], amount: clamped }; setPayAllocations(next);
                   }} placeholder="0" className="w-24 px-2 py-1 text-sm text-right rounded-lg border border-gray-200 focus:outline-none focus:border-violet-400" />
                 </div>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Allocated: {money(payAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0))} of {money(payAmount)}</p>
+            <div className="border-t border-gray-100 mt-3 pt-2 space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Payment Received</span><span className="font-semibold">{money(payAmount || 0)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Total Allocated</span><span className="font-semibold">{money(payTotalAllocated)}</span></div>
+              <div className="flex justify-between"><span className={payUnallocated !== 0 ? "text-red-600 font-semibold" : "text-gray-500"}>Unallocated</span><span className={`font-semibold ${payUnallocated !== 0 ? "text-red-600" : ""}`}>{money(payUnallocated)}</span></div>
+            </div>
+            {payUnallocated !== 0 && Number(payAmount) > 0 && (
+              <p className="text-xs text-red-600 mt-2">Total Allocated must equal Payment Received before you can confirm. Adjust the allocation above.</p>
+            )}
           </div>
         </div>
         <div className="px-6 py-4 border-t">
-          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0}
+          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0 || payUnallocated !== 0 || hasInvalidAllocation}
             className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {paySaving ? "Recording…" : `Record ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
+            {paySaving ? "Recording…" : `Confirm ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
           </button>
         </div>
       </div>
