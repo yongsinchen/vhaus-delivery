@@ -335,7 +335,7 @@ function CommissionPage() {
   const [holds, setHolds] = useState([]); // eslint-disable-line
   const [incentives, setIncentives] = useState([]);
   const [salesmen, setSalesmen] = useState([]);
-  const [incForm, setIncForm] = useState({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" });
+  const [incForm, setIncForm] = useState({ product_id: "", product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" });
   const [showIncForm, setShowIncForm] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState([]);
@@ -549,7 +549,7 @@ function CommissionPage() {
         const res = await af(`${API}/product-incentives`, { method: "POST", body: JSON.stringify(incForm) });
         const d = await res.json();
         if (!d.incentive) throw new Error(d.error || "Failed");
-        toast.success("Incentive added"); setShowIncForm(false); setIncForm({ product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" }); loadIncentives();
+        toast.success("Incentive added"); setShowIncForm(false); setIncForm({ product_id: "", product_name: "", product_code: "", incentive_amount: "", start_date: "", end_date: "" }); loadIncentives();
       });
     } catch (e) { toast.error(e.message); }
   };
@@ -1213,12 +1213,21 @@ function CommissionPage() {
                     {productResults.length > 0 && (
                       <div className="border border-gray-200 rounded-xl mt-1 max-h-32 overflow-y-auto">
                         {productResults.map(p => (
-                          <button key={p.id} onClick={() => { setIncForm(f => ({ ...f, product_id: p.id, product_code: p.code, product_name: p.name })); setProductSearch(`${p.code} ${p.name}`); setProductResults([]); }}
+                          <button key={p.id} onClick={() => { setIncForm(f => ({ ...f, product_id: p.id, product_code: p.code, product_name: p.name })); setProductSearch(`${p.code} ${p.name}${p.size ? ` — ${p.size}` : ""}`); setProductResults([]); }}
                             className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
-                            <span className="font-mono text-violet-700">{p.code}</span> {p.name}
+                            <span className="font-mono text-violet-700">{p.code}</span> {p.name}{p.size ? <span className="text-gray-500"> — {p.size}</span> : null}
                           </button>
                         ))}
                       </div>
+                    )}
+                    {incForm.product_id ? (
+                      <div className="mt-2 text-xs bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                        <div className="font-medium text-emerald-800">{incForm.product_name || "—"}{incForm.product_code ? ` · ${incForm.product_code}` : ""}</div>
+                        <div className="text-emerald-600 font-mono">Product ID: {incForm.product_id}</div>
+                        <div className="text-gray-500 mt-0.5">This exact variant only — other sizes/variants are not affected.</div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-amber-600">Select an exact product/variant — an incentive with no product is not allowed.</p>
                     )}
                   </div>
                   <div>
@@ -1235,7 +1244,7 @@ function CommissionPage() {
                 </div>
                 <div className="px-6 py-4 border-t flex gap-3 justify-end">
                   <button onClick={() => setShowIncForm(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
-                  <button onClick={saveIncentive} disabled={!incForm.incentive_amount} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 disabled:opacity-50">Add Incentive</button>
+                  <button onClick={saveIncentive} disabled={!incForm.incentive_amount || !incForm.product_id} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 disabled:opacity-50">Add Incentive</button>
                 </div>
               </div>
             </div>
