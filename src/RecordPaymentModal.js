@@ -22,23 +22,41 @@ const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 
 
 export const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate", "2C2P", "eZbeli"];
 
+// URGENT FIX — deterministic suggestion order when neither the business nor
+// this codebase defines a payment-allocation priority: oldest order_date
+// first, then created_at, then immutable id. A UI suggestion only — every
+// row stays editable, and nothing posts until Finance presses Confirm.
+const sortOldestFirst = (list) => [...list].sort((a, b) => {
+  const ad = a.order_date || a.delivery_date || "", bd = b.order_date || b.delivery_date || "";
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  const ac = a.created_at || "", bc = b.created_at || "";
+  if (ac !== bc) return ac < bc ? -1 : 1;
+  return String(a.id) < String(b.id) ? -1 : 1;
+});
+
 // Allocation rows for the chosen kind. Deposit collection is only offered on
 // orders that have NO deposit yet (a new order); once an order has a deposit,
 // only its balance can be collected.
-const allocsFor = (orders, kind) => (orders || [])
-  .filter(o => (kind === "deposit" ? !o._hasDeposit : o._hasDeposit))
+const allocsFor = (orders, kind) => sortOldestFirst((orders || [])
+  .filter(o => (kind === "deposit" ? !o._hasDeposit : o._hasDeposit)))
   .map(o => ({ order_id: o.id, so_number: o.so_number, balance: Number(o.balance), amount: "" }));
 
-export default function RecordPaymentModal({ customer, orders, company, onClose, onRecorded }) {
+// Tag each outstanding order: does it already have a deposit paid? (Anything
+// paid means balance < the full order amount.) Deposit collection applies to
+// orders with none yet; balance collection to those that already have one.
+// Cancelled and Service orders are never payment targets.
+const tagOutstanding = (orders) => (orders || []).filter(o => Number(o.balance) > 0 && o.status !== "Cancelled" && o.type !== "Service")
+  .map(o => ({ ...o, _hasDeposit: Number(o.balance) < (Number(o.order_amount) || 0) }));
+const defaultKind = (list) => (list.some(o => !o._hasDeposit) ? "deposit" : "balance"); // default to deposit only if a no-deposit order exists
+
+// reloadOrders (optional) — async () => fresh orders array; used to rebuild the
+// allocation preview when the server rejects a payment as stale_balance.
+export default function RecordPaymentModal({ customer, orders, company, onClose, onRecorded, reloadOrders }) {
   const toast = useToast();
   const { withLoading } = useLoading();
 
-  // Tag each outstanding order: does it already have a deposit paid? (Anything
-  // paid means balance < the full order amount.) Deposit collection applies to
-  // orders with none yet; balance collection to those that already have one.
-  const [withBalance] = useState(() => (orders || []).filter(o => Number(o.balance) > 0)
-    .map(o => ({ ...o, _hasDeposit: Number(o.balance) < (Number(o.order_amount) || 0) })));
-  const initialKind = withBalance.some(o => !o._hasDeposit) ? "deposit" : "balance"; // default to deposit only if a no-deposit order exists
+  const [withBalance, setWithBalance] = useState(() => tagOutstanding(orders));
+  const initialKind = defaultKind(withBalance);
 
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
@@ -57,19 +75,27 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
     setPayAmount("");
   };
 
+  // Fills orders oldest-first, each capped at its own outstanding balance —
+  // a starting suggestion only. Finance can edit any row; Confirm stays
+  // disabled until Total Allocated exactly equals Payment Received (never
+  // silently discarding a remainder, never overflowing onto one order).
   const autoAllocate = (total) => {
     let remaining = Number(total) || 0;
     setPayAllocations(prev => prev.map(a => {
       const alloc = Math.min(remaining, a.balance);
-      remaining -= alloc;
+      remaining = Math.round((remaining - alloc) * 100) / 100;
       return { ...a, amount: alloc > 0 ? String(alloc) : "" };
     }));
   };
+
+  const payTotalAllocated = Math.round(payAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100;
+  const payUnallocated = Math.round(((Number(payAmount) || 0) - payTotalAllocated) * 100) / 100;
 
   const submitPayment = async () => {
     if (paySavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
+    if (payUnallocated !== 0) { toast.warning("Total Allocated must equal Payment Received before you can confirm."); return; } // defense in depth — Confirm is already disabled for this
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
     if ((payMethod === "Credit Card / Debit Card" || payMethod === "Instalment") && !payRef.trim()) { toast.warning("Please enter the approval code"); return; }
     const allocations = payAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
@@ -79,7 +105,23 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
       await withLoading("Recording payment…", async () => {
         const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind }) });
         const d = await res.json();
-        if (!d.payment) throw new Error(d.error || "Failed");
+        if (!d.payment) {
+          if (d.code === "stale_balance") {
+            // Server rejected as stale — never silently reapply old numbers.
+            // Reload current orders/balances and rebuild the allocation
+            // preview before Finance tries again. Without a reloader, clear
+            // the suggested amounts so the stale figures can't be resubmitted.
+            if (reloadOrders) {
+              const fresh = tagOutstanding(await reloadOrders());
+              const kind = defaultKind(fresh);
+              setWithBalance(fresh); setPayKind(kind); setPayAllocations(allocsFor(fresh, kind)); setPayAmount("");
+              throw new Error(`${d.error} Balances reloaded — please review the allocation again.`);
+            }
+            setPayAllocations(prev => prev.map(a => ({ ...a, amount: "" }))); setPayAmount("");
+            throw new Error(`${d.error} Please close and reopen to load the current balance.`);
+          }
+          throw new Error(d.error || "Failed");
+        }
         // Payment is PENDING Finance approval, but the OR is assigned at
         // collection so the salesman can print it now for the customer.
         toast.success(`${money(total)} recorded — pending Finance verification`);
@@ -226,13 +268,20 @@ export default function RecordPaymentModal({ customer, orders, company, onClose,
                 </div>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Allocated: {money(payAllocations.reduce((s, a) => s + (Number(a.amount) || 0), 0))} of {money(payAmount)}</p>
+            <div className="border-t border-gray-100 mt-3 pt-2 space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Payment Received</span><span className="font-semibold">{money(payAmount || 0)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Total Allocated</span><span className="font-semibold">{money(payTotalAllocated)}</span></div>
+              <div className="flex justify-between"><span className={payUnallocated !== 0 ? "text-red-600 font-semibold" : "text-gray-500"}>Unallocated</span><span className={`font-semibold ${payUnallocated !== 0 ? "text-red-600" : ""}`}>{money(payUnallocated)}</span></div>
+            </div>
+            {payUnallocated !== 0 && Number(payAmount) > 0 && (
+              <p className="text-xs text-red-600 mt-2">Total Allocated must equal Payment Received before you can confirm. Adjust the allocation above.</p>
+            )}
           </div>
         </div>
         <div className="px-6 py-4 border-t">
-          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0}
+          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0 || payUnallocated !== 0}
             className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {paySaving ? "Recording…" : `Record ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
+            {paySaving ? "Recording…" : `Confirm ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
           </button>
         </div>
       </div>
