@@ -1195,19 +1195,29 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
   // OrderViewModal — Dashboard / Delivery Schedule / Calendar / Today's
   // Deliveries / Flagged / Global Search). Those surfaces only know the SO
   // number (the one identifier the legacy `orders` row and this page's
-  // `sales_orders` row share), so resolve it here — the same lookup the old
-  // legacy edit form already used — then hand off to the SAME openEdit()
-  // every row in this page's own list uses. No amendment/lineage logic is
-  // duplicated in App.js; it all still lives here, exactly once.
+  // `sales_orders` row share), so resolve it here, then hand off to the SAME
+  // openEdit() every row in this page's own list uses. No amendment/lineage
+  // logic is duplicated in App.js; it all still lives here, exactly once.
+  //
+  // GET /sales-orders's own `search` param is `order_number.ilike.%term%`
+  // (server.js) — a SUBSTRING match with no relevance ranking, so "5607"
+  // also matches "56070", "56071", etc. Company scoping is already enforced
+  // server-side (getActiveCompanyId), but exact-order identity is not — this
+  // page must guarantee that itself: fetch a generous candidate page (the
+  // server's own max `limit`, 100 — real SO-number collisions on a short
+  // digit substring within one company are far below that), then require an
+  // exact string match on `order_number` before ever calling openEdit().
+  // No exact match = fail closed, never open a fuzzy neighbor as a fallback.
   useEffect(() => {
     if (!editRequest?.soNumber) return;
     (async () => {
       try {
         const headers = await authHeaders();
-        const res = await fetch(`${API}/sales-orders?${new URLSearchParams({ search: editRequest.soNumber, limit: 1 })}`, { headers });
+        const res = await fetch(`${API}/sales-orders?${new URLSearchParams({ search: editRequest.soNumber, limit: 100 })}`, { headers });
         const d = await res.json();
-        const order = (d.orders || [])[0];
-        if (!order) { toast.error(`Order ${editRequest.soNumber} not found`); return; }
+        const target = String(editRequest.soNumber).trim();
+        const order = (d.data || []).find(o => String(o.order_number).trim() === target);
+        if (!order) { toast.error(`Could not find the exact order ${editRequest.soNumber} to edit.`); return; }
         await openEdit(order);
       } catch {
         toast.error("Network error loading order");
