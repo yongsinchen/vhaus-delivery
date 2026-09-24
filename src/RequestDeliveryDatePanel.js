@@ -4,8 +4,9 @@
 // server-side: 10-day auto-approval, DO target validation, superseding an
 // older open request for the same target.
 import React, { useState, useEffect, useCallback } from "react";
-import { supabase } from "./AuthContext";
+import { supabase, useAuth } from "./AuthContext";
 import { useToast } from "./UIComponents";
+import DeliveryDateRequestActions, { canChangeRequest } from "./DeliveryDateRequestActions";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -32,6 +33,7 @@ const doItemSummary = (dord) => (dord.delivery_order_items || [])
 
 export default function RequestDeliveryDatePanel({ order, onChanged }) {
   const toast = useToast();
+  const { user } = useAuth();
   const soNumber = order?.order_number;
   const [requests, setRequests] = useState(null); // this user's requests for this SO, newest first
   const [formOpen, setFormOpen] = useState(false);
@@ -112,6 +114,9 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
               <span className="text-gray-600">{fmt(r.original_date)} → <b className="text-gray-900">{fmt(r.requested_date)}</b></span>
             </div>
             {r.remark && <p className="text-gray-500">📝 {r.remark}</p>}
+            {canChangeRequest(r, user) && (
+              <DeliveryDateRequestActions request={r} onChanged={() => { loadRequests(); onChanged?.(); }} />
+            )}
             {r.status === "needs_reschedule" && Array.isArray(r.alternative_dates) && r.alternative_dates.length > 0 && (
               <div className="pt-1">
                 {r.decision_note && <p className="text-amber-700 mb-1">{r.decision_note}</p>}

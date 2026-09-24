@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
+import DeliveryDateRequestActions, { AmendDeliveryDateRequestModal, canChangeRequest } from "./DeliveryDateRequestActions";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -27,8 +28,9 @@ const STATUS = {
 };
 
 function DeliveryDateRequestsPage() {
-  const { user } = useAuth(); // eslint-disable-line no-unused-vars
+  const { user } = useAuth();
   const toast = useToast();
+  const [amendFor, setAmendFor] = useState(null); // own open request being amended — dialog hosted here (Card remounts each render)
   const [rows, setRows] = useState([]);
   const [isApprover, setIsApprover] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -252,6 +254,9 @@ function DeliveryDateRequestsPage() {
           {r.remark && <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded-lg px-2 py-1.5">📝 {r.remark}</p>}
           <p className="text-xs text-gray-400 mt-1">by {r.requested_by_name || "salesman"} · {new Date(r.created_at).toLocaleDateString("en-MY")}</p>
           <button onClick={() => openDetail(r)} className="mt-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 inline-flex items-center gap-1">🔍 View order details</button>
+          {canChangeRequest(r, user) && (
+            <div className="mt-2"><DeliveryDateRequestActions request={r} onAmend={setAmendFor} onChanged={load} /></div>
+          )}
         </div>
         {isApprover && (r.status === "pending" || r.status === "needs_reschedule") && (
           <div className="flex flex-col gap-1.5 shrink-0">
@@ -536,6 +541,11 @@ function DeliveryDateRequestsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {amendFor && (
+        <AmendDeliveryDateRequestModal request={amendFor} onClose={() => setAmendFor(null)}
+          onSaved={() => { setAmendFor(null); load(); }} />
       )}
 
       {doFor && (
