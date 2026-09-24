@@ -3,6 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
+import RecordPaymentModal from "./RecordPaymentModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -515,6 +516,10 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   // the Delivery Date Approvals page) create DOs from the SO view; everyone
   // else requests a delivery date there instead. UX only — server authorizes.
   const isDateApprover = ["master", "manager", "operation_manager", "company_admin"].includes((activeRoleKey || user?.role || "").toLowerCase());
+  // Who can record a payment — mirrors the server's ORDER_ROLES on
+  // POST /payments/record, which checks the BASE users.role (part_time is
+  // normalized to salesman). UX only — the server authorizes.
+  const canRecordPayment = ["master", "manager", "company_admin", "salesman", "part_time", "sales_manager", "branch_operation_admin"].includes((user?.role || "").toLowerCase());
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
@@ -559,6 +564,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [arrivalItems, setArrivalItems] = useState(null);
   const [viewingOrder, setViewingOrder] = useState(null); // read-only detail view
   const [viewArrival, setViewArrival] = useState(null);
+  const [viewLegacy, setViewLegacy] = useState(null); // legacy orders row { id, balance, customer_id } — payments record against it
+  const [payOpen, setPayOpen] = useState(false);      // Record Payment modal for the viewed SO
   // P1-1 — Active Delivery Order Amendment: the most recent sales_order_amendments
   // row for the order currently open in either the view drawer or the edit
   // drawer (null when there's none). `order`/`legacy_order` from
@@ -747,6 +754,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
           bank: d.settings.bank_account || DEFAULT_COMPANY.bank,
           branches_display: d.settings.branches_display || DEFAULT_COMPANY.branches_display,
           logo: d.settings.logo_url || DEFAULT_COMPANY.logo,
+          email: d.settings.email || "", website: d.settings.website || "", // Official Receipt header
         });
       }
       try {
@@ -984,6 +992,7 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       await withLoading("Loading order…", async () => {
         const { order: full, legacy_order, pending_amendment } = await getFullOrder(o);
         setViewArrival(parseLegacyArrival(legacy_order));
+        setViewLegacy(legacy_order || null);
         setOrderedMarks(readOrderedMarks(user?.id, full?.id ?? o.id));
         setViewingOrder(full);
         setPendingAmendment(pending_amendment);
@@ -1736,7 +1745,11 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
               const gst = view.gst_waived ? 0 : (Number(view.gst_amount) || 0);
               const total = sub - disc + gst;
               const dep = Number(view.deposit) || 0;
-              const bal = total - dep;
+              // Outstanding balance. On the canonical view prefer the legacy
+              // row's balance — it's what payments recompute and it includes
+              // instalment admin charges; SO math is the fallback.
+              const bal = !showingProposed && viewLegacy?.balance != null ? Number(viewLegacy.balance) : total - dep;
+              const canPay = canRecordPayment && !showingProposed && !!viewLegacy?.id && bal > 0.005 && o.status !== "cancelled";
               return (<>
                 <div className="sticky top-0 bg-white border-b px-5 py-3 z-10">
                   <div className="flex items-center justify-between">
@@ -1822,7 +1835,16 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                     {gst > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">GST</p><p className="text-sm font-bold text-gray-600">{money(gst)}</p></div>}
                     {disc > 0 && <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Discount</p><p className="text-sm font-bold text-red-600">-{money(disc)}</p></div>}
                     <div className="bg-gray-50 rounded-xl p-2.5 text-center"><p className="text-xs text-gray-400">Deposit</p><p className="text-sm font-bold text-emerald-600">{money(dep)}</p></div>
-                    <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-red-50" : "bg-emerald-50"}`}><p className="text-xs text-gray-400">Balance</p><p className={`text-sm font-bold ${bal > 0 ? "text-red-600" : "text-emerald-600"}`}>{money(bal)}</p></div>
+                    {canPay ? (
+                      <button type="button" onClick={() => setPayOpen(true)} title="Record a payment for this SO"
+                        className="rounded-xl p-2.5 text-center bg-red-50 hover:bg-red-100 ring-1 ring-red-200 hover:ring-red-300 transition-colors cursor-pointer">
+                        <p className="text-xs text-gray-400">Balance</p>
+                        <p className="text-sm font-bold text-red-600">{money(bal)}</p>
+                        <p className="text-[10px] font-semibold text-red-500 mt-0.5">💰 Record payment</p>
+                      </button>
+                    ) : (
+                      <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-red-50" : "bg-emerald-50"}`}><p className="text-xs text-gray-400">Balance</p><p className={`text-sm font-bold ${bal > 0 ? "text-red-600" : "text-emerald-600"}`}>{money(bal)}</p></div>
+                    )}
                   </div>
 
                   {/* Delivery info */}
@@ -1995,6 +2017,29 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
             })()}
           </div>
         </div>
+      )}
+
+      {/* Record Payment for the viewed SO — same modal as the Customers page,
+          allocated to this SO's legacy orders row. */}
+      {payOpen && viewingOrder && viewLegacy?.id && (
+        <RecordPaymentModal
+          customer={{ id: viewLegacy.customer_id || null, name: viewingOrder.customer_name, phone: viewingOrder.customer_contact }}
+          orders={[{
+            id: viewLegacy.id, so_number: viewingOrder.order_number, order_date: viewingOrder.order_date,
+            balance: viewLegacy.balance != null ? Number(viewLegacy.balance) : orderBalance(viewingOrder),
+            order_amount: orderTotal(viewingOrder),
+          }]}
+          company={companyInfo}
+          onClose={() => setPayOpen(false)}
+          onRecorded={async () => {
+            setPayOpen(false);
+            try {
+              const { order: full, legacy_order } = await getFullOrder(viewingOrder);
+              if (full) setViewingOrder(full);
+              setViewLegacy(legacy_order || null);
+            } catch { /* drawer keeps prior numbers */ }
+            loadOrders(page);
+          }} />
       )}
 
       {/* Create Delivery Order modal (Phase 2B) */}
