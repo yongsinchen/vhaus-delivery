@@ -7,6 +7,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Orders page: glow on the SO card picked from "Upcoming deliveries". */
+@keyframes so-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(201, 163, 107, 0.9), 0 0 14px 2px rgba(201, 163, 107, 0.45); }
+  50%      { box-shadow: 0 0 0 3px rgba(201, 163, 107, 1),   0 0 28px 8px rgba(201, 163, 107, 0.6); }
+}
+.so-glow {
+  animation: so-glow 1.1s ease-in-out 3;
+  border-color: #c9a36b !important;
+  background-color: #fffaf1 !important;
+}
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;

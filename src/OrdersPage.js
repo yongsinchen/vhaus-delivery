@@ -137,6 +137,20 @@ const TERMS = [
 
 const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
+// Order total and outstanding balance — same formula as the detail view.
+// sales_orders.deposit is the amount paid to date (kept in sync with payments).
+const orderTotal = (o) => (Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0));
+const orderBalance = (o) => orderTotal(o) - (Number(o.deposit) || 0);
+const hasBalanceDue = (o) => orderBalance(o) > 0.005 && !["draft", "cancelled"].includes(o.status);
+
+// "Upcoming deliveries" panel. delivery_date is a plain TEXT YYYY-MM-DD in the
+// company's local calendar, so compare against the LOCAL date, not UTC.
+const UPCOMING_DAYS = 7;
+const localYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const daysBetween = (fromYmd, toYmd) => Math.round((new Date(`${toYmd}T00:00:00`) - new Date(`${fromYmd}T00:00:00`)) / 86400000);
+const dayLabel = (n) => (n === 0 ? "Today" : n === 1 ? "Tomorrow" : `In ${n} days`);
+const DAY_CHIP = (n) => (n === 0 ? "bg-[#b8894d] text-white" : n === 1 ? "bg-[#dcc195] text-[#5c4322]" : "bg-[#efe3cc] text-[#7a5c34]");
+
 // P1-1: submitted-at / reviewed-at timestamps on amendment banners.
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 
@@ -523,6 +537,15 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [perPage, setPerPage] = useState(50);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Upcoming deliveries (next UPCOMING_DAYS days) — independent of list filters/paging
+  const [today, setToday] = useState(() => localYmd(new Date()));
+  const [upcoming, setUpcoming] = useState([]);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [upcomingOpen, setUpcomingOpen] = useState(() => { try { return localStorage.getItem("ordersUpcomingOpen") !== "0"; } catch { return true; } });
+  const [glowId, setGlowId] = useState(null);   // SO card currently glowing in the list
+  const pendingFocus = useRef(null);            // SO picked from the panel that isn't on the loaded page yet
+  const glowTimer = useRef(null);
+
   // Order builder drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [step, setStep] = useState(1); // Add-order wizard: 1 customer · 2 items+discount · 3 payment
@@ -626,6 +649,56 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   // Reset to page 1 when filters or sort change. sortKey must be here — the sort
   // dropdown only calls setSortKey, so without it a sort change never re-fetches.
   useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+
+  // Keep "today" live so the upcoming window rolls over at midnight without a reload.
+  useEffect(() => {
+    const t = setInterval(() => setToday(localYmd(new Date())), 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  const loadUpcoming = useCallback(async () => {
+    if (!companyId) return;
+    setUpcomingLoading(true);
+    try {
+      const end = new Date(`${today}T00:00:00`);
+      end.setDate(end.getDate() + UPCOMING_DAYS);
+      const params = new URLSearchParams({ date_from: today, date_to: localYmd(end), sort_by: "delivery_date", sort_order: "asc", limit: 100, page: 1 });
+      const res = await fetch(`${API}/sales-orders?${params}`, { headers: await authHeaders() });
+      const d = await res.json();
+      const list = (d.data || [])
+        .filter(o => !["draft", "cancelled", "delivered"].includes(o.status) && /^\d{4}-\d{2}-\d{2}/.test(o.delivery_date || ""))
+        .map(o => ({ ...o, _days: daysBetween(today, o.delivery_date.slice(0, 10)) }))
+        .sort((a, b) => a._days - b._days || String(a.delivery_time_slot || "").localeCompare(String(b.delivery_time_slot || "")));
+      setUpcoming(list);
+    } catch { /* keep prior list */ }
+    setUpcomingLoading(false);
+  }, [companyId, today]);
+
+  // Reload with the main list too, so status changes / edits / new orders show up.
+  useEffect(() => { loadUpcoming(); }, [loadUpcoming, orders]);
+
+  const glowOrder = (id) => {
+    setGlowId(id);
+    clearTimeout(glowTimer.current);
+    glowTimer.current = setTimeout(() => setGlowId(null), 3500);
+    requestAnimationFrame(() => document.getElementById(`so-card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+  useEffect(() => () => clearTimeout(glowTimer.current), []);
+
+  // Clicking an upcoming SO: glow it if it's on the loaded page; otherwise search
+  // for its number so the list brings it in (effect below finishes the job).
+  const focusOrder = (o) => {
+    if (orders.some(x => x.id === o.id)) { glowOrder(o.id); return; }
+    if (search === o.order_number) { openView(o); return; } // already searched, still filtered out
+    pendingFocus.current = o;
+    setSearch(o.order_number);
+  };
+  useEffect(() => {
+    const p = pendingFocus.current;
+    if (!p) return;
+    if (orders.some(x => x.id === p.id)) { pendingFocus.current = null; glowOrder(p.id); }
+    else if (debouncedSearch === p.order_number) { pendingFocus.current = null; openView(p); } // other filters hide it — open it directly
+  }, [orders]); // eslint-disable-line
 
   useEffect(() => {
     if (!companyId) return;
@@ -1467,6 +1540,52 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
         </button>
       )}
 
+      {/* Upcoming deliveries — next UPCOMING_DAYS days, closest first. Click an SO to jump to it. */}
+      <div className="rounded-2xl border border-[#e6d8bd] bg-[#f8f2e7]">
+        <button type="button" aria-expanded={upcomingOpen}
+          onClick={() => setUpcomingOpen(v => { const n = !v; try { localStorage.setItem("ordersUpcomingOpen", n ? "1" : "0"); } catch {} return n; })}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left">
+          <span className="flex items-center gap-2 min-w-0">
+            <span className={`text-[#9a7646] text-xs transition-transform ${upcomingOpen ? "rotate-90" : ""}`}>▶</span>
+            <span className="text-sm font-semibold text-[#6b4f2a]">🚚 Upcoming deliveries</span>
+            <span className="text-xs text-[#9a7646]">next {UPCOMING_DAYS} days</span>
+          </span>
+          <span className="flex items-center gap-2 shrink-0">
+            {upcomingLoading && <span className="text-[11px] text-[#9a7646]">updating…</span>}
+            <span className="min-w-6 px-2 py-0.5 rounded-full bg-[#e9dbc0] text-xs font-semibold text-[#6b4f2a] text-center">{upcoming.length}</span>
+          </span>
+        </button>
+        {upcomingOpen && (
+          <div className="border-t border-[#e6d8bd] px-2 py-2">
+            {upcoming.length === 0 ? (
+              <p className="px-2 py-3 text-sm text-[#9a7646]">{upcomingLoading ? "Loading…" : `No deliveries scheduled in the next ${UPCOMING_DAYS} days.`}</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto space-y-1">
+                {upcoming.map(o => (
+                  <button key={o.id} type="button" onClick={() => focusOrder(o)}
+                    title="Show this SO in the list"
+                    className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left transition-colors hover:bg-[#efe3cc] ${glowId === o.id ? "bg-[#efe3cc]" : ""}`}>
+                    <span className={`shrink-0 w-20 text-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${DAY_CHIP(o._days)}`}>{dayLabel(o._days)}</span>
+                    <span className="shrink-0 w-24 text-xs text-[#7a5c34]">
+                      {new Date(`${o.delivery_date.slice(0, 10)}T00:00:00`).toLocaleDateString("en-MY", { weekday: "short", day: "numeric", month: "short" })}
+                      {o.delivery_time_slot && <span className="block text-[10px] text-[#9a7646] truncate">{o.delivery_time_slot}</span>}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-mono text-sm font-medium text-[#6b4f2a]">{o.order_number}</span>
+                        {hasBalanceDue(o) && <span title={`Balance RM ${money(orderBalance(o))} not collected`} className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
+                      </span>
+                      <span className="block text-xs text-gray-600 truncate">{o.customer_name}{o.delivery_type ? ` · ${o.delivery_type}` : ""}</span>
+                    </span>
+                    <span className={`hidden sm:inline shrink-0 px-2 py-0.5 rounded-full text-[11px] font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{statusLabel(o.status)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order # or customer…"
@@ -1517,14 +1636,12 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
         {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
         {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
         {!loading && orders.map(o => {
-          // Same total/balance formula as the detail view. sales_orders.deposit
-          // is the amount paid to date (kept in sync with customer payments).
-          const listTotal = (Number(o.subtotal) || 0) - (Number(o.discount) || 0) + (o.gst_waived ? 0 : (Number(o.gst_amount) || 0));
-          const listBal = listTotal - (Number(o.deposit) || 0);
-          const balanceDue = listBal > 0.005 && !["draft", "cancelled"].includes(o.status);
+          const listTotal = orderTotal(o);
+          const listBal = orderBalance(o);
+          const balanceDue = hasBalanceDue(o);
           return (
-          <div key={o.id} onClick={() => openView(o)}
-            className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors">
+          <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)}
+            className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
