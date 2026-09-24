@@ -513,7 +513,7 @@ function ArrivalDateInput({ value, disabled, onChange, className }) {
   );
 }
 
-function OrdersPage({ onNavigateToAmendments } = {}) {
+function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled } = {}) {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
   // Delivery-date approvers (same roles as the server's DATE_APPROVER_ROLES /
@@ -1190,6 +1190,33 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
     setCustMatches([]); setCustOpen(false); setCustPicked(null);
     setDrawerOpen(true);
   };
+
+  // Canonical entry point for "Edit Order" from OUTSIDE this page (App.js's
+  // OrderViewModal — Dashboard / Delivery Schedule / Calendar / Today's
+  // Deliveries / Flagged / Global Search). Those surfaces only know the SO
+  // number (the one identifier the legacy `orders` row and this page's
+  // `sales_orders` row share), so resolve it here — the same lookup the old
+  // legacy edit form already used — then hand off to the SAME openEdit()
+  // every row in this page's own list uses. No amendment/lineage logic is
+  // duplicated in App.js; it all still lives here, exactly once.
+  useEffect(() => {
+    if (!editRequest?.soNumber) return;
+    (async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/sales-orders?${new URLSearchParams({ search: editRequest.soNumber, limit: 1 })}`, { headers });
+        const d = await res.json();
+        const order = (d.orders || [])[0];
+        if (!order) { toast.error(`Order ${editRequest.soNumber} not found`); return; }
+        await openEdit(order);
+      } catch {
+        toast.error("Network error loading order");
+      } finally {
+        onEditRequestHandled?.();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest]);
 
   // Pick a branch and auto-fill its next running number (new orders only;
   // the salesman can still edit the number afterwards).

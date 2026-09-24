@@ -37,8 +37,6 @@ const authFetch = async (url, opts = {}) => {
   return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touch n Go", "Cheque", "Instalment"];
-const EMPTY_ITEM = { itemCode: "", itemName: "", unit: "1", supplier: "", itemOrderDate: "", supplierSentDate: "", arrivalDate: "" };
-const EMPTY_ORDER = { soNumber: "", customerName: "", address: "", contact: "", orderDate: "", salesman: "", orderAmount: "", balance: "", deliveryDate: "", timeSlot: "", plateNo: "", type: "Delivery", serviceNote: "", remark: "", status: "Pending", items: [{ ...EMPTY_ITEM }] };
 
 // ── Helpers ───────────────────────────────────────────────────────
 const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
@@ -1056,13 +1054,15 @@ export default function App() {
   const [blockedDates, setBlockedDates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [switchingCompany, setSwitchingCompany] = useState(false);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] });
-  const [editId, setEditId] = useState(null);
-  const [showForm, setShowForm] = useState(false);
   const [viewOrder, setViewOrder] = useState(null);
+  // Edit Order (from Dashboard / Delivery Schedule / Calendar / Today's
+  // Deliveries / Flagged / Global Search) navigates into the canonical
+  // OrdersPage editor instead of maintaining a second, lineage-blind edit
+  // form here — see openCanonicalEdit below. `nonce` guarantees the effect
+  // in OrdersPage re-fires even if the same SO is opened twice in a row.
+  const [ordersEditRequest, setOrdersEditRequest] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalResults, setGlobalResults] = useState([]);
@@ -1370,7 +1370,17 @@ export default function App() {
 
   // ── Actions ─────────────────────────────────────────────────────
   const handleView = useCallback(o => setViewOrder(o), []);
-  const handleEdit = o => { setForm({ ...o, items: o.items?.length ? o.items : [{ ...EMPTY_ITEM }] }); setEditId(o.id); setShowForm(true); };
+  // Edit Order — routes to the SAME canonical editor OrdersPage.js's own list
+  // uses (item lineage, critical-field detection, Active DO amendment
+  // routing). This page never re-implements any of that: it only identifies
+  // the order (by SO number — the one stable identifier this legacy `orders`
+  // row and the canonical `sales_orders` row share) and hands off; OrdersPage
+  // resolves it and opens through its own openEdit(), unchanged.
+  const openCanonicalEdit = o => {
+    if (!o?.soNumber) { toast.error("This order has no SO number to edit."); return; }
+    setPage("orders");
+    setOrdersEditRequest({ soNumber: o.soNumber, nonce: Date.now() });
+  };
   const handleDelete = async id => {
     try {
       await withLoading("Deleting order…", async () => {
@@ -1381,39 +1391,6 @@ export default function App() {
       toast.success("Order deleted");
     } catch (e) { toast.error("Failed to delete: " + e.message); }
   };
-  const handleSubmit = async () => {
-    if (!form.soNumber) return alert("SO Number required.");
-    setSaving(true);
-    try {
-      const items = (form.items || []).filter(i => i.itemName).map(i => ({
-        product_name: i.itemName, product_code: i.itemCode, quantity: Number(i.unit) || 1,
-        unit_price: Number(i.unitPrice) || 0, supplier_name: i.supplier || null,
-      }));
-      const body = {
-        order_number: form.soNumber, customer_name: form.customerName, customer_contact: form.contact,
-        customer_address: form.address, salesman_names: form.salesman, order_date: form.orderDate || null, delivery_date: form.deliveryDate || null,
-        delivery_time_slot: form.timeSlot || null, delivery_type: form.type || "Delivery",
-        remark: form.remark || null, status: "confirmed",
-        subtotal: Number(form.orderAmount) || 0, deposit: (Number(form.orderAmount) || 0) - (Number(form.balance) || 0),
-        items,
-      };
-      let res;
-      if (editId) {
-        const listRes = await authFetch(`${BACKEND}/sales-orders?search=${encodeURIComponent(form.soNumber)}&limit=1`);
-        const listData = await listRes.json();
-        const soId = listData?.orders?.[0]?.id;
-        if (soId) {
-          res = await authFetch(`${BACKEND}/sales-orders/${soId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        }
-      } else {
-        res = await authFetch(`${BACKEND}/sales-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      }
-      if (res && !res.ok) { const d = await res.json(); alert("Error: " + (d.error || "Unknown")); setSaving(false); return; }
-      await loadOrders();
-    } catch (e) { alert("Error: " + e.message); }
-    setForm({ ...EMPTY_ORDER, items: [{ ...EMPTY_ITEM }] }); setEditId(null); setShowForm(false); setSaving(false);
-  };
-
   const resolveDoReview = async (id, soNumber=null, itemCode=null) => {
     try {
       await withLoading("Resolving item…", async () => {
@@ -1595,10 +1572,6 @@ export default function App() {
     setGlobalResults([...orderHits, ...serviceHits]);
   };
 
-  const setItem = (idx, k, v) => setForm(p => ({ ...p, items: p.items.map((it, i) => i===idx ? {...it,[k]:v} : it) }));
-  const addItem = () => setForm(p => ({ ...p, items: [...p.items, { ...EMPTY_ITEM }] }));
-  const removeItem = idx => setForm(p => ({ ...p, items: p.items.filter((_,i) => i!==idx) }));
-
   // ── Auth guards ─────────────────────────────────────────────────
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
   if (authLoading) return <FullPageLoader message="Loading PulseOS…" subtext="Preparing your workspace" />;
@@ -1691,7 +1664,7 @@ export default function App() {
     if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
-    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} />;
+    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} editRequest={ordersEditRequest} onEditRequestHandled={() => setOrdersEditRequest(null)} />;
 
     // DELIVERIES
     if (page === "deliveries") return (
@@ -2188,64 +2161,7 @@ export default function App() {
       {/* ── Modals ────────────────────────────────────────────────── */}
 
       {/* Order view */}
-      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); handleEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} onRefresh={loadOrders} />}
-
-      {/* Add/Edit Order form */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white rounded-t-3xl">
-              <h2 className="font-bold text-gray-900">{editId ? "Edit Order" : "New Sales Order"}</h2>
-              <button onClick={() => { setShowForm(false); setEditId(null); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold">×</button>
-            </div>
-            <div className="px-6 py-5 space-y-5">
-              <div>
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Order Info</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[{k:"soNumber",l:"SO Number",req:true},{k:"customerName",l:"Customer Name",req:true},{k:"contact",l:"Contact"},{k:"orderDate",l:"Order Date",t:"date"},{k:"salesman",l:"Salesman"},{k:"orderAmount",l:"Order Amount (RM)",t:"number"},{k:"balance",l:"Balance (RM)",t:"number"}].map(({k,l,t,req})=>(
-                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-1">{l}{req&&<span className="text-red-500"> *</span>}</label><input type={t||"text"} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" /></div>
-                  ))}
-                  <div><label className="text-xs font-medium text-gray-600 block mb-1">Type</label><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white"><option>Delivery</option><option>Service</option></select></div>
-                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-1">Address</label><textarea value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" /></div>
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Delivery Info</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[{k:"deliveryDate",l:"Delivery Date",t:"date"},{k:"timeSlot",l:"Time Slot"},{k:"plateNo",l:"Plate No"}].map(({k,l,t})=>(
-                    <div key={k}><label className="text-xs font-medium text-gray-600 block mb-1">{l}</label><input type={t||"text"} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" /></div>
-                  ))}
-                  <div><label className="text-xs font-medium text-gray-600 block mb-1">Status</label><select value={form.status} onChange={e=>setForm(p=>({...p,status:e.target.value}))} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 bg-white">{["Pending","Out for Delivery","Delivered","Serviced","Flagged"].map(s=><option key={s}>{s}</option>)}</select></div>
-                  {form.type==="Service" && <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-1">Service Note</label><textarea value={form.serviceNote} onChange={e=>setForm(p=>({...p,serviceNote:e.target.value}))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" /></div>}
-                  <div className="sm:col-span-2"><label className="text-xs font-medium text-gray-600 block mb-1">Remark</label><textarea value={form.remark} onChange={e=>setForm(p=>({...p,remark:e.target.value}))} rows={2} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" /></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Items</p>
-                  <button onClick={addItem} className="text-xs bg-violet-50 text-violet-600 border border-violet-200 px-3 py-1 rounded-xl hover:bg-violet-100">+ Add Item</button>
-                </div>
-                <div className="space-y-3">
-                  {form.items.map((item,idx)=>(
-                    <div key={idx} className="bg-gray-50 rounded-2xl p-3 border border-gray-100">
-                      <div className="flex items-center justify-between mb-2"><span className="text-xs font-semibold text-gray-600">Item {idx+1}</span>{form.items.length>1&&<button onClick={()=>removeItem(idx)} className="text-xs text-red-400 hover:text-red-600">Remove</button>}</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {[{k:"itemCode",l:"Item Code"},{k:"itemName",l:"Item Name"},{k:"unit",l:"Qty"},{k:"supplier",l:"Supplier"},{k:"itemOrderDate",l:"Order Date",t:"date"},{k:"supplierSentDate",l:"Sent Date",t:"date"},{k:"arrivalDate",l:"Arrival Date",t:"date"}].map(({k,l,t})=>(
-                          <div key={k}><label className="text-xs text-gray-400 block mb-0.5">{l}</label><input type={t||"text"} value={item[k]} onChange={e=>setItem(idx,k,e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300" /></div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex gap-3 justify-end sticky bottom-0 bg-white rounded-b-3xl">
-              <button onClick={() => { setShowForm(false); setEditId(null); }} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
-              <button onClick={handleSubmit} disabled={saving} className="px-5 py-2 text-sm bg-violet-600 text-white rounded-xl hover:bg-violet-700 disabled:opacity-50">{saving ? "Saving..." : editId ? "Update Order" : "Save Order"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); openCanonicalEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} onRefresh={loadOrders} />}
 
       {/* Global search */}
       {showSearch && (
