@@ -2,15 +2,14 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
-const SERVICE_TYPES = { 1: "Warranty Repair", 2: "Assembly / Installation", 3: "Exchange / Replacement", 4: "Delivery (Missing Item)", 5: "Delivery" };
 // Short date for leg/arrival chips; blank-safe for null/empty values.
 const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
-const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚", 5: "📦" };
 const STATUS_STYLE = {
   open: "bg-gray-100 text-gray-700", scheduled: "bg-blue-100 text-blue-700",
   in_progress: "bg-amber-100 text-amber-700", claiming: "bg-violet-100 text-violet-700",
@@ -27,8 +26,6 @@ const STATUS_TABS = [["open", "Open"], ["scheduled", "Scheduled"], ["resolved", 
 const groupOf = status => Object.keys(STATUS_GROUPS).find(g => STATUS_GROUPS[g].includes(status)) || "open";
 const LEG_STATUS = { pending: "bg-gray-100 text-gray-600", scheduled: "bg-blue-100 text-blue-700", in_progress: "bg-amber-100 text-amber-700", completed: "bg-emerald-100 text-emerald-700" };
 const CLAIM_STATUS = { pending: "bg-gray-100 text-gray-600", submitted: "bg-blue-100 text-blue-700", approved: "bg-violet-100 text-violet-700", received: "bg-emerald-100 text-emerald-700", rejected: "bg-red-100 text-red-600" };
-// Per-item action on a service case (matches backend service_items.action_type).
-const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
 const ITEM_ACTION_ICON = { 1: "🪛", 2: "🔧", 3: "🔄" };
 
 async function toDataUrl(url) {
@@ -313,12 +310,8 @@ function ServicePage() {
     setEditForm(null);
   };
 
-  // Create form
-  const [createForm, setCreateForm] = useState({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, amount: "", customer_name: "", customer_phone: "", customer_address: "" });
-  const [orderSearch, setOrderSearch] = useState("");
-  const [orderResults, setOrderResults] = useState([]);
-  // Line items entered while creating a case (added later via the detail drawer).
-  const [createItems, setCreateItems] = useState([]);
+  // Own pending service request being amended (ServiceCaseFormModal "amend").
+  const [amendReq, setAmendReq] = useState(null);
 
   const [suppliers, setSuppliers] = useState([]); // eslint-disable-line
 
@@ -367,34 +360,6 @@ function ServicePage() {
     setDetailLoading(false);
   };
 
-  const searchOrders = async (q) => {
-    setOrderSearch(q);
-    if (q.length < 2) { setOrderResults([]); return; }
-    // Search real (non-Service) orders to link to, server-side.
-    const res = await af(`${API}/orders?search=${encodeURIComponent(q)}${companyId ? `&company_id=${companyId}` : ""}`);
-    const all = await res.json();
-    setOrderResults((Array.isArray(all) ? all : []).slice(0, 10));
-  };
-
-  const resetCreate = () => { setShowCreate(false); setOrderSearch(""); setCreateItems([]); setCreateForm({ order_id: "", service_type: 1, description: "", service_date: new Date().toISOString().slice(0, 10), delivery_date: "", schedule_tbc: false, amount: "", customer_name: "", customer_phone: "", customer_address: "" }); };
-  const createService = async () => {
-    try {
-      await withLoading(isApprover ? "Creating service case…" : "Submitting request…", async () => {
-        const items = createItems
-          .filter(i => String(i.description || "").trim())
-          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1, arrival_date: i.arrival_date || null }));
-        // Approvers create the case directly; salesmen submit a request that a
-        // PIC must approve before the case (and its delivery legs) exist.
-        const endpoint = isApprover ? "service-cases" : "service-requests";
-        const res = await af(`${API}/${endpoint}`, { method: "POST", body: JSON.stringify({ ...createForm, items }) });
-        const d = await res.json();
-        if (isApprover ? !d.service : !d.request) throw new Error(d.error || "Failed");
-        toast.success(isApprover ? "Service case created" : "Service request submitted for approval");
-        resetCreate();
-        if (isApprover) loadServices(); else { loadRequests(); setTab("requests"); }
-      });
-    } catch (e) { toast.error(e.message); }
-  };
 
   const decideRequest = async (id, action, opts = {}) => {
     let note = opts.note ?? null;
@@ -727,6 +692,12 @@ function ServicePage() {
                         <button onClick={(e) => { e.stopPropagation(); decideRequest(r.id, "reject"); }} className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Reject</button>
                       </div>
                     )}
+                    {canChangeServiceRequest(r, user) && (
+                      <div className="flex gap-1.5">
+                        <button onClick={(e) => { e.stopPropagation(); setAmendReq(r); }} className="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 font-medium">✏️ Amend</button>
+                        <button onClick={async (e) => { e.stopPropagation(); if (await deleteServiceRequest(r, toast)) loadRequests(); }} className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium">🗑 Delete</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -839,144 +810,18 @@ function ServicePage() {
         />
       )}
 
-      {/* Create Modal */}
+      {/* Create Modal — shared with the Orders page SO view */}
       {showCreate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
-            <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
-              <h3 className="font-bold text-gray-900">New Service Case</h3>
-              <button onClick={() => setShowCreate(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
-            </div>
-            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Service Type</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {Object.entries(SERVICE_TYPES).map(([k, v]) => (
-                    <button key={k} onClick={() => setCreateForm(f => ({ ...f, service_type: Number(k) }))}
-                      className={`py-2.5 rounded-xl text-xs font-medium border transition-colors ${createForm.service_type === Number(k) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-gray-700 border-gray-200"}`}>
-                      {TYPE_ICON[k]} {v.split("/")[0]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Link to Order (optional)</label>
-                {createForm.order_id ? (
-                  <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-violet-200 bg-violet-50 text-sm">
-                    <span className="text-violet-700 font-medium truncate">{orderSearch || "Order linked"}</span>
-                    <button onClick={() => { setCreateForm(f => ({ ...f, order_id: "" })); setOrderSearch(""); }}
-                      className="ml-2 text-xs text-gray-500 hover:text-gray-700 shrink-0">Clear</button>
-                  </div>
-                ) : (
-                  <input value={orderSearch} onChange={e => searchOrders(e.target.value)} placeholder="Search SO number or customer..."
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                )}
-                {!createForm.order_id && orderResults.length > 0 && (
-                  <div className="border border-gray-200 rounded-xl mt-1 max-h-32 overflow-y-auto">
-                    {orderResults.map(o => (
-                      <button key={o.id} onClick={() => { setCreateForm(f => ({ ...f, order_id: o.id, customer_name: "", customer_phone: "", customer_address: "" })); setOrderSearch(`${o.so_number} — ${o.customer_name}`); setOrderResults([]); }}
-                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50">
-                        <span className="font-bold text-violet-700">{o.so_number}</span> {o.customer_name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {/* No linked order → capture customer details directly (backend stores
-                  them on the service + its inert delivery order). */}
-              {!createForm.order_id && (
-                <div className="space-y-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
-                  <p className="text-xs font-medium text-gray-500">Customer details</p>
-                  <input value={createForm.customer_name} onChange={e => setCreateForm(f => ({ ...f, customer_name: e.target.value }))}
-                    placeholder="Customer name"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                  <input value={createForm.customer_phone} onChange={e => setCreateForm(f => ({ ...f, customer_phone: e.target.value }))}
-                    placeholder="Contact number"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                  <textarea value={createForm.customer_address} onChange={e => setCreateForm(f => ({ ...f, customer_address: e.target.value }))}
-                    placeholder="Address" rows={2}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                </div>
-              )}
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
-                <textarea value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="What's the issue? What needs to be done?" rows={3}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-              </div>
-              {/* Line items — one row per thing to do, each with its own action.
-                  Optional at creation; can also be added from the detail drawer. */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-medium text-gray-500">Items (optional)</label>
-                  <button type="button" onClick={() => setCreateItems(a => [...a, { description: "", action_type: 2, quantity: 1 }])}
-                    className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Item</button>
-                </div>
-                {createItems.length === 0 ? (
-                  <p className="text-xs text-gray-400">No items — you can also add them after creating the case.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {createItems.map((it, i) => (
-                      <div key={i} className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400 w-4 text-right">{i + 1}.</span>
-                          <input value={it.description} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, description: e.target.value } : x))}
-                            placeholder="e.g. Dining chair"
-                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                          <select value={it.action_type} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, action_type: Number(e.target.value) } : x))}
-                            className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white shrink-0">
-                            {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                          </select>
-                          <input type="number" min="1" value={it.quantity} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
-                            className="w-12 px-1.5 py-1.5 rounded-lg border border-gray-200 text-xs text-center shrink-0" />
-                          <button type="button" onClick={() => setCreateItems(a => a.filter((_, idx) => idx !== i))}
-                            className="text-gray-300 hover:text-red-500 text-base px-1 shrink-0">×</button>
-                        </div>
-                        {/* Arrival date for any item whose part/stock must arrive
-                            before it can be delivered (not just Claim items). */}
-                        <div className="flex items-center gap-2 pl-6">
-                          <span className="text-xs text-gray-400">Arrival date</span>
-                          <input type="date" value={it.arrival_date || ""} onChange={e => setCreateItems(a => a.map((x, idx) => idx === i ? { ...x, arrival_date: e.target.value } : x))}
-                            className="px-2 py-1 rounded-lg border border-gray-200 text-xs" />
-                          <span className="text-xs text-gray-400">optional — leave blank until the item arrives</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Service Creation Date</label>
-                  <input type="date" value={createForm.service_date} onChange={e => setCreateForm(f => ({ ...f, service_date: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Schedule Date</label>
-                  <input type="date" value={createForm.schedule_tbc ? "" : createForm.delivery_date} disabled={createForm.schedule_tbc}
-                    onChange={e => setCreateForm(f => ({ ...f, delivery_date: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400 disabled:bg-gray-100 disabled:text-gray-400" />
-                  <label className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-600">
-                    <input type="checkbox" checked={createForm.schedule_tbc} onChange={e => setCreateForm(f => ({ ...f, schedule_tbc: e.target.checked }))} />
-                    TBC — hidden from delivery route
-                  </label>
-                </div>
-              </div>
-              {Number(createForm.service_type) === 5 && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Amount <span className="text-gray-400">(RM)</span></label>
-                  <input type="number" min="0" step="0.01" inputMode="decimal" value={createForm.amount}
-                    onChange={e => setCreateForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400" />
-                </div>
-              )}
-            </div>
-            <div className="px-6 py-4 border-t flex gap-3 justify-end shrink-0">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm rounded-xl bg-gray-100 text-gray-600">Cancel</button>
-              <button onClick={createService} className="px-5 py-2 text-sm rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700">{isApprover ? "Create" : "Submit for approval"}</button>
-            </div>
-          </div>
-        </div>
+        <ServiceCaseFormModal mode="create" isApprover={isApprover}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => { setShowCreate(false); if (isApprover) loadServices(); else { loadRequests(); setTab("requests"); } }} />
+      )}
+
+      {/* Amend own pending service request */}
+      {amendReq && (
+        <ServiceCaseFormModal mode="amend" request={amendReq}
+          onClose={() => setAmendReq(null)}
+          onSaved={() => { setAmendReq(null); loadRequests(); }} />
       )}
 
       {/* Detail Drawer */}

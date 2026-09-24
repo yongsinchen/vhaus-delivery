@@ -4,6 +4,7 @@ import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import RecordPaymentModal from "./RecordPaymentModal";
+import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -520,6 +521,11 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   // POST /payments/record, which checks the BASE users.role (part_time is
   // normalized to salesman). UX only — the server authorizes.
   const canRecordPayment = ["master", "manager", "company_admin", "salesman", "part_time", "sales_manager", "branch_operation_admin"].includes((user?.role || "").toLowerCase());
+  // Service cases — same split as the Services page: approvers create the case
+  // directly (POST /service-cases); order roles submit a request for approval
+  // (POST /service-requests, the same ORDER_ROLES as payments).
+  const isServiceApprover = ["master", "manager", "operation_manager", "company_admin"].includes((user?.base_role || user?.role || "").toLowerCase());
+  const canCreateService = isServiceApprover || canRecordPayment;
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
@@ -578,6 +584,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
   const [viewShowProposed, setViewShowProposed] = useState(false); // rejected/conflict: expand the proposed version
   const [viewShowChanges, setViewShowChanges] = useState(false);   // rejected/conflict: expand the before→after change list
   const [orderServices, setOrderServices] = useState(null); // services linked to the viewed order
+  const [orderServiceReqs, setOrderServiceReqs] = useState([]); // service_requests for the viewed order (own, or all for approvers)
+  const [serviceForm, setServiceForm] = useState(null);         // { mode: "create" } | { mode: "amend", request }
   const [orderedMarks, setOrderedMarks] = useState(() => new Set()); // item ids ticked "ordered" on the viewed order — see orderedMarksKey
   const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
@@ -996,7 +1004,8 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
         setOrderedMarks(readOrderedMarks(user?.id, full?.id ?? o.id));
         setViewingOrder(full);
         setPendingAmendment(pending_amendment);
-        await Promise.all([loadDeliveryOrders(o.id), loadOrderServices(full)]);
+        setOrderServiceReqs([]);
+        await Promise.all([loadDeliveryOrders(o.id), loadOrderServices(full), loadOrderServiceRequests(full)]);
       });
     } catch (e) { toast.error("Failed to load order: " + e.message); }
   };
@@ -1021,6 +1030,19 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
       const d = await res.json();
       setOrderServices(d.services || []);
     } catch { setOrderServices([]); }
+  };
+
+  // Service approval requests raised for this order. The server already scopes
+  // salesmen to their own; approvers see the company queue.
+  const loadOrderServiceRequests = async (order) => {
+    try {
+      const soNum = order?.order_number || order?.so_number;
+      if (!soNum) { setOrderServiceReqs([]); return; }
+      const res = await fetch(`${API}/service-requests`, { headers: await authHeaders() });
+      if (!res.ok) { setOrderServiceReqs([]); return; }
+      const d = await res.json();
+      setOrderServiceReqs((d.requests || []).filter(r => r.so_number === soNum));
+    } catch { setOrderServiceReqs([]); }
   };
 
   // ── Order CRUD ────────────────────────────────────────────────────
@@ -1988,20 +2010,65 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                       avoid showing the same "pending approval" information
                       twice in one drawer. */}
 
-                  {/* Linked service cases */}
-                  {Array.isArray(orderServices) && orderServices.length > 0 && (
-                    <div className="bg-white border border-gray-200 rounded-xl p-3">
-                      <div className="text-sm font-bold text-gray-700 mb-2">Services ({orderServices.length})</div>
-                      <div className="space-y-1.5">
-                        {orderServices.map(sv => (
-                          <div key={sv.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
-                            <span className="text-gray-700 truncate">{({ 1: "Warranty", 2: "Assembly", 3: "Exchange" })[sv.service_type] || `Type ${sv.service_type}`}{sv.description ? ` — ${sv.description}` : ""}</span>
-                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">{sv.schedule_tbc ? "TBC" : sv.status}</span>
+                  {/* Services — create a case (approvers) or request one (salesmen),
+                      the same flow as the Services page, plus this SO's
+                      requests (own pending ones can be amended / deleted) and
+                      its linked service cases. */}
+                  {(() => {
+                    const cases = Array.isArray(orderServices) ? orderServices : [];
+                    const reqs = orderServiceReqs.filter(r => r.status === "pending" || !r.created_service_id);
+                    const canCreate = canCreateService && !!viewLegacy?.id && o.status !== "cancelled";
+                    if (!canCreate && cases.length === 0 && reqs.length === 0) return null;
+                    const REQ_BADGE = { pending: "bg-amber-100 text-amber-700", approved: "bg-emerald-100 text-emerald-700", rejected: "bg-gray-100 text-gray-500" };
+                    return (
+                      <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-bold text-gray-700">Services ({cases.length})</div>
+                          {canCreate && (
+                            <button onClick={() => setServiceForm({ mode: "create" })} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">+ New Service Case</button>
+                          )}
+                        </div>
+                        {reqs.length > 0 && (
+                          <div className="space-y-1.5">
+                            {reqs.map(r => (
+                              <div key={r.id} className="border border-amber-100 bg-amber-50/40 rounded-lg px-2.5 py-2 text-xs space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span>{TYPE_ICON[r.service_type] || "🔧"}</span>
+                                  <span className="font-medium text-gray-800">{SERVICE_TYPES[r.service_type] || `Type ${r.service_type}`}</span>
+                                  <span className={`px-2 py-0.5 rounded-full font-medium ${REQ_BADGE[r.status] || "bg-gray-100 text-gray-500"}`}>{r.status === "pending" ? "Pending approval" : r.status}</span>
+                                  {r.requested_by_name && r.requested_by !== user?.id && <span className="text-gray-400">by {r.requested_by_name}</span>}
+                                </div>
+                                {r.description && <p className="text-gray-600 truncate">{r.description}</p>}
+                                <p className="text-gray-400">
+                                  {(r.items || []).length > 0 ? `${r.items.length} item(s) · ` : ""}
+                                  {r.schedule_tbc ? "Schedule TBC" : r.delivery_date ? `Schedule ${r.delivery_date}` : "No schedule date"}
+                                </p>
+                                {r.status === "rejected" && r.decision_note && <p className="text-red-500">Rejected: {r.decision_note}</p>}
+                                {canChangeServiceRequest(r, user) && (
+                                  <div className="flex gap-1.5 pt-0.5">
+                                    <button onClick={() => setServiceForm({ mode: "amend", request: r })} className="px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 font-medium">✏️ Amend</button>
+                                    <button onClick={async () => { if (await deleteServiceRequest(r, toast)) loadOrderServiceRequests(o); }} className="px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 font-medium">🗑 Delete</button>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
+                        {cases.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {cases.map(sv => (
+                              <div key={sv.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                                <span className="text-gray-700 truncate">{SERVICE_TYPES[sv.service_type] || `Type ${sv.service_type}`}{sv.description ? ` — ${sv.description}` : ""}</span>
+                                <span className="shrink-0 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">{sv.schedule_tbc ? "TBC" : sv.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : reqs.length === 0 && (
+                          <p className="text-xs text-gray-400">No service cases for this order yet.</p>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Notes & Remark */}
                   {view.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{view.remark}</div>}
@@ -2017,6 +2084,21 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
             })()}
           </div>
         </div>
+      )}
+
+      {/* New service case / amend own pending request for the viewed SO —
+          same form as the Services page, with this SO's order locked in. */}
+      {serviceForm && viewingOrder && (
+        <ServiceCaseFormModal
+          mode={serviceForm.mode}
+          request={serviceForm.request || null}
+          isApprover={isServiceApprover}
+          fixedOrder={viewLegacy?.id ? { id: viewLegacy.id, label: `${viewingOrder.order_number} — ${viewingOrder.customer_name || ""}` } : null}
+          onClose={() => setServiceForm(null)}
+          onSaved={async () => {
+            setServiceForm(null);
+            await Promise.all([loadOrderServices(viewingOrder), loadOrderServiceRequests(viewingOrder)]);
+          }} />
       )}
 
       {/* Record Payment for the viewed SO — same modal as the Customers page,
