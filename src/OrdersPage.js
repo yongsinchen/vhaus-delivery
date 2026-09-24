@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -508,8 +509,12 @@ function ArrivalDateInput({ value, disabled, onChange, className }) {
 }
 
 function OrdersPage({ onNavigateToAmendments } = {}) {
-  const { user, activeCompanyId } = useAuth();
+  const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
+  // Delivery-date approvers (same roles as the server's DATE_APPROVER_ROLES /
+  // the Delivery Date Approvals page) create DOs from the SO view; everyone
+  // else requests a delivery date there instead. UX only — server authorizes.
+  const isDateApprover = ["master", "manager", "operation_manager", "company_admin"].includes((activeRoleKey || user?.role || "").toLowerCase());
   const { withLoading } = useLoading();
   const companyId = activeCompanyId || user?.company_id;
 
@@ -1870,12 +1875,22 @@ function OrdersPage({ onNavigateToAmendments } = {}) {
                     </div>
                   </div>
 
+                  {/* Non-approvers: request a delivery date right here (same flow
+                      as the Delivery Date Requests page). Outside the doData
+                      block — salesmen may not have DELIVERY_ORDER_VIEW. */}
+                  {!isDateApprover && !["cancelled", "delivered"].includes(o.status) && (
+                    <RequestDeliveryDatePanel order={o} onChanged={() => {
+                      loadOrders(page);
+                      getFullOrder(o).then(({ order: full }) => { if (full) setViewingOrder(full); }).catch(() => {});
+                    }} />
+                  )}
+
                   {/* Delivery Orders (shipments) — Phase 2B */}
                   {doData && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-xs font-bold text-gray-500">DELIVERY ORDERS ({doData.delivery_orders.filter(d => d.status !== "cancelled").length})</p>
-                        {o.status !== "cancelled" && doData.items.some(i => i.remaining_qty > 0) && (
+                        {isDateApprover && o.status !== "cancelled" && doData.items.some(i => i.remaining_qty > 0) && (
                           <button onClick={openDoModal} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">+ Create Delivery Order</button>
                         )}
                       </div>
