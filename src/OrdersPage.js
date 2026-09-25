@@ -775,10 +775,20 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
     try {
       const end = new Date(`${today}T00:00:00`);
       end.setDate(end.getDate() + UPCOMING_DAYS);
-      const params = new URLSearchParams({ date_from: today, date_to: localYmd(end), sort_by: "delivery_date", sort_order: "asc", limit: 100, page: 1 });
-      const res = await fetch(`${API}/sales-orders?${params}`, { headers: await authHeaders() });
-      const d = await res.json();
-      const list = (d.data || [])
+      const headers = await authHeaders();
+      // Effective dates: an SO that ships per Delivery Order goes out on its
+      // DOs' dates (a DO reschedule never touches the SO's own date), so use
+      // /upcoming-deliveries. Falls back to SO dates if that isn't live yet.
+      let rows;
+      const res = await fetch(`${API}/upcoming-deliveries?${new URLSearchParams({ from: today, to: localYmd(end) })}`, { headers });
+      if (res.ok) {
+        rows = (await res.json()).deliveries || [];
+      } else {
+        const params = new URLSearchParams({ date_from: today, date_to: localYmd(end), sort_by: "delivery_date", sort_order: "asc", limit: 100, page: 1 });
+        const r2 = await fetch(`${API}/sales-orders?${params}`, { headers });
+        rows = (await r2.json()).data || [];
+      }
+      const list = rows
         .filter(o => !["draft", "cancelled", "delivered"].includes(o.status) && /^\d{4}-\d{2}-\d{2}/.test(o.delivery_date || ""))
         .map(o => ({ ...o, _days: daysBetween(today, o.delivery_date.slice(0, 10)) }))
         .sort((a, b) => a._days - b._days || String(a.delivery_time_slot || "").localeCompare(String(b.delivery_time_slot || "")));
@@ -789,6 +799,15 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
 
   // Reload with the main list too, so status changes / edits / new orders show up.
   useEffect(() => { loadUpcoming(); }, [loadUpcoming, orders]);
+  // Dates also change elsewhere (Delivery Dates approvals, the schedule board,
+  // other users) — refresh when the tab regains focus and every 2 minutes.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") loadUpcoming(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    const t = setInterval(onVisible, 120000);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); clearInterval(t); };
+  }, [loadUpcoming]);
 
   const glowOrder = (id) => {
     setGlowId(id);
@@ -1737,7 +1756,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
             ) : (
               <div className="max-h-72 overflow-y-auto space-y-1">
                 {upcoming.map(o => (
-                  <button key={o.id} type="button" onClick={() => focusOrder(o)}
+                  <button key={`${o.id}-${o.delivery_order_id || "so"}`} type="button" onClick={() => focusOrder(o)}
                     title="Show this SO in the list"
                     className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left transition-colors hover:bg-[#efe3cc] ${glowId === o.id ? "bg-[#efe3cc]" : ""}`}>
                     <span className={`shrink-0 w-20 text-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${DAY_CHIP(o._days)}`}>{dayLabel(o._days)}</span>
@@ -1748,6 +1767,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5">
                         <span className="font-mono text-sm font-medium text-[#6b4f2a]">{o.order_number}</span>
+                        {o.do_number && <span title="Delivery Order — the date shown is this shipment's" className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#efe3cc] text-[#7a5c34]">{o.do_number}</span>}
                         {hasBalanceDue(o) && <span title={`Balance RM ${money(orderBalance(o))} not collected`} className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
                       </span>
                       <span className="block text-xs text-gray-600 truncate">{o.customer_name}{o.delivery_type ? ` · ${o.delivery_type}` : ""}</span>
