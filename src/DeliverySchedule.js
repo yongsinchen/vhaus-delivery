@@ -911,6 +911,16 @@ const postWithBlockRetry = async (url, payload) => {
   return data;
 };
 
+// Linked delivery (delivery date requests linked for the same customer): the
+// other SO numbers this stop is delivered together with.
+function LinkedBadge({ others }) {
+  if (!others || others.length === 0) return null;
+  return (
+    <span title={`Linked delivery — deliver together with SO ${others.join(", ")}`}
+      className="text-[10px] bg-teal-100 text-teal-700 font-semibold px-1.5 py-0.5 rounded whitespace-nowrap">🔗 {others.join(", ")}</span>
+  );
+}
+
 // -- Trip Card (for multi-trip orders in unassigned) -------------------
 function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
   const order = trip.orders || {};
@@ -972,7 +982,7 @@ const ITEM_COLS = ["#", "Code", "Item", "Qty", "Supplier", "Ordered", "Sent", "A
 
 const DO_TERMINAL_STATUSES = ["delivered", "completed", "cancelled"];
 
-const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign }) {
+const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
@@ -1075,6 +1085,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             <span className="text-[11px] text-gray-400 font-medium">#{index + 1}</span>
             <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
             {dord && <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1 py-0.5 rounded" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>}
+            <LinkedBadge others={linkedWith} />
             {isSuperseded && (
               <span className="text-[10px] bg-gray-200 text-gray-500 font-medium px-1.5 py-0.5 rounded-full" title={`Superseded ${dord.superseded_at}`}>
                 Superseded{dord.superseded_by?.do_number ? ` → ${dord.superseded_by.do_number}` : ""}
@@ -2374,6 +2385,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   const [company, setCompany] = useState({});     // header/logo for printed DOs
   const [unassignedDos, setUnassignedDos] = useState([]); // Phase 2B: draft Delivery Orders awaiting scheduling
   const [activeDoSoNumbers, setActiveDoSoNumbers] = useState(new Set()); // SOs with active DOs — excluded from whole-order pool
+  // Linked deliveries: so_number -> other so_numbers delivered together
+  // (GET /delivery-links; empty until the backend + migration 106 are live).
+  const [linkedMap, setLinkedMap] = useState(() => new Map());
   const [readiness, setReadiness] = useState(null);
   const [smartPlan, setSmartPlan] = useState(null); // Smart Assign proposal: area clusters of unassigned DOs
   const [assignTeam, setAssignTeam] = useState({}); // Smart Assign: area -> chosen team id (override)
@@ -2443,6 +2457,17 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       setTrips(Array.isArray(tripsData) ? tripsData : []);
     } catch (e) { console.error(e); }
     setLoading(false);
+    // Linked-delivery groups — non-blocking, never fails the board.
+    try {
+      const lr = await af(`${API}/delivery-links`);
+      const ld = lr.ok ? await lr.json() : { groups: [] };
+      const m = new Map();
+      for (const g of (ld.groups || [])) {
+        const nos = [...new Set((g.members || []).map(x => x.so_number).filter(Boolean))];
+        for (const no of nos) m.set(no, nos.filter(n => n !== no));
+      }
+      setLinkedMap(m);
+    } catch { /* keep prior links */ }
   }, [date, companyId, vehicles]);
 
   const loadVehicles = useCallback(async () => {
@@ -2668,10 +2693,33 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } catch (e) { toast.error(e.message); }
   };
 
+  // -- Linked deliveries: keep linked stops on the same team -------------
+  const poolSoNumber = (it) => (it._type === "do" ? it.sales_orders?.order_number : it.so_number);
+  // After a linked stop lands on a team, offer to put its linked partners that
+  // are still in this date's pool on the same team, right after it.
+  const assignLinkedSiblings = async (teamId, assignedSo, nextSort) => {
+    const others = linkedMap.get(assignedSo) || [];
+    if (others.length === 0) return;
+    const siblings = combinedUnassigned.filter(it => (it._type === "order" || it._type === "do") && others.includes(poolSoNumber(it)));
+    if (siblings.length === 0) return;
+    const names = [...new Set(siblings.map(poolSoNumber))].join(", ");
+    if (!window.confirm(`SO ${assignedSo} is a linked delivery with SO ${names}.\n\nAssign ${siblings.length === 1 ? "it" : "them"} to the same team too?`)) return;
+    let sort = nextSort;
+    for (const sib of siblings) {
+      const payload = sib._type === "do"
+        ? { delivery_order_id: sib.id, team_id: teamId, scheduled_date: date, sort_order: sort++ }
+        : { order_id: sib.id, team_id: teamId, scheduled_date: date, sort_order: sort++ };
+      const data = await postWithBlockRetry(`${API}/delivery-schedules`, payload);
+      if (data.error) { if (!data.cancelled) toast.error(`SO ${poolSoNumber(sib)}: ${data.error}`); break; }
+    }
+  };
+
   // -- CRUD: Schedules (assign / unassign / reorder) --------------------
   const assignItem = async (teamId, id, type, setDateOnAssign = false) => await withLoading("Assigning to route…", async () => {
     const team = teams.find(t => String(t.id) === String(teamId));
     const sortOrder = (team?.schedules?.length || 0) + 1;
+    const assignedItem = combinedUnassigned.find(it => String(it.id) === String(id) && (type === "do" ? it._type === "do" : it._type === "order"));
+    const assignedSo = assignedItem ? poolSoNumber(assignedItem) : null;
 
     if (setDateOnAssign && type === "order") {
       await af(`${API}/orders/${id}/set-date`, {
@@ -2685,6 +2733,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
       // with a dispatcher-entered override reason.
       const data = await postWithBlockRetry(`${API}/delivery-schedules`, { delivery_order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder });
       if (data.error) { if (!data.cancelled) alert(data.error); return; }
+      if (assignedSo) await assignLinkedSiblings(teamId, assignedSo, sortOrder + 1);
       loadData();
       return;
     }
@@ -2702,6 +2751,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     } else {
       const data = await postWithBlockRetry(`${API}/delivery-schedules`, { order_id: id, team_id: teamId, scheduled_date: date, sort_order: sortOrder });
       if (data.error) { if (!data.cancelled) alert(data.error); return; }
+      if (assignedSo && type === "order") await assignLinkedSiblings(teamId, assignedSo, sortOrder + 1);
     }
     loadData();
   });
@@ -2730,16 +2780,32 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   }, [withLoading, toast, date, company]);
 
   // Fix #4: reassign a stop to another team without unassign+recreate.
+  // Linked deliveries: moving a linked stop offers to move its linked partners
+  // on this date to the same team, so they stay together.
   const reassignSchedule = useCallback(async (scheduleId, newTeamId) => {
+    const all = teams.flatMap(t => (t.schedules || []).map(s => ({ ...s, _teamId: t.id })));
+    const moved = all.find(s => String(s.id) === String(scheduleId));
+    const others = linkedMap.get(moved?.orders?.so_number) || [];
+    const siblings = all.filter(s => String(s.id) !== String(scheduleId) && String(s._teamId) !== String(newTeamId)
+      && others.includes(s.orders?.so_number) && normalizeScheduleStatus(s.status) !== "Delivered");
+    const moveSiblings = siblings.length > 0 && window.confirm(
+      `SO ${moved.orders.so_number} is a linked delivery with SO ${[...new Set(siblings.map(s => s.orders.so_number))].join(", ")}.\n\nMove ${siblings.length === 1 ? "it" : "them"} to the same team too?`);
     try {
       await withLoading("Reassigning…", async () => {
         const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ team_id: newTeamId }) });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        if (moveSiblings) {
+          for (const s of siblings) {
+            const r2 = await af(`${API}/delivery-schedules/${s.id}`, { method: "PATCH", body: JSON.stringify({ team_id: newTeamId }) });
+            const d2 = await r2.json().catch(() => ({}));
+            if (d2.error) toast.error(`SO ${s.orders?.so_number}: ${d2.error}`);
+          }
+        }
         loadData();
       });
     } catch (e) { toast.error("Failed to reassign: " + e.message); }
-  }, [withLoading, toast, loadData]);
+  }, [withLoading, toast, loadData, teams, linkedMap]);
 
   const updateScheduleStatus = async (scheduleId, status) => {
     await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ status }) });
@@ -2812,6 +2878,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
               <span className="text-xs bg-violet-200 text-violet-800 font-bold px-1.5 py-0.5 rounded">DO</span>
               <span className="font-bold text-violet-700 text-xs">{item.do_number}</span>
               <span className="text-xs text-gray-400">{so.order_number}</span>
+              <LinkedBadge others={linkedMap.get(so.order_number)} />
               {item.status === "failed" && <span className="text-xs bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded">FAILED — retry</span>}
             </div>
             <span className="flex items-center gap-1.5">
@@ -2895,6 +2962,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           <div className="flex items-center gap-1">
             <span className="text-xs bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded">SO</span>
             <span className="font-bold text-blue-700 text-xs">{item.so_number}</span>
+            <LinkedBadge others={linkedMap.get(item.so_number)} />
           </div>
           <span className="flex items-center gap-1.5">
             {item.order_amount != null && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
@@ -3257,6 +3325,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           tripInfo={linkedTrip ? { trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : null}
                           teams={teams}
                           onReassign={readOnly ? null : reassignSchedule}
+                          linkedWith={linkedMap.get(sc.orders?.so_number)}
                           onUnassign={unassignOrder}
                           onDragStart={handleAssignedDragStart}
                           onDrop={handleAssignedDrop}

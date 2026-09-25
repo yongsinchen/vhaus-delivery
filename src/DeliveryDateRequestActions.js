@@ -20,7 +20,7 @@ export const canChangeRequest = (r, user) =>
 
 // Delete (withdraw) an open request after confirming. Returns true on success.
 export async function deleteDeliveryDateRequest(r, toast) {
-  if (!window.confirm(`Delete this delivery date request for SO ${r.so_number}?`)) return false;
+  if (!window.confirm(`Delete this delivery date request for SO ${r.so_number}?${r.link_group_id ? "\n\nThis is a linked delivery — the linked SOs' requests are deleted too." : ""}`)) return false;
   try {
     const res = await af(`${API}/delivery-date-requests/${r.id}`, { method: "DELETE" });
     const d = await res.json().catch(() => ({}));
@@ -57,6 +57,9 @@ export function AmendDeliveryDateRequestModal({ request: r, onClose, onSaved }) 
               <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
             </div>
             <div className="px-5 py-4 space-y-3">
+              {r.link_group_id && (
+                <p className="text-xs text-teal-700 bg-teal-50 rounded-lg px-3 py-2">🔗 Linked delivery — the new date and remark apply to every linked SO.</p>
+              )}
               {r.status === "needs_reschedule" && (
                 <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">The reviewer proposed other dates. Amending sends your new date for review instead.</p>
               )}
