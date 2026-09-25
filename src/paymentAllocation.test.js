@@ -5,7 +5,25 @@
 // suite can never silently drift from the shipped component's behavior.
 // Every fixture is routed through tagOutstanding() before allocsFor(), the
 // same way the component itself always does (withBalance = tagOutstanding(orders)).
-import { sortOldestFirst, allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2 } from "./paymentAllocation";
+import { sortOldestFirst, allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2, allocatedByOrder } from "./paymentAllocation";
+
+describe("allocatedByOrder (Amend pre-fill / balance add-back)", () => {
+  test("sums allocation rows per order, keyed by string id", () => {
+    const m = allocatedByOrder({ amount: 300, order_id: 1, payment_allocations: [{ order_id: 1, amount: 100.1 }, { order_id: 2, amount: 199.9 }] });
+    expect(m.get("1")).toBe(100.1);
+    expect(m.get("2")).toBe(199.9);
+    expect(m.size).toBe(2);
+  });
+  test("legacy payment with no allocation rows counts its whole amount on its own order", () => {
+    const m = allocatedByOrder({ amount: 250, order_id: 7, payment_allocations: [] });
+    expect([...m.entries()]).toEqual([["7", 250]]);
+  });
+  test("rounds to cents and tolerates missing data", () => {
+    expect(allocatedByOrder({ payment_allocations: [{ order_id: 3, amount: 0.1 }, { order_id: 3, amount: 0.2 }] }).get("3")).toBe(0.3);
+    expect(allocatedByOrder(null).size).toBe(0);
+    expect(allocatedByOrder({ amount: 10 }).size).toBe(0);
+  });
+});
 
 describe("tagOutstanding / defaultKind", () => {
   test("excludes zero-balance, Cancelled, and Service orders", () => {

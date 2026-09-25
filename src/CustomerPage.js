@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
-import RecordPaymentModal from "./RecordPaymentModal";
+import RecordPaymentModal, { allocatedByOrder } from "./RecordPaymentModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -110,6 +110,27 @@ function CustomerPage() {
   };
 
   const openPayment = (customer, orders) => setPayModal({ customer, orders });
+
+  // Before Finance decides, a pending payment can be amended / deleted — by
+  // whoever recorded it, or any pending one for Finance and managers. Managers
+  // can still remove any payment (approved too). The server re-checks all of
+  // this under a row lock (migration 107).
+  const myRole = (user?.base_role || user?.role || "").toLowerCase();
+  const isPaymentManager = ["master", "manager", "company_admin", "operation_manager"].includes(myRole);
+  const canChangePending = (p) => !!p?.id && p.approval_status === "pending"
+    && (isPaymentManager || myRole === "finance" || (user?.id && p.recorded_by === user.id));
+  const openAmend = (p) => {
+    // Balances already include this payment, so add its own allocation back —
+    // amending releases it before the corrected split is applied.
+    const cur = allocatedByOrder(p);
+    const known = new Set((detail?.orders || []).map(o => String(o.id)));
+    if ([...cur.keys()].some(id => !known.has(id))) {
+      toast.error("This payment is allocated to an order that isn't on this customer — amend it from Finance.");
+      return;
+    }
+    const orders = (detail?.orders || []).map(o => ({ ...o, balance: Math.round(((Number(o.balance) || 0) + (cur.get(String(o.id)) || 0)) * 100) / 100 }));
+    setPayModal({ customer: detail.customer, orders, amend: p });
+  };
 
   // Reprint the Official Receipt for any past payment or order deposit.
   const reprintReceipt = (p) => {
@@ -370,10 +391,14 @@ function CustomerPage() {
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
                             <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Official Receipt"}
                               className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 {p.approval_status === "rejected" ? "Void copy" : "Receipt"}</button>
-                            {p.id ? (
-                              <button onClick={() => deletePayment(p)} title="Remove payment"
-                                className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">Remove</button>
-                            ) : (
+                            {canChangePending(p) && (
+                              <button onClick={() => openAmend(p)} title="Amend this payment (before Finance approves it)"
+                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">✏️ Amend</button>
+                            )}
+                            {p.id ? ((isPaymentManager || canChangePending(p)) && (
+                              <button onClick={() => deletePayment(p)} title={p.approval_status === "pending" ? "Delete this payment (before Finance approves it)" : "Remove payment"}
+                                className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">{p.approval_status === "pending" ? "🗑 Delete" : "Remove"}</button>
+                            )) : (
                               <span className="text-[10px] text-gray-400" title="Edit the deposit on the order">on order</span>
                             )}
                           </div>
@@ -391,8 +416,9 @@ function CustomerPage() {
       {/* Payment Modal */}
       {payModal && (
         <RecordPaymentModal customer={payModal.customer} orders={payModal.orders} company={company}
+          amendPayment={payModal.amend || null}
           onClose={() => setPayModal(null)}
-          reloadOrders={async () => { const r = await af(`${API}/customers/${payModal.customer.id}`); return (await r.json()).orders || []; }}
+          reloadOrders={payModal.amend ? undefined : async () => { const r = await af(`${API}/customers/${payModal.customer.id}`); return (await r.json()).orders || []; }}
           onRecorded={() => { setPayModal(null); if (detail) openDetail(detail.customer); }} />
       )}
 
