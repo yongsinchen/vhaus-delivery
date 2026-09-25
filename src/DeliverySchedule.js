@@ -1898,6 +1898,14 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   };
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadServiceOrders(); }, [loadServiceOrders]);
+  // Team-date invariant (frontend guard for the DO team-view bug): the per-area
+  // team overrides in `assignTeam` were chosen from ONE date's team list, and
+  // teams are per-date. When the board date changes, a retained override would
+  // point at another date's team and get sent with the new scheduled_date —
+  // exactly the cross-date team_id that orphaned SO21447/DO2609-0144. Clear it
+  // so the operator re-selects from the new date's teams (the backend also
+  // fails closed on a cross-date team via checkScheduleTeamDate).
+  useEffect(() => { setAssignTeam({}); }, [date]);
 
   const activeVehicles = vehicles.filter(v => v.status === "Active");
 
