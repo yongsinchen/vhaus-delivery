@@ -157,6 +157,78 @@ const dayLabel = (n) => (n === 0 ? "Today" : n === 1 ? "Tomorrow" : `In ${n} day
 const ORDER_ITEMS_REMIND_DAYS = 45;
 const DAY_CHIP = (n) => (n === 0 ? "bg-[#b8894d] text-white" : n === 1 ? "bg-[#dcc195] text-[#5c4322]" : "bg-[#efe3cc] text-[#7a5c34]");
 
+// ── Delivery-readiness card art ────────────────────────────────────
+// Once every item has an arrival date the SO is ready to deliver, so its list
+// card carries a faint illustration (fades in from the right, behind the text):
+//   boxes · beige  — all arrived, no delivery date requested yet (reminder)
+//   boxes · green  — a delivery date request is pending review
+//   truck · green  — the date is approved (or a Delivery Order already exists)
+const ART = {
+  beige: { top: "#ecdcbd", left: "#d9bf92", right: "#c6a674", tape: "#f5ebd8", label: "#fbf7ef", stroke: "#b8894d" },
+  green: { top: "#c3e6cf", left: "#90cda8", right: "#6db58a", tape: "#e0f3e7", label: "#f4fbf6", stroke: "#2f8f5b" },
+};
+function readinessOf(o) {
+  if (o._all_arrived !== true || ["draft", "cancelled", "delivered"].includes(o.status)) return null;
+  if (o._delivery_request === "approved" || o._has_do) return "approved";
+  if (o._delivery_request === "pending" || o._delivery_request === "needs_reschedule") return "requested";
+  return "ready";
+}
+const READINESS_HINT = {
+  ready: "All items arrived — request a delivery date",
+  requested: "All items arrived · delivery date requested, awaiting approval",
+  approved: "All items arrived · delivery date approved",
+};
+// One isometric carton: top rhombus + left/right faces, a tape stripe and a label.
+function Carton({ cx, ty, a = 24, h = 30, c }) {
+  const d = a / 2;
+  return (
+    <g>
+      <polygon points={`${cx},${ty} ${cx + a},${ty + d} ${cx},${ty + 2 * d} ${cx - a},${ty + d}`} fill={c.top} />
+      <polygon points={`${cx - a},${ty + d} ${cx},${ty + 2 * d} ${cx},${ty + 2 * d + h} ${cx - a},${ty + d + h}`} fill={c.left} />
+      <polygon points={`${cx},${ty + 2 * d} ${cx + a},${ty + d} ${cx + a},${ty + d + h} ${cx},${ty + 2 * d + h}`} fill={c.right} />
+      {/* tape across the lid and down the front */}
+      <polygon points={`${cx - a / 2 - 3},${ty + d / 2 + 1.5} ${cx - a / 2 + 3},${ty + d / 2 - 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5} ${cx + a / 2 - 3},${ty + 1.5 * d + 1.5}`} fill={c.tape} />
+      <polygon points={`${cx + a / 2 - 3},${ty + 1.5 * d + 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5 + h * 0.28} ${cx + a / 2 - 3},${ty + 1.5 * d + 1.5 + h * 0.28}`} fill={c.tape} />
+      <polygon points={`${cx - a * 0.62},${ty + d * 1.3 + h * 0.62} ${cx - a * 0.3},${ty + d * 1.62 + h * 0.62} ${cx - a * 0.3},${ty + d * 1.62 + h * 0.86} ${cx - a * 0.62},${ty + d * 1.3 + h * 0.86}`} fill={c.label} />
+    </g>
+  );
+}
+function BoxesArt({ c }) {
+  return (
+    <svg viewBox="0 0 124 110" className="h-full w-auto" aria-hidden="true">
+      <Carton cx={86} ty={46} c={c} />
+      <Carton cx={40} ty={42} c={c} />
+      <Carton cx={62} ty={6} c={c} />
+    </svg>
+  );
+}
+function TruckArt({ c }) {
+  return (
+    <svg viewBox="0 0 140 84" className="h-full w-auto" aria-hidden="true" fill="none" stroke={c.stroke} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 22 H34 M16 32 H38 M4 42 H32 M14 52 H36" />
+      <path d="M52 8 H100 V60 H42 Z" />
+      <path d="M100 24 H120 L132 42 V60 H100" />
+      <path d="M107 30 H118 L125 41 H107 Z" strokeWidth="4" />
+      <circle cx="60" cy="64" r="9" fill="#ffffff" />
+      <circle cx="116" cy="64" r="9" fill="#ffffff" />
+      <circle cx="60" cy="64" r="2.5" strokeWidth="3" />
+      <circle cx="116" cy="64" r="2.5" strokeWidth="3" />
+    </svg>
+  );
+}
+// Faint backdrop, right-aligned and masked so it fades into the card on the left.
+function ReadinessArt({ state }) {
+  if (!state) return null;
+  const c = state === "ready" ? ART.beige : ART.green;
+  return (
+    <div aria-hidden="true"
+      className={`pointer-events-none select-none absolute inset-y-1 right-40 sm:right-52 flex items-center ${state === "approved" ? "opacity-[0.22]" : "opacity-[0.38]"}`}
+      style={{ WebkitMaskImage: "linear-gradient(to right, transparent, #000 45%)", maskImage: "linear-gradient(to right, transparent, #000 45%)" }}>
+      {state === "approved" ? <TruckArt c={c} /> : <BoxesArt c={c} />}
+    </div>
+  );
+}
+
 // P1-1: submitted-at / reviewed-at timestamps on amendment banners.
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
 
@@ -1751,10 +1823,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
             && !["draft", "cancelled", "delivered"].includes(o.status);
           const tickedCount = remindOrder ? Math.min(readOrderedMarks(user?.id, o.id).size, itemCount) : 0;
           const allOrdered = remindOrder && tickedCount >= itemCount;
+          const readiness = readinessOf(o);
           return (
-          <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)}
-            className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
-            <div className="flex items-start justify-between gap-3">
+          <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)} title={readiness ? READINESS_HINT[readiness] : undefined}
+            className={`relative overflow-hidden bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
+            <ReadinessArt state={readiness} />
+            <div className="relative flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-sm font-medium text-violet-700">{o.order_number}</span>
