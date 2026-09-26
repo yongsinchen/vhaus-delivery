@@ -32,7 +32,7 @@ export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, d
       </div>
       <div class="copytag">${tag}</div>
     </div>
-    <div class="title">OFFICIAL RECEIPT</div>
+    <div class="title">PAYMENT ACKNOWLEDGE</div>
     <div class="no">No: ${esc(receiptNo || "")}${kindLabel ? ` · ${esc(kindLabel)}` : ""}</div>
     <div class="fields">
       <div><b>RECEIVED FROM:</b> ${esc(customer.name || "")}</div>
@@ -52,7 +52,7 @@ export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, d
       <div class="sig"><div class="line">Company Chop &amp; Signature</div></div>
     </div>
   </div>`;
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Official Receipt ${esc(receiptNo || "")}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payment Acknowledge ${esc(receiptNo || "")}</title>
 <style>
   @page { size: A4 portrait; margin: 8mm; }
   * { box-sizing: border-box; }

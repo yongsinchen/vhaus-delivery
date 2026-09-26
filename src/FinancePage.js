@@ -593,7 +593,7 @@ function FinancePage() {
               <button onClick={() => setDetailTxn(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
-              {detailTxn.or_number != null && <div className="flex justify-between"><span className="text-gray-500">Official Receipt No.</span><span className="font-bold text-gray-900">#{detailTxn.or_number}</span></div>}
+              {detailTxn.or_number != null && <div className="flex justify-between"><span className="text-gray-500">Payment Acknowledge No.</span><span className="font-bold text-gray-900">#{detailTxn.or_number}</span></div>}
               <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className={`font-bold ${detailTxn._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(detailTxn.amount)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{txnType(detailTxn)}{detailTxn._deposit ? " (on order)" : ""}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="text-gray-800">{detailTxn.payment_method || "-"}</span></div>
@@ -651,8 +651,8 @@ function FinancePage() {
             )}
             {detailTxn.approval_note && <div className="px-5 pt-2 text-xs text-gray-500">Note: {detailTxn.approval_note}</div>}
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-gray-100">
-              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Official Receipt #${detailTxn.or_number}` : "No OR number"}</span>
-              <button onClick={() => printReceipt(detailTxn)} className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${apprOf(detailTxn) === "rejected" ? "bg-gray-500 hover:bg-gray-600" : "bg-violet-600 hover:bg-violet-700"}`}>🧾 {apprOf(detailTxn) === "rejected" ? "Print VOID copy" : "Print Official Receipt"}</button>
+              <span className="text-xs text-gray-400">{detailTxn.or_number != null ? `Payment Acknowledge #${detailTxn.or_number}` : "No OR number"}</span>
+              <button onClick={() => printReceipt(detailTxn)} className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium ${apprOf(detailTxn) === "rejected" ? "bg-gray-500 hover:bg-gray-600" : "bg-violet-600 hover:bg-violet-700"}`}>🧾 {apprOf(detailTxn) === "rejected" ? "Print VOID copy" : "Print Payment Acknowledge"}</button>
             </div>
           </div>
         </div>
