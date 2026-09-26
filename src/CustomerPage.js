@@ -454,7 +454,7 @@ function CustomerPage() {
                             {p.approval_status === "pending" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending approval</span>}
                             {p.approval_status === "rejected" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Rejected</span>}
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
-                            <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Payment Acknowledge"}
+                            <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Payment Acknowledgement"}
                               className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 {p.approval_status === "rejected" ? "Void copy" : "Receipt"}</button>
                             {p.id ? (
                               <button onClick={() => deletePayment(p)} title="Remove payment"
