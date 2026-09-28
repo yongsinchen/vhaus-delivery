@@ -615,6 +615,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterBranch, setFilterBranch] = useState(""); // filter by branch
+  const [archiveView, setArchiveView] = useState("exclude"); // exclude = Active, only = Archived, all
   const [filterMonth, setFilterMonth] = useState("");   // filter by order-date month (YYYY-MM)
   const [filterOrderFrom, setFilterOrderFrom] = useState(""); // order-date range start (YYYY-MM-DD)
   const [filterOrderTo, setFilterOrderTo] = useState("");     // order-date range end (YYYY-MM-DD)
@@ -732,6 +733,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
     const headers = await authHeaders();
     const params = new URLSearchParams({ page: p, limit: perPage });
     if (filterStatus) params.set("status", filterStatus);
+    if (archiveView !== "all") params.set("archived", archiveView);
     if (filterBranch) params.set("branch_id", filterBranch);
     if (filterMonth) params.set("month", filterMonth);
     if (filterOrderFrom) params.set("order_from", filterOrderFrom);
@@ -757,11 +759,11 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       const cd = await cRes.json();
       setAmendedCount(cd.total || 0);
     } catch { /* leave prior count */ }
-  }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  }, [companyId, filterStatus, archiveView, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters or sort change. sortKey must be here — the sort
   // dropdown only calls setSortKey, so without it a sort change never re-fetches.
-  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, archiveView, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Keep "today" live so the upcoming window rolls over at midnight without a reload.
   useEffect(() => {
@@ -1691,9 +1693,32 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
         const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify(body) });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || "Failed");
-        // Optimistic local update
-        setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
+        // Optimistic local update. Delivered auto-archives server-side (trigger,
+        // migration 108) — drop it from the Active view to match.
+        const autoArchived = status === "delivered" && !o.archived_at;
+        const next = autoArchived ? { ...o, status, archived_at: new Date().toISOString(), archive_reason: "auto_delivered" } : { ...o, status };
+        setOrders(prev => (autoArchived && archiveView === "exclude")
+          ? prev.filter(ord => ord.id !== o.id)
+          : prev.map(ord => ord.id === o.id ? next : ord));
+        if (autoArchived && archiveView === "exclude") setTotalOrders(n => Math.max(0, n - 1));
+        if (autoArchived && archiveView === "exclude") toast.success(`${o.order_number} delivered — moved to Archived`);
       });
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const setArchived = async (o, archived) => {
+    try {
+      await withLoading(archived ? "Archiving…" : "Unarchiving…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/sales-orders/${o.id}/archive`, { method: "PATCH", headers, body: JSON.stringify({ archived }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "Failed");
+        const leavesView = (archived && archiveView === "exclude") || (!archived && archiveView === "only");
+        setOrders(prev => leavesView ? prev.filter(ord => ord.id !== o.id) : prev.map(ord => ord.id === o.id ? { ...ord, ...d.order } : ord));
+        if (leavesView) setTotalOrders(n => Math.max(0, n - 1));
+        setViewingOrder(v => v?.id === o.id ? (leavesView ? null : { ...v, ...d.order }) : v);
+      });
+      toast.success(`${o.order_number} ${archived ? "archived" : "unarchived"}`);
     } catch (e) { toast.error(e.message); }
   };
 
@@ -1783,6 +1808,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
+        <div className="flex rounded-xl border border-gray-200 bg-white p-0.5" title="Delivered orders are archived automatically">
+          {[["exclude", "Active"], ["only", "Archived"], ["all", "All"]].map(([v, label]) => (
+            <button key={v} onClick={() => setArchiveView(v)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${archiveView === v ? "bg-violet-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>{label}</button>
+          ))}
+        </div>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order # or customer…"
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-64 focus:outline-none focus:border-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
@@ -1829,7 +1860,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       {/* Orders list */}
       <div className="space-y-2">
         {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-        {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
+        {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">{archiveView === "only" ? "No archived orders" : "No orders yet"}</div>}
         {!loading && orders.map(o => {
           const listTotal = orderTotal(o);
           const listBal = orderBalance(o);
@@ -1854,6 +1885,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                   <span className="font-mono text-sm font-medium text-violet-700">{o.order_number}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{statusLabel(o.status)}</span>
                   {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
+                  {o.archived_at && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500" title={o.archive_reason === "auto_delivered" ? "Auto-archived when delivered" : "Archived manually"}>🗄 Archived</span>}
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
                 <p className="text-xs text-gray-400">
@@ -1898,6 +1930,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                       {STATUSES.filter(s => s !== "amended").map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                     </select>
                   )}
+                  <button onClick={e => { e.stopPropagation(); setArchived(o, !o.archived_at); }}
+                    title={o.archived_at ? "Move back to Active" : "Hide from the Active list"}
+                    className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">{o.archived_at ? "Unarchive" : "Archive"}</button>
                 </div>
               </div>
             </div>
@@ -1964,6 +1999,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
+                      <button onClick={() => setArchived(o, !o.archived_at)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">{o.archived_at ? "Unarchive" : "Archive"}</button>
                       {!["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
