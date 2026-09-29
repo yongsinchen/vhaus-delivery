@@ -341,10 +341,21 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     @page { size: A4; margin: 8mm; }
     body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page { width: 725px; margin: 0 auto; }
-    /* Two copies (Customer + Company) — each on its own sheet. */
+    /* Two copies (Customer + Company) — each on its own sheet, however many
+       physical pages a copy itself needs (long orders continue onto Page 2/3+
+       rather than being shrunk to fit one page). */
     .page + .page { page-break-before: always; }
     .copytag { background: rgba(255,255,255,.18); border: 0.5px solid rgba(255,255,255,.6); border-radius: 3px; padding: 1px 8px; font-weight: 800; letter-spacing: 1.5px; }
     .doc { width: 100%; border: 1px solid #1f2937; }
+    /* Pagination: repeat the item-table column header on every printed page
+       (native <thead> behaviour), never split a single item row across a
+       page break, and keep the totals block and the signature block each
+       together as a unit — moving the whole block to the next page rather
+       than splitting it if it doesn't fit where it naturally falls. */
+    table.items thead { display: table-header-group; }
+    table.items tbody tr { page-break-inside: avoid; break-inside: avoid; }
+    .midrow { page-break-inside: avoid; break-inside: avoid; }
+    .sign { page-break-inside: avoid; break-inside: avoid; }
     .sec { border-bottom: 0.5px solid #1f2937; }
     .sec:last-child { border-bottom: none; }
     .pad { padding: 6px 13px; }
@@ -533,27 +544,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     </div></div>`).join("")}
   </body></html>`;
 
-  // Auto-fit to a single A4 page: the .page wrapper is fixed at the A4 printable
-  // width (725px @96dpi), so its rendered height matches the print layout. If the
-  // document is taller than the printable height (~1050px), scale it down to fit.
-  printHtml(html, {
-    onBeforePrint: (w) => {
-      // Scale each copy independently so both fit their own A4 sheet.
-      w.document.querySelectorAll(".page").forEach(page => {
-        const doc = page.querySelector(".doc");
-        if (!doc) return;
-        const maxH = 1050;
-        const h = doc.getBoundingClientRect().height;
-        if (h > maxH) {
-          const s = maxH / h;
-          doc.style.transformOrigin = "top left";
-          doc.style.transform = `scale(${s})`;
-          page.style.height = Math.ceil(h * s) + "px";
-          page.style.overflow = "hidden";
-        }
-      });
-    },
-  });
+  // Natural multi-page A4 flow: a short order fits on one page as-is; a long
+  // one continues onto Page 2 / 3 / ... via ordinary print pagination (the
+  // .midrow/.sign/tr break rules above keep rows and blocks from splitting).
+  // No scaling — readable font size is preserved regardless of order length.
+  printHtml(html);
 }
 
 // Fix #9: arrival-date entry via a bare native <input type="date"> forced
