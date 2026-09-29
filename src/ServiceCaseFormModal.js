@@ -16,7 +16,7 @@
 import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
-import { usePhotoStaging, StagedPhotoList, uploadStagedPhotos } from "./RecordPhotos";
+import RecordPhotos, { usePhotoStaging, StagedPhotoList, uploadStagedPhotos } from "./RecordPhotos";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -66,8 +66,9 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
   const [items, setItems] = useState(() => (amending && Array.isArray(request.items) ? request.items.map(i => ({ description: i.description || "", action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) || 1, arrival_date: i.arrival_date || "" })) : []));
   const [orderSearch, setOrderSearch] = useState(fixedOrder?.label || "");
   const [orderResults, setOrderResults] = useState([]);
-  // Photos — direct create only: uploaded to the case right after it's created.
-  // A request has no case yet, so photos are added once it's approved.
+  // Photos picked on create upload right after the save: to the case (direct)
+  // or to the request, which moves them onto the case on approval. On amend
+  // the request's existing photos are managed in place (RecordPhotos).
   const photos = usePhotoStaging();
   const photoInput = useRef(null);
 
@@ -103,11 +104,15 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
         const d = await res.json();
         if (direct ? !d.service : !d.request) throw new Error(d.error || "Failed");
         let photoError = null;
-        if (direct && photos.staged.length > 0) {
-          try { await uploadStagedPhotos("service-cases", d.service.id, photos.staged); }
-          catch (e) { photoError = e.message; }
+        if (!amending && photos.staged.length > 0) {
+          try {
+            if (direct) await uploadStagedPhotos("service-cases", d.service.id, photos.staged);
+            else await uploadStagedPhotos("service-requests", d.request.id, photos.staged);
+          } catch (e) { photoError = e.message; }
         }
-        if (photoError) toast.error(`Service case created, but the photos didn't upload (${photoError}). Add them from the case.`);
+        if (photoError) toast.error(direct
+          ? `Service case created, but the photos didn't upload (${photoError}). Add them from the case.`
+          : `Request submitted, but the photos didn't upload (${photoError}). Amend the request to add them.`);
         else toast.success(amending ? "Service request updated" : direct ? "Service case created" : "Service request submitted for approval");
         await onSaved?.(d);
       });
@@ -221,7 +226,9 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
               </div>
             )}
           </div>
-          {direct && (
+          {amending ? (
+            <RecordPhotos basePath="service-requests" recordId={request.id} canEdit />
+          ) : (
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-medium text-gray-500">Photos (optional)</label>
@@ -233,7 +240,7 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
                   onChange={e => { photos.pick(e.target.files); e.target.value = ""; }} />
               </div>
               {photos.staged.length === 0
-                ? <p className="text-xs text-gray-400">No photos — you can also add them after creating the case.</p>
+                ? <p className="text-xs text-gray-400">{direct ? "No photos — you can also add them after creating the case." : "No photos — they'll be attached to the case when it's approved."}</p>
                 : <StagedPhotoList staging={photos} />}
             </div>
           )}

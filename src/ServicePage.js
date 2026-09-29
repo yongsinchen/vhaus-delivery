@@ -241,6 +241,8 @@ function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
               </div>
             </div>
           )}
+          {/* Approved requests' photos were moved onto the created case. */}
+          {req.status !== "approved" && <RecordPhotos key={req.id} basePath="service-requests" recordId={req.id} />}
           {req.status === "rejected" && req.decision_note && <p className="text-xs text-red-500">Rejected: {req.decision_note}</p>}
           {isApprover && req.status === "pending" && (
             <div className="border-t pt-4">
