@@ -4,7 +4,6 @@ import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import RecordPaymentModal from "./RecordPaymentModal";
-import RecordPhotos from "./RecordPhotos";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -2134,11 +2133,6 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                       );})}
                     </div>
                   </div>
-
-                  {/* Photos — each with an optional description. Same roles as
-                      order create/edit (canRecordPayment = ORDER_ROLES); the
-                      backend also limits salesmen to their own orders. */}
-                  <RecordPhotos key={o.id} basePath="sales-orders" recordId={o.id} canEdit={canRecordPayment} />
 
                   {/* Non-approvers: request a delivery date right here (same flow
                       as the Delivery Date Requests page). Outside the doData

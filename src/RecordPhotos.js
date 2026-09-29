@@ -25,13 +25,82 @@ const readError = async (res, fallback) => {
 };
 const fmtWhen = v => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? d.toLocaleString("en-MY", { dateStyle: "medium", timeStyle: "short" }) : ""; };
 
+// Photos picked but not uploaded yet: [{ key, file, preview, description }].
+// Shared by the detail drawer (RecordPhotos) and forms that upload after the
+// record is created (ServiceCaseFormModal). Previews are object URLs and are
+// released whenever a photo is dropped and on unmount.
+export function usePhotoStaging() {
+  const toast = useToast();
+  const [staged, setStaged] = useState([]);
+  const stagedRef = useRef(staged);
+  stagedRef.current = staged;
+
+  const clear = useCallback(() => {
+    stagedRef.current.forEach(s => URL.revokeObjectURL(s.preview));
+    setStaged([]);
+  }, []);
+  const remove = (key) => setStaged(prev => prev.filter(x => {
+    if (x.key === key) URL.revokeObjectURL(x.preview);
+    return x.key !== key;
+  }));
+  const setDescription = (key, description) => setStaged(prev => prev.map(x => (x.key === key ? { ...x, description } : x)));
+  const pick = (fileList) => {
+    const files = Array.from(fileList || []);
+    const images = files.filter(f => /^image\//.test(f.type));
+    if (images.length < files.length) toast.error("Only image files can be added");
+    const tooBig = images.filter(f => f.size > MAX_BYTES);
+    if (tooBig.length) toast.error(`${tooBig.map(f => f.name).join(", ")} is larger than 15 MB`);
+    const ok = images.filter(f => f.size <= MAX_BYTES);
+    const room = Math.max(0, MAX_PER_UPLOAD - stagedRef.current.length);
+    if (ok.length > room) toast.error(`Up to ${MAX_PER_UPLOAD} photos per upload`);
+    const added = ok.slice(0, room).map(file => ({
+      key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`,
+      file, preview: URL.createObjectURL(file), description: "",
+    }));
+    if (added.length) setStaged(prev => [...prev, ...added]);
+  };
+  useEffect(() => clear, [clear]);
+
+  return { staged, pick, remove, clear, setDescription, full: staged.length >= MAX_PER_UPLOAD };
+}
+
+// POST staged photos to a record. Returns the created photo rows; throws on failure.
+export async function uploadStagedPhotos(basePath, recordId, staged) {
+  const fd = new FormData();
+  staged.forEach(s => fd.append("photos", s.file));
+  fd.append("descriptions", JSON.stringify(staged.map(s => s.description.trim())));
+  const res = await fetch(`${API}/${basePath}/${recordId}/photos`, { method: "POST", headers: await authHeaders(), body: fd });
+  if (!res.ok) throw new Error(await readError(res, "Photo upload failed"));
+  const d = await res.json();
+  return d.photos || [];
+}
+
+// Thumbnail + optional description textarea per staged photo.
+export function StagedPhotoList({ staging }) {
+  return (
+    <div className="space-y-2">
+      {staging.staged.map(s => (
+        <div key={s.key} className="flex gap-2 items-start">
+          <img src={s.preview} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200 shrink-0" />
+          <textarea rows={2} value={s.description} maxLength={1000} placeholder="Description (optional)"
+            onChange={e => staging.setDescription(s.key, e.target.value)}
+            className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-gray-200" />
+          <button type="button" onClick={() => staging.remove(s.key)} title="Remove"
+            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500">×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function RecordPhotos({ basePath, recordId, canEdit = false }) {
   const toast = useToast();
   const { withLoading } = useLoading();
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [staged, setStaged] = useState([]);      // [{ key, file, preview, description }]
+  const staging = usePhotoStaging();
+  const staged = staging.staged;
   const [editing, setEditing] = useState(null);  // { id, description }
   const [lightbox, setLightbox] = useState(null); // photo row
   const fileRef = useRef(null);
@@ -50,49 +119,16 @@ export default function RecordPhotos({ basePath, recordId, canEdit = false }) {
   }, [url, recordId]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Staged previews are object URLs — release them whenever they're dropped.
-  const stagedRef = useRef(staged);
-  stagedRef.current = staged;
-  const clearStaged = useCallback(() => {
-    stagedRef.current.forEach(s => URL.revokeObjectURL(s.preview));
-    setStaged([]);
-  }, []);
-  const unstage = (key) => setStaged(prev => prev.filter(x => {
-    if (x.key === key) URL.revokeObjectURL(x.preview);
-    return x.key !== key;
-  }));
-  // Switching records (or closing the drawer) drops anything staged.
-  useEffect(() => () => { clearStaged(); setEditing(null); }, [recordId, clearStaged]);
-
-  const pickFiles = (fileList) => {
-    const files = Array.from(fileList || []);
-    const images = files.filter(f => /^image\//.test(f.type));
-    if (images.length < files.length) toast.error("Only image files can be added");
-    const tooBig = images.filter(f => f.size > MAX_BYTES);
-    if (tooBig.length) toast.error(`${tooBig.map(f => f.name).join(", ")} is larger than 15 MB`);
-    const ok = images.filter(f => f.size <= MAX_BYTES);
-    const room = Math.max(0, MAX_PER_UPLOAD - stagedRef.current.length);
-    if (ok.length > room) toast.error(`Up to ${MAX_PER_UPLOAD} photos per upload`);
-    const added = ok.slice(0, room).map(file => ({
-      key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`,
-      file, preview: URL.createObjectURL(file), description: "",
-    }));
-    if (added.length) setStaged(prev => [...prev, ...added]);
-  };
+  // Parents mount this with key={recordId}, so a record switch remounts it and
+  // the staging hook releases anything picked for the previous record.
 
   const uploadStaged = async () => {
     if (staged.length === 0) return;
     try {
       await withLoading(`Uploading ${staged.length} photo${staged.length > 1 ? "s" : ""}…`, async () => {
-        const fd = new FormData();
-        staged.forEach(s => fd.append("photos", s.file));
-        fd.append("descriptions", JSON.stringify(staged.map(s => s.description.trim())));
-        const res = await fetch(url, { method: "POST", headers: await authHeaders(), body: fd });
-        if (!res.ok) throw new Error(await readError(res, "Upload failed"));
-        const d = await res.json();
-        setPhotos(prev => [...prev, ...(d.photos || [])]);
-        clearStaged();
+        const created = await uploadStagedPhotos(basePath, recordId, staged);
+        setPhotos(prev => [...prev, ...created]);
+        staging.clear();
         toast.success("Photos uploaded");
       });
     } catch (e) { toast.error(e.message); }
@@ -155,28 +191,19 @@ export default function RecordPhotos({ basePath, recordId, canEdit = false }) {
           <button onClick={() => fileRef.current?.click()} className="text-xs px-3 py-1 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Photos</button>
         )}
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
-          onChange={e => { pickFiles(e.target.files); e.target.value = ""; }} />
+          onChange={e => { staging.pick(e.target.files); e.target.value = ""; }} />
       </div>
 
       {/* Staged: preview + optional description per photo before upload */}
       {staged.length > 0 && (
         <div className="border border-violet-200 bg-violet-50/40 rounded-xl p-3 mb-2 space-y-2">
           <p className="text-xs font-bold text-violet-700">NEW PHOTOS ({staged.length})</p>
-          {staged.map(s => (
-            <div key={s.key} className="flex gap-2 items-start">
-              <img src={s.preview} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200 shrink-0" />
-              <textarea rows={2} value={s.description} maxLength={1000} placeholder="Description (optional)"
-                onChange={e => setStaged(prev => prev.map(x => (x.key === s.key ? { ...x, description: e.target.value } : x)))}
-                className="flex-1 text-xs px-2 py-1.5 rounded-lg border border-gray-200" />
-              <button onClick={() => unstage(s.key)} title="Remove"
-                className="w-7 h-7 shrink-0 flex items-center justify-center rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500">×</button>
-            </div>
-          ))}
+          <StagedPhotoList staging={staging} />
           <div className="flex items-center gap-2 justify-end">
-            {staged.length < MAX_PER_UPLOAD && (
+            {!staging.full && (
               <button onClick={() => fileRef.current?.click()} className="text-xs px-3 py-1.5 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 mr-auto">+ More</button>
             )}
-            <button onClick={clearStaged} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
+            <button onClick={staging.clear} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Cancel</button>
             <button onClick={uploadStaged} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 font-medium">Upload {staged.length}</button>
           </div>
         </div>
