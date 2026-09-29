@@ -4,6 +4,7 @@ import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import RecordPaymentModal from "./RecordPaymentModal";
+import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -2294,6 +2295,10 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Edit Order</button>
                     <button onClick={() => openSubmitPO(o)} className="py-2.5 px-4 rounded-xl text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">Submit PO</button>
                   </div>
+
+                  {/* Notes log — stored apart from the order, so no amendment
+                      and no order-edit permission needed (migration 111). */}
+                  <OrderNotes key={o.id} orderId={o.id} />
                 </div>
               </>);
             })()}
