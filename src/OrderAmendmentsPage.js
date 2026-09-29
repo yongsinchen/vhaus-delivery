@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, useModal } from "./UIComponents";
+import AmendmentRebaseReview from "./AmendmentRebaseReview";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -168,7 +169,7 @@ function ActiveDoWarning({ snapshot }) {
   );
 }
 
-function AmendmentCard({ a, isApprover, busyId, onDecide }) {
+function AmendmentCard({ a, isApprover, busyId, onDecide, onReviewConflict, supersedeCandidateId, onSupersede }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
 
@@ -194,14 +195,26 @@ function AmendmentCard({ a, isApprover, busyId, onDecide }) {
               className="px-4 py-1.5 text-xs rounded-xl bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-50">Approve</button>
           </div>
         )}
+        {isApprover && a.status === "conflict" && !rejecting && (
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setRejecting(true)} disabled={busyId === a.id}
+              className="px-3 py-1.5 text-xs rounded-xl border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">Reject</button>
+            {supersedeCandidateId && (
+              <button onClick={() => onSupersede(a, supersedeCandidateId)} disabled={busyId === a.id}
+                className="px-3 py-1.5 text-xs rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">Supersede</button>
+            )}
+            <button onClick={() => onReviewConflict(a)} disabled={busyId === a.id}
+              className="px-4 py-1.5 text-xs rounded-xl bg-violet-600 text-white font-medium hover:bg-violet-700 disabled:opacity-50">Review Conflict</button>
+          </div>
+        )}
       </div>
 
       {a.status === "pending" && <ActiveDoWarning snapshot={a.active_do_snapshot} />}
 
       {a.status === "conflict" && (
         <div className="mt-2 bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-xs text-orange-700">
-          <span className="font-bold">⚠ AMENDMENT CONFLICT — </span>
-          The Sales Order changed since this was requested; it was not auto-applied and nothing was overwritten. Reload the order, review the latest values, and ask the salesperson to resubmit if the change is still needed.
+          <span className="font-bold">⚠ ORDER CHANGED SINCE THIS WAS REQUESTED — </span>
+          Some fields now conflict with the salesperson's proposed changes. Use Review Conflict to see exactly what changed and choose how to resolve it.
         </div>
       )}
       {a.status === "rejected" && a.decision_note && (
@@ -238,12 +251,14 @@ function AmendmentCard({ a, isApprover, busyId, onDecide }) {
 export default function OrderAmendmentsPage({ onDecided } = {}) {
   const { user } = useAuth(); // eslint-disable-line no-unused-vars
   const toast = useToast();
+  const { confirm } = useModal();
   const [rows, setRows] = useState([]);
   const [isApprover, setIsApprover] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [statusFilter, setStatusFilter] = useState("pending"); // pending | approved | rejected | conflict | all
   const [busyId, setBusyId] = useState(null);
+  const [reviewingAmendment, setReviewingAmendment] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError("");
@@ -306,6 +321,32 @@ export default function OrderAmendmentsPage({ onDecided } = {}) {
     finally { setBusyId(null); }
   };
 
+  // Supersede is only ever surfaced when a newer, already-approved amendment
+  // exists for the SAME Sales Order — never inferred automatically beyond
+  // that; the Manager still has to click it explicitly.
+  const supersedeCandidateFor = (a) => {
+    const candidate = rows.find(r => r.sales_order_id === a.sales_order_id && r.status === "approved" && r.id !== a.id);
+    return candidate?.id || null;
+  };
+
+  const doSupersede = async (a, supersededBy) => {
+    const ok = await confirm(
+      "This will mark the conflicted amendment as superseded by the newer, already-approved change on the same Sales Order. This cannot be undone.",
+      { title: "Supersede this amendment?", confirmText: "Supersede", variant: "warning" }
+    );
+    if (!ok) return;
+    setBusyId(a.id);
+    try {
+      const res = await af(`${API}/order-amendments/${a.id}/supersede`, { method: "POST", body: JSON.stringify({ superseded_by: supersededBy }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Failed to supersede");
+      toast.success("Amendment marked as superseded.");
+      await load();
+      onDecided?.();
+    } catch (e) { toast.error(e.message); }
+    finally { setBusyId(null); }
+  };
+
   const filtered = rows.filter(r => statusFilter === "all" || r.status === statusFilter);
   const pendingCount = rows.filter(r => r.status === "pending").length;
 
@@ -348,9 +389,20 @@ export default function OrderAmendmentsPage({ onDecided } = {}) {
       {!loading && !loadError && filtered.length > 0 && (
         <div className="space-y-3">
           {filtered.map(a => (
-            <AmendmentCard key={a.id} a={a} isApprover={isApprover} busyId={busyId} onDecide={decide} />
+            <AmendmentCard key={a.id} a={a} isApprover={isApprover} busyId={busyId} onDecide={decide}
+              onReviewConflict={setReviewingAmendment}
+              supersedeCandidateId={a.status === "conflict" ? supersedeCandidateFor(a) : null}
+              onSupersede={doSupersede} />
           ))}
         </div>
+      )}
+
+      {reviewingAmendment && (
+        <AmendmentRebaseReview
+          amendment={reviewingAmendment}
+          onClose={() => setReviewingAmendment(null)}
+          onApplied={async () => { setReviewingAmendment(null); await load(); onDecided?.(); }}
+        />
       )}
     </div>
   );
