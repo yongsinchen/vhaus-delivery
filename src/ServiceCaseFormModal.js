@@ -13,9 +13,10 @@
 //   request     the service_requests row being amended (amend only)
 //   onClose     () => void
 //   onSaved     (result) => void — after a successful save, inside the loading overlay
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
+import RecordPhotos, { usePhotoStaging, StagedPhotoList, uploadStagedPhotos } from "./RecordPhotos";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -65,6 +66,11 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
   const [items, setItems] = useState(() => (amending && Array.isArray(request.items) ? request.items.map(i => ({ description: i.description || "", action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) || 1, arrival_date: i.arrival_date || "" })) : []));
   const [orderSearch, setOrderSearch] = useState(fixedOrder?.label || "");
   const [orderResults, setOrderResults] = useState([]);
+  // Photos picked on create upload right after the save: to the case (direct)
+  // or to the request, which moves them onto the case on approval. On amend
+  // the request's existing photos are managed in place (RecordPhotos).
+  const photos = usePhotoStaging();
+  const photoInput = useRef(null);
 
   // The linked order can't change when it came from the SO, or on amend.
   const orderLocked = !!fixedOrder || amending;
@@ -97,7 +103,17 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
         }
         const d = await res.json();
         if (direct ? !d.service : !d.request) throw new Error(d.error || "Failed");
-        toast.success(amending ? "Service request updated" : direct ? "Service case created" : "Service request submitted for approval");
+        let photoError = null;
+        if (!amending && photos.staged.length > 0) {
+          try {
+            if (direct) await uploadStagedPhotos("service-cases", d.service.id, photos.staged);
+            else await uploadStagedPhotos("service-requests", d.request.id, photos.staged);
+          } catch (e) { photoError = e.message; }
+        }
+        if (photoError) toast.error(direct
+          ? `Service case created, but the photos didn't upload (${photoError}). Add them from the case.`
+          : `Request submitted, but the photos didn't upload (${photoError}). Amend the request to add them.`);
+        else toast.success(amending ? "Service request updated" : direct ? "Service case created" : "Service request submitted for approval");
         await onSaved?.(d);
       });
     } catch (e) { toast.error(e.message); }
@@ -210,6 +226,24 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
               </div>
             )}
           </div>
+          {amending ? (
+            <RecordPhotos basePath="service-requests" recordId={request.id} canEdit />
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-gray-500">Photos (optional)</label>
+                {!photos.full && (
+                  <button type="button" onClick={() => photoInput.current?.click()}
+                    className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-700 hover:bg-violet-200">+ Add Photos</button>
+                )}
+                <input ref={photoInput} type="file" accept="image/*" multiple className="hidden"
+                  onChange={e => { photos.pick(e.target.files); e.target.value = ""; }} />
+              </div>
+              {photos.staged.length === 0
+                ? <p className="text-xs text-gray-400">{direct ? "No photos — you can also add them after creating the case." : "No photos — they'll be attached to the case when it's approved."}</p>
+                : <StagedPhotoList staging={photos} />}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Service Creation Date</label>

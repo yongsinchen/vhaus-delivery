@@ -4,6 +4,7 @@ import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import RecordPaymentModal from "./RecordPaymentModal";
+import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -156,6 +157,78 @@ const dayLabel = (n) => (n === 0 ? "Today" : n === 1 ? "Tomorrow" : `In ${n} day
 // past their date) flag whether every item has been ticked "ordered".
 const ORDER_ITEMS_REMIND_DAYS = 45;
 const DAY_CHIP = (n) => (n === 0 ? "bg-[#b8894d] text-white" : n === 1 ? "bg-[#dcc195] text-[#5c4322]" : "bg-[#efe3cc] text-[#7a5c34]");
+
+// ── Delivery-readiness card art ────────────────────────────────────
+// Once every item has an arrival date the SO is ready to deliver, so its list
+// card carries a faint illustration (fades in from the right, behind the text):
+//   boxes · beige  — all arrived, no delivery date requested yet (reminder)
+//   boxes · green  — a delivery date request is pending review
+//   truck · green  — the date is approved (or a Delivery Order already exists)
+const ART = {
+  beige: { top: "#ecdcbd", left: "#d9bf92", right: "#c6a674", tape: "#f5ebd8", label: "#fbf7ef", stroke: "#b8894d" },
+  green: { top: "#c3e6cf", left: "#90cda8", right: "#6db58a", tape: "#e0f3e7", label: "#f4fbf6", stroke: "#2f8f5b" },
+};
+function readinessOf(o) {
+  if (o._all_arrived !== true || ["draft", "cancelled", "delivered"].includes(o.status)) return null;
+  if (o._delivery_request === "approved" || o._has_do) return "approved";
+  if (o._delivery_request === "pending" || o._delivery_request === "needs_reschedule") return "requested";
+  return "ready";
+}
+const READINESS_HINT = {
+  ready: "All items arrived — request a delivery date",
+  requested: "All items arrived · delivery date requested, awaiting approval",
+  approved: "All items arrived · delivery date approved",
+};
+// One isometric carton: top rhombus + left/right faces, a tape stripe and a label.
+function Carton({ cx, ty, a = 24, h = 30, c }) {
+  const d = a / 2;
+  return (
+    <g>
+      <polygon points={`${cx},${ty} ${cx + a},${ty + d} ${cx},${ty + 2 * d} ${cx - a},${ty + d}`} fill={c.top} />
+      <polygon points={`${cx - a},${ty + d} ${cx},${ty + 2 * d} ${cx},${ty + 2 * d + h} ${cx - a},${ty + d + h}`} fill={c.left} />
+      <polygon points={`${cx},${ty + 2 * d} ${cx + a},${ty + d} ${cx + a},${ty + d + h} ${cx},${ty + 2 * d + h}`} fill={c.right} />
+      {/* tape across the lid and down the front */}
+      <polygon points={`${cx - a / 2 - 3},${ty + d / 2 + 1.5} ${cx - a / 2 + 3},${ty + d / 2 - 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5} ${cx + a / 2 - 3},${ty + 1.5 * d + 1.5}`} fill={c.tape} />
+      <polygon points={`${cx + a / 2 - 3},${ty + 1.5 * d + 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5} ${cx + a / 2 + 3},${ty + 1.5 * d - 1.5 + h * 0.28} ${cx + a / 2 - 3},${ty + 1.5 * d + 1.5 + h * 0.28}`} fill={c.tape} />
+      <polygon points={`${cx - a * 0.62},${ty + d * 1.3 + h * 0.62} ${cx - a * 0.3},${ty + d * 1.62 + h * 0.62} ${cx - a * 0.3},${ty + d * 1.62 + h * 0.86} ${cx - a * 0.62},${ty + d * 1.3 + h * 0.86}`} fill={c.label} />
+    </g>
+  );
+}
+function BoxesArt({ c }) {
+  return (
+    <svg viewBox="0 0 124 110" className="h-full w-auto" aria-hidden="true">
+      <Carton cx={86} ty={46} c={c} />
+      <Carton cx={40} ty={42} c={c} />
+      <Carton cx={62} ty={6} c={c} />
+    </svg>
+  );
+}
+function TruckArt({ c }) {
+  return (
+    <svg viewBox="0 0 140 84" className="h-full w-auto" aria-hidden="true" fill="none" stroke={c.stroke} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 22 H34 M16 32 H38 M4 42 H32 M14 52 H36" />
+      <path d="M52 8 H100 V60 H42 Z" />
+      <path d="M100 24 H120 L132 42 V60 H100" />
+      <path d="M107 30 H118 L125 41 H107 Z" strokeWidth="4" />
+      <circle cx="60" cy="64" r="9" fill="#ffffff" />
+      <circle cx="116" cy="64" r="9" fill="#ffffff" />
+      <circle cx="60" cy="64" r="2.5" strokeWidth="3" />
+      <circle cx="116" cy="64" r="2.5" strokeWidth="3" />
+    </svg>
+  );
+}
+// Faint backdrop, right-aligned and masked so it fades into the card on the left.
+function ReadinessArt({ state }) {
+  if (!state) return null;
+  const c = state === "ready" ? ART.beige : ART.green;
+  return (
+    <div aria-hidden="true"
+      className={`pointer-events-none select-none absolute inset-y-1 right-40 sm:right-52 flex items-center ${state === "approved" ? "opacity-[0.22]" : "opacity-[0.38]"}`}
+      style={{ WebkitMaskImage: "linear-gradient(to right, transparent, #000 45%)", maskImage: "linear-gradient(to right, transparent, #000 45%)" }}>
+      {state === "approved" ? <TruckArt c={c} /> : <BoxesArt c={c} />}
+    </div>
+  );
+}
 
 // P1-1: submitted-at / reviewed-at timestamps on amendment banners.
 const fmtDateTime = (d) => d ? new Date(d).toLocaleString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -543,6 +616,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterBranch, setFilterBranch] = useState(""); // filter by branch
+  const [archiveView, setArchiveView] = useState("exclude"); // exclude = Active, only = Archived, all
   const [filterMonth, setFilterMonth] = useState("");   // filter by order-date month (YYYY-MM)
   const [filterOrderFrom, setFilterOrderFrom] = useState(""); // order-date range start (YYYY-MM-DD)
   const [filterOrderTo, setFilterOrderTo] = useState("");     // order-date range end (YYYY-MM-DD)
@@ -660,6 +734,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
     const headers = await authHeaders();
     const params = new URLSearchParams({ page: p, limit: perPage });
     if (filterStatus) params.set("status", filterStatus);
+    if (archiveView !== "all") params.set("archived", archiveView);
     if (filterBranch) params.set("branch_id", filterBranch);
     if (filterMonth) params.set("month", filterMonth);
     if (filterOrderFrom) params.set("order_from", filterOrderFrom);
@@ -685,11 +760,11 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       const cd = await cRes.json();
       setAmendedCount(cd.total || 0);
     } catch { /* leave prior count */ }
-  }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  }, [companyId, filterStatus, archiveView, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Reset to page 1 when filters or sort change. sortKey must be here — the sort
   // dropdown only calls setSortKey, so without it a sort change never re-fetches.
-  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
+  useEffect(() => { setPage(1); loadOrders(1); }, [companyId, filterStatus, archiveView, filterBranch, filterMonth, filterOrderFrom, filterOrderTo, filterSalesman, debouncedSearch, perPage, sortKey]); // eslint-disable-line
 
   // Keep "today" live so the upcoming window rolls over at midnight without a reload.
   useEffect(() => {
@@ -703,10 +778,20 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
     try {
       const end = new Date(`${today}T00:00:00`);
       end.setDate(end.getDate() + UPCOMING_DAYS);
-      const params = new URLSearchParams({ date_from: today, date_to: localYmd(end), sort_by: "delivery_date", sort_order: "asc", limit: 100, page: 1 });
-      const res = await fetch(`${API}/sales-orders?${params}`, { headers: await authHeaders() });
-      const d = await res.json();
-      const list = (d.data || [])
+      const headers = await authHeaders();
+      // Effective dates: an SO that ships per Delivery Order goes out on its
+      // DOs' dates (a DO reschedule never touches the SO's own date), so use
+      // /upcoming-deliveries. Falls back to SO dates if that isn't live yet.
+      let rows;
+      const res = await fetch(`${API}/upcoming-deliveries?${new URLSearchParams({ from: today, to: localYmd(end) })}`, { headers });
+      if (res.ok) {
+        rows = (await res.json()).deliveries || [];
+      } else {
+        const params = new URLSearchParams({ date_from: today, date_to: localYmd(end), sort_by: "delivery_date", sort_order: "asc", limit: 100, page: 1 });
+        const r2 = await fetch(`${API}/sales-orders?${params}`, { headers });
+        rows = (await r2.json()).data || [];
+      }
+      const list = rows
         .filter(o => !["draft", "cancelled", "delivered"].includes(o.status) && /^\d{4}-\d{2}-\d{2}/.test(o.delivery_date || ""))
         .map(o => ({ ...o, _days: daysBetween(today, o.delivery_date.slice(0, 10)) }))
         .sort((a, b) => a._days - b._days || String(a.delivery_time_slot || "").localeCompare(String(b.delivery_time_slot || "")));
@@ -717,6 +802,15 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
 
   // Reload with the main list too, so status changes / edits / new orders show up.
   useEffect(() => { loadUpcoming(); }, [loadUpcoming, orders]);
+  // Dates also change elsewhere (Delivery Dates approvals, the schedule board,
+  // other users) — refresh when the tab regains focus and every 2 minutes.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") loadUpcoming(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    const t = setInterval(onVisible, 120000);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); clearInterval(t); };
+  }, [loadUpcoming]);
 
   const glowOrder = (id) => {
     setGlowId(id);
@@ -1600,9 +1694,32 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
         const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify(body) });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || "Failed");
-        // Optimistic local update
-        setOrders(prev => prev.map(ord => ord.id === o.id ? { ...ord, status } : ord));
+        // Optimistic local update. Delivered auto-archives server-side (trigger,
+        // migration 108) — drop it from the Active view to match.
+        const autoArchived = status === "delivered" && !o.archived_at;
+        const next = autoArchived ? { ...o, status, archived_at: new Date().toISOString(), archive_reason: "auto_delivered" } : { ...o, status };
+        setOrders(prev => (autoArchived && archiveView === "exclude")
+          ? prev.filter(ord => ord.id !== o.id)
+          : prev.map(ord => ord.id === o.id ? next : ord));
+        if (autoArchived && archiveView === "exclude") setTotalOrders(n => Math.max(0, n - 1));
+        if (autoArchived && archiveView === "exclude") toast.success(`${o.order_number} delivered — moved to Archived`);
       });
+    } catch (e) { toast.error(e.message); }
+  };
+
+  const setArchived = async (o, archived) => {
+    try {
+      await withLoading(archived ? "Archiving…" : "Unarchiving…", async () => {
+        const headers = await authHeaders();
+        const res = await fetch(`${API}/sales-orders/${o.id}/archive`, { method: "PATCH", headers, body: JSON.stringify({ archived }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || "Failed");
+        const leavesView = (archived && archiveView === "exclude") || (!archived && archiveView === "only");
+        setOrders(prev => leavesView ? prev.filter(ord => ord.id !== o.id) : prev.map(ord => ord.id === o.id ? { ...ord, ...d.order } : ord));
+        if (leavesView) setTotalOrders(n => Math.max(0, n - 1));
+        setViewingOrder(v => v?.id === o.id ? (leavesView ? null : { ...v, ...d.order }) : v);
+      });
+      toast.success(`${o.order_number} ${archived ? "archived" : "unarchived"}`);
     } catch (e) { toast.error(e.message); }
   };
 
@@ -1665,7 +1782,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
             ) : (
               <div className="max-h-72 overflow-y-auto space-y-1">
                 {upcoming.map(o => (
-                  <button key={o.id} type="button" onClick={() => focusOrder(o)}
+                  <button key={`${o.id}-${o.delivery_order_id || "so"}`} type="button" onClick={() => focusOrder(o)}
                     title="Show this SO in the list"
                     className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left transition-colors hover:bg-[#efe3cc] ${glowId === o.id ? "bg-[#efe3cc]" : ""}`}>
                     <span className={`shrink-0 w-20 text-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${DAY_CHIP(o._days)}`}>{dayLabel(o._days)}</span>
@@ -1676,6 +1793,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5">
                         <span className="font-mono text-sm font-medium text-[#6b4f2a]">{o.order_number}</span>
+                        {o.do_number && <span title="Delivery Order — the date shown is this shipment's" className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#efe3cc] text-[#7a5c34]">{o.do_number}</span>}
                         {hasBalanceDue(o) && <span title={`Balance RM ${money(orderBalance(o))} not collected`} className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
                       </span>
                       <span className="block text-xs text-gray-600 truncate">{o.customer_name}{o.delivery_type ? ` · ${o.delivery_type}` : ""}</span>
@@ -1691,6 +1809,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
+        <div className="flex rounded-xl border border-gray-200 bg-white p-0.5" title="Delivered orders are archived automatically">
+          {[["exclude", "Active"], ["only", "Archived"], ["all", "All"]].map(([v, label]) => (
+            <button key={v} onClick={() => setArchiveView(v)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${archiveView === v ? "bg-violet-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>{label}</button>
+          ))}
+        </div>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order # or customer…"
           className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-64 focus:outline-none focus:border-violet-400" />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
@@ -1737,7 +1861,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       {/* Orders list */}
       <div className="space-y-2">
         {loading && <div className="space-y-2">{[1,2,3,4].map(i=><div key={i} className="h-16 bg-white rounded-2xl border border-gray-100 animate-pulse" />)}</div>}
-        {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">No orders yet</div>}
+        {!loading && orders.length === 0 && <div className="text-center text-gray-400 py-8">{archiveView === "only" ? "No archived orders" : "No orders yet"}</div>}
         {!loading && orders.map(o => {
           const listTotal = orderTotal(o);
           const listBal = orderBalance(o);
@@ -1751,15 +1875,18 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
             && !["draft", "cancelled", "delivered"].includes(o.status);
           const tickedCount = remindOrder ? Math.min(readOrderedMarks(user?.id, o.id).size, itemCount) : 0;
           const allOrdered = remindOrder && tickedCount >= itemCount;
+          const readiness = readinessOf(o);
           return (
-          <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)}
-            className={`bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
-            <div className="flex items-start justify-between gap-3">
+          <div key={o.id} id={`so-card-${o.id}`} onClick={() => openView(o)} title={readiness ? READINESS_HINT[readiness] : undefined}
+            className={`relative overflow-hidden bg-white rounded-2xl border border-gray-100 shadow-sm p-4 hover:border-violet-200 cursor-pointer transition-colors ${glowId === o.id ? "so-glow" : ""}`}>
+            <ReadinessArt state={readiness} />
+            <div className="relative flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-sm font-medium text-violet-700">{o.order_number}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[o.status] || "bg-gray-100 text-gray-600"}`}>{statusLabel(o.status)}</span>
                   {o.sales_channel && o.sales_channel !== "branch" && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{o.sales_channel}</span>}
+                  {o.archived_at && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500" title={o.archive_reason === "auto_delivered" ? "Auto-archived when delivered" : "Archived manually"}>🗄 Archived</span>}
                 </div>
                 <p className="font-medium text-gray-900 mt-1">{o.customer_name}</p>
                 <p className="text-xs text-gray-400">
@@ -1804,6 +1931,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                       {STATUSES.filter(s => s !== "amended").map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                     </select>
                   )}
+                  <button onClick={e => { e.stopPropagation(); setArchived(o, !o.archived_at); }}
+                    title={o.archived_at ? "Move back to Active" : "Hide from the Active list"}
+                    className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">{o.archived_at ? "Unarchive" : "Archive"}</button>
                 </div>
               </div>
             </div>
@@ -1870,6 +2000,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Edit</button>
+                      <button onClick={() => setArchived(o, !o.archived_at)} className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">{o.archived_at ? "Unarchive" : "Archive"}</button>
                       {!["delivered"].includes(o.status) && <button onClick={() => deleteOrder(o)} className="text-xs px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">Delete</button>}
                       <button onClick={() => setViewingOrder(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
                     </div>
@@ -2164,6 +2295,10 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                     <button onClick={() => { setViewingOrder(null); openEdit(o); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Edit Order</button>
                     <button onClick={() => openSubmitPO(o)} className="py-2.5 px-4 rounded-xl text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">Submit PO</button>
                   </div>
+
+                  {/* Notes log — stored apart from the order, so no amendment
+                      and no order-edit permission needed (migration 111). */}
+                  <OrderNotes key={o.id} orderId={o.id} />
                 </div>
               </>);
             })()}

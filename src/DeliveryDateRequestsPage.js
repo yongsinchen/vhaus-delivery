@@ -3,6 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import DeliveryDateRequestActions, { AmendDeliveryDateRequestModal, canChangeRequest } from "./DeliveryDateRequestActions";
+import LinkedDeliveryPicker, { LinkedChip, linkedSoNumbers } from "./LinkedDeliveryPicker";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -61,6 +62,7 @@ function DeliveryDateRequestsPage() {
   const [picked, setPicked] = useState(null);
   const [reqDate, setReqDate] = useState("");
   const [remark, setRemark] = useState("");
+  const [linkSos, setLinkSos] = useState([]); // same-customer SOs ticked to deliver together
   const [saving, setSaving] = useState(false);
   // P1-2: this order's active Delivery Orders (0/1/many — never guessed).
   // "Active" mirrors doLib.isOperationallyActive() server-side: not
@@ -77,7 +79,7 @@ function DeliveryDateRequestsPage() {
     setResults(Array.isArray(d) ? d : []);
   };
   const pickOrder = async (o) => {
-    setPicked(o); setResults([]); setActiveDos(null); setSelectedDoId(null);
+    setPicked(o); setResults([]); setActiveDos(null); setSelectedDoId(null); setLinkSos([]);
     if (!o.so_number) { setActiveDos([]); return; }
     try {
       const res = await af(`${API}/delivery-orders?so_number=${encodeURIComponent(o.so_number)}`);
@@ -103,12 +105,13 @@ function DeliveryDateRequestsPage() {
     try {
       const res = await af(`${API}/delivery-date-requests`, {
         method: "POST",
-        body: JSON.stringify({ order_id: picked.id, requested_date: reqDate, remark, delivery_order_id: selectedDoId || undefined }),
+        body: JSON.stringify({ order_id: picked.id, requested_date: reqDate, remark, delivery_order_id: selectedDoId || undefined, link_so_numbers: linkSos.length ? linkSos : undefined }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Failed");
-      toast.success(d.request?.status === "approved" ? "Auto-approved — 10+ days out" : "Request sent for approval");
-      setPicked(null); setQ(""); setResults([]); setReqDate(""); setRemark(""); setActiveDos(null); setSelectedDoId(null);
+      const linkedNote = (d.linked_requests || []).length ? ` · linked with SO ${d.linked_requests.map(x => x.so_number).join(", ")}` : "";
+      toast.success((d.request?.status === "approved" ? "Auto-approved — 10+ days out" : "Request sent for approval") + linkedNote);
+      setPicked(null); setQ(""); setResults([]); setReqDate(""); setRemark(""); setActiveDos(null); setSelectedDoId(null); setLinkSos([]);
       load();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
@@ -117,7 +120,11 @@ function DeliveryDateRequestsPage() {
     if (!window.confirm(`Confirm delivery on ${fmt(date)} for SO ${r.so_number}?`)) return;
     const res = await af(`${API}/delivery-date-requests/${r.id}/pick`, { method: "PATCH", body: JSON.stringify({ requested_date: date }) });
     const d = await res.json();
-    if (res.ok) { toast.success("Delivery date set"); load(); } else toast.error(d.error || "Failed");
+    if (res.ok) {
+      toast.success("Delivery date set");
+      if ((d.linked_failures || []).length) toast.warning(`Some linked SOs could not be updated: ${d.linked_failures.join("; ")}`);
+      load();
+    } else toast.error(d.error || "Failed");
   };
 
   // ── Order detail review (before deciding) ────────────────────────
@@ -141,7 +148,9 @@ function DeliveryDateRequestsPage() {
     const res = await af(`${API}/delivery-date-requests/${r.id}/approve`, { method: "PATCH", body: JSON.stringify({}) });
     const d = await res.json();
     if (res.ok) {
-      toast.success(`Approved — now create the delivery order for SO ${r.so_number}`);
+      const linkedOk = (d.linked_results || []).filter(x => x.request).map(x => x.so_number);
+      toast.success(`Approved${linkedOk.length ? ` with linked SO ${linkedOk.join(", ")}` : ""} — now create the delivery order for SO ${r.so_number}`);
+      if ((d.linked_failures || []).length) toast.warning(`Some linked SOs could not be approved: ${d.linked_failures.join("; ")}`);
       load();
       // Straight after approving, open the Create Delivery Order picker so the
       // admin can build a DO from the SO's items (arrived or not) — same flow
@@ -243,7 +252,11 @@ function DeliveryDateRequestsPage() {
               </span>
             )}
             {r.auto_approved && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700">Auto-approved</span>}
+            <LinkedChip others={linkedSoNumbers(r, rows)} />
           </div>
+          {r.link_group_id && isApprover && (r.status === "pending" || r.status === "needs_reschedule") && (
+            <p className="text-[11px] text-teal-700 mt-0.5">Linked delivery — approving, proposing or rejecting applies to every linked SO.</p>
+          )}
           <p className="text-sm text-gray-700 mt-0.5">{r.customer_name || ""}</p>
           {r.delivery_order_id && r.delivery_orders?.superseded_at && (
             <p className="text-xs text-red-600 mt-1">⚠️ This Delivery Order was superseded since this request was made — it can no longer be applied as-is.</p>
@@ -309,7 +322,7 @@ function DeliveryDateRequestsPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between bg-violet-50 rounded-xl px-3 py-2">
                 <span className="text-sm"><b className="text-violet-700">SO {picked.so_number}</b> · {picked.customer_name}</span>
-                <button onClick={() => { setPicked(null); setQ(""); setActiveDos(null); setSelectedDoId(null); }} className="text-xs text-gray-400 hover:text-red-500">change</button>
+                <button onClick={() => { setPicked(null); setQ(""); setActiveDos(null); setSelectedDoId(null); setLinkSos([]); }} className="text-xs text-gray-400 hover:text-red-500">change</button>
               </div>
               {/* P1-2: 0 active DO -> nothing shown here (SO-level request).
                   1 active DO -> auto-selected, shown for clarity, not chosen.
@@ -356,6 +369,7 @@ function DeliveryDateRequestsPage() {
               )}
             </div>
           )}
+          {picked && <LinkedDeliveryPicker soNumber={picked.so_number} selected={linkSos} onChange={setLinkSos} />}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Delivery date</label>
@@ -370,7 +384,7 @@ function DeliveryDateRequestsPage() {
           </div>
           <button onClick={submitRequest} disabled={saving || !picked || !reqDate || ((activeDos || []).length > 1 && !selectedDoId)}
             className="px-5 py-2 rounded-xl text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
-            {saving ? "Sending…" : "Send for approval"}
+            {saving ? "Sending…" : linkSos.length ? `Send for approval (${linkSos.length + 1} SOs)` : "Send for approval"}
           </button>
         </div>
       )}

@@ -12,11 +12,17 @@
 //   company   receipt header ({ name, reg, address, hotline, email, website, logo })
 //   onClose   () => void
 //   onRecorded () => void — called after a successful record (inside the loading overlay)
+//   amendPayment  optional — a PENDING payment row (with payment_allocations)
+//                 to amend instead of recording a new one. The form opens
+//                 pre-filled; `orders` balances must already ADD BACK this
+//                 payment's own allocations (amending releases them first).
+//                 Saves via PATCH /payments/:id (atomic reverse + re-record,
+//                 same OR number, still pending Finance).
 import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
-import { allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2 } from "./paymentAllocation";
+import { allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2, allocatedByOrder } from "./paymentAllocation";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -29,20 +35,30 @@ export { allocsFor, tagOutstanding, defaultKind } from "./paymentAllocation";
 
 // reloadOrders (optional) — async () => fresh orders array; used to rebuild the
 // allocation preview when the server rejects a payment as stale_balance.
-export default function RecordPaymentModal({ customer, orders, initiatingOrderId, company, onClose, onRecorded, reloadOrders }) {
+export { allocatedByOrder } from "./paymentAllocation";
+
+export default function RecordPaymentModal({ customer, orders, initiatingOrderId, company, onClose, onRecorded, reloadOrders, amendPayment }) {
   const toast = useToast();
   const { withLoading } = useLoading();
+  const amending = !!amendPayment;
 
   const [withBalance, setWithBalance] = useState(() => tagOutstanding(orders));
-  const initialKind = defaultKind(withBalance);
+  const initialKind = amending && ["deposit", "balance"].includes(amendPayment.kind) ? amendPayment.kind : defaultKind(withBalance);
+  // Amend: every order this payment could sit on is listed (no deposit/balance
+  // filter — the kind is just a label here), pre-filled with its current split.
+  const amendAllocs = (list) => {
+    const cur = allocatedByOrder(amendPayment);
+    return list.map(o => ({ order_id: o.id, so_number: o.so_number, balance: Number(o.balance), amount: cur.has(String(o.id)) ? String(cur.get(String(o.id))) : "" }))
+      .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0));
+  };
 
-  const [payAmount, setPayAmount] = useState("");
-  const [payMethod, setPayMethod] = useState("Cash");
+  const [payAmount, setPayAmount] = useState(amending ? String(Number(amendPayment.amount) || "") : "");
+  const [payMethod, setPayMethod] = useState(amending ? (amendPayment.payment_method || "Cash") : "Cash");
   const [payKind, setPayKind] = useState(initialKind); // "deposit" | "balance" — descriptive label on the payment
-  const [payRef, setPayRef] = useState("");
-  const [payAdmin, setPayAdmin] = useState(""); // instalment admin charges
-  const [payAllocations, setPayAllocations] = useState(() => allocsFor(withBalance, initialKind, initiatingOrderId));
-  const [payProofs, setPayProofs] = useState([]); // uploaded proof URLs
+  const [payRef, setPayRef] = useState(amending ? (amendPayment.reference_no || "") : "");
+  const [payAdmin, setPayAdmin] = useState(amending && amendPayment.admin_charges != null ? String(amendPayment.admin_charges) : ""); // instalment admin charges
+  const [payAllocations, setPayAllocations] = useState(() => (amending ? amendAllocs(withBalance) : allocsFor(withBalance, initialKind, initiatingOrderId)));
+  const [payProofs, setPayProofs] = useState(() => (amending ? String(amendPayment.proof_url || "").split(",").map(s => s.trim()).filter(Boolean) : [])); // uploaded proof URLs
   const [payUploading, setPayUploading] = useState(false);
   const [paySaving, setPaySaving] = useState(false); // drives button label/disabled
   const paySavingRef = useRef(false); // synchronous guard — blocks a double-click before re-render
@@ -55,6 +71,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
 
   const switchPayKind = (kind) => {
     setPayKind(kind);
+    if (amending) return; // amend keeps its allocation; kind is only the label
     setPayAllocations(allocsFor(withBalance, kind, initiatingOrderId));
     setPayAmount("");
   };
@@ -86,8 +103,11 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
     paySavingRef.current = true;
     setPaySaving(true);
     try {
-      await withLoading("Recording payment…", async () => {
-        const res = await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind, idempotency_key: idempotencyKeyRef.current }) });
+      await withLoading(amending ? "Saving payment…" : "Recording payment…", async () => {
+        const fields = { amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind };
+        const res = amending
+          ? await af(`${API}/payments/${amendPayment.id}`, { method: "PATCH", body: JSON.stringify(fields) })
+          : await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, ...fields, idempotency_key: idempotencyKeyRef.current }) });
         const d = await res.json();
         if (!d.payment) {
           if (d.code === "idempotency_conflict") {
@@ -103,6 +123,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
             // Reload current orders/balances and rebuild the allocation
             // preview before Finance tries again. Without a reloader, clear
             // the suggested amounts so the stale figures can't be resubmitted.
+            if (amending) throw new Error(`${d.error} Please close and reopen Amend to load the current balance.`);
             if (reloadOrders) {
               const fresh = tagOutstanding(await reloadOrders());
               const kind = defaultKind(fresh);
@@ -116,7 +137,8 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
         }
         // Payment is PENDING Finance approval, but the OR is assigned at
         // collection so the salesman can print it now for the customer.
-        toast.success(`${money(total)} recorded — pending Finance verification`);
+        toast.success(amending ? `Payment amended to ${money(total)} — still pending Finance verification` : `${money(total)} recorded — pending Finance verification`);
+        if (d.proof_cleanup_warning) toast.warning(d.proof_cleanup_warning);
         const rows = payAllocations.filter(a => Number(a.amount) > 0).map(a => {
           const ord = withBalance.find(o => o.id === a.order_id) || {};
           const oldBal = Number(a.balance) || 0, paid = Number(a.amount) || 0;
@@ -144,8 +166,8 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-gray-900">Record Payment</h3>
-            <p className="text-xs text-gray-500">{customer?.name} · {withBalance.length} order(s) with balance</p>
+            <h3 className="font-bold text-gray-900">{amending ? "Amend Payment" : "Record Payment"}</h3>
+            <p className="text-xs text-gray-500">{customer?.name} · {amending ? `OR #${amendPayment.or_number ?? "—"} · pending approval` : `${withBalance.length} order(s) with balance`}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>
         </div>
@@ -156,9 +178,9 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
               {[{ k: "deposit", label: "Collect Deposit" }, { k: "balance", label: "Collect Balance" }].map(({ k, label }) => {
                 // Deposit only when there's an order without a deposit yet;
                 // balance only when there's an order that already has one.
-                const available = k === "deposit"
+                const available = amending || (k === "deposit"
                   ? withBalance.some(o => !o._hasDeposit)
-                  : withBalance.some(o => o._hasDeposit);
+                  : withBalance.some(o => o._hasDeposit));
                 return (
                   <button key={k} type="button" disabled={!available} onClick={() => switchPayKind(k)}
                     title={!available ? (k === "deposit" ? "No new orders awaiting a deposit" : "No orders with an outstanding balance") : ""}
@@ -275,7 +297,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
         <div className="px-6 py-4 border-t">
           <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0 || payUnallocated !== 0 || hasInvalidAllocation}
             className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
-            {paySaving ? "Recording…" : `Confirm ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
+            {paySaving ? (amending ? "Saving…" : "Recording…") : `${amending ? "Save" : "Confirm"} ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
           </button>
         </div>
       </div>

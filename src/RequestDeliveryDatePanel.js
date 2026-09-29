@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { supabase, useAuth } from "./AuthContext";
 import { useToast } from "./UIComponents";
 import DeliveryDateRequestActions, { canChangeRequest } from "./DeliveryDateRequestActions";
+import LinkedDeliveryPicker, { LinkedChip, linkedSoNumbers } from "./LinkedDeliveryPicker";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -36,6 +37,8 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
   const { user } = useAuth();
   const soNumber = order?.order_number;
   const [requests, setRequests] = useState(null); // this user's requests for this SO, newest first
+  const [allRequests, setAllRequests] = useState([]); // every visible request — to name linked SOs
+  const [linkSos, setLinkSos] = useState([]); // same-customer SOs ticked to deliver together
   const [formOpen, setFormOpen] = useState(false);
   const [activeDos, setActiveDos] = useState(null); // null = not loaded, [] = none active
   const [selectedDoId, setSelectedDoId] = useState(null);
@@ -48,13 +51,14 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
     try {
       const res = await af(`${API}/delivery-date-requests`);
       const d = await res.json();
+      setAllRequests(d.requests || []);
       setRequests((d.requests || []).filter(r => r.so_number === soNumber));
     } catch { setRequests([]); }
   }, [soNumber]);
   useEffect(() => { setRequests(null); setFormOpen(false); loadRequests(); }, [loadRequests]);
 
   const openForm = async () => {
-    setFormOpen(true); setReqDate(""); setRemark(""); setActiveDos(null); setSelectedDoId(null);
+    setFormOpen(true); setReqDate(""); setRemark(""); setActiveDos(null); setSelectedDoId(null); setLinkSos([]);
     try {
       const res = await af(`${API}/delivery-orders?so_number=${encodeURIComponent(soNumber)}`);
       const d = await res.json();
@@ -71,11 +75,12 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
     try {
       const res = await af(`${API}/delivery-date-requests`, {
         method: "POST",
-        body: JSON.stringify({ so_number: soNumber, requested_date: reqDate, remark, delivery_order_id: selectedDoId || undefined }),
+        body: JSON.stringify({ so_number: soNumber, requested_date: reqDate, remark, delivery_order_id: selectedDoId || undefined, link_so_numbers: linkSos.length ? linkSos : undefined }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Failed");
-      toast.success(d.request?.status === "approved" ? "Auto-approved — 10+ days out" : "Request sent for approval");
+      const linkedNote = (d.linked_requests || []).length ? ` · linked with SO ${d.linked_requests.map(x => x.so_number).join(", ")}` : "";
+      toast.success((d.request?.status === "approved" ? "Auto-approved — 10+ days out" : "Request sent for approval") + linkedNote);
       setFormOpen(false);
       loadRequests();
       onChanged?.();
@@ -112,6 +117,7 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
               <span className={`px-2 py-0.5 rounded-full font-medium ${STATUS[r.status]?.cls}`}>{STATUS[r.status]?.label}</span>
               {r.delivery_order_id && <span className="bg-violet-100 text-violet-700 font-bold px-1.5 py-0.5 rounded">{r.delivery_orders?.do_number || "DO"}</span>}
               <span className="text-gray-600">{fmt(r.original_date)} → <b className="text-gray-900">{fmt(r.requested_date)}</b></span>
+              <LinkedChip others={linkedSoNumbers(r, allRequests)} />
             </div>
             {r.remark && <p className="text-gray-500">📝 {r.remark}</p>}
             {canChangeRequest(r, user) && (
@@ -166,6 +172,7 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
               ))}
             </div>
           ) : null}
+          <LinkedDeliveryPicker soNumber={soNumber} selected={linkSos} onChange={setLinkSos} />
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Delivery date</label>
             <input type="date" min={localToday()} value={reqDate} onChange={e => setReqDate(e.target.value)}
@@ -180,7 +187,7 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
             <button onClick={() => setFormOpen(false)} className="px-3 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-gray-100">Cancel</button>
             <button onClick={submit} disabled={saving || !reqDate || activeDos === null || (activeDos.length > 1 && !selectedDoId)}
               className="px-4 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
-              {saving ? "Sending…" : "Send for approval"}
+              {saving ? "Sending…" : linkSos.length ? `Send for approval (${linkSos.length + 1} SOs)` : "Send for approval"}
             </button>
           </div>
         </div>

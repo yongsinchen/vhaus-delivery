@@ -51,3 +51,15 @@ export const autoAllocateInto = (allocations, total) => {
 };
 
 export const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// A payment's current allocation per order id (string key → amount): its
+// payment_allocations rows, or — a legacy unallocated payment — its whole
+// amount on its own order_id. Used to pre-fill Amend and to add the payment's
+// own share back onto each order's balance before re-allocating.
+export const allocatedByOrder = (p) => {
+  const m = new Map();
+  const rows = Array.isArray(p?.payment_allocations) ? p.payment_allocations : [];
+  if (rows.length) for (const a of rows) m.set(String(a.order_id), round2((m.get(String(a.order_id)) || 0) + Number(a.amount || 0)));
+  else if (p?.order_id != null) m.set(String(p.order_id), round2(Number(p.amount) || 0));
+  return m;
+};
