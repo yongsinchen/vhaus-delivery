@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import RecordPhotos from "./RecordPhotos";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -276,6 +277,7 @@ function ServicePage() {
   // directly; everyone else (salesmen) submits a request for approval.
   const role = (user?.base_role || user?.role || "").toLowerCase();
   const isApprover = ["master", "manager", "operation_manager", "company_admin"].includes(role);
+  const canEditPhotos = isApprover || ["driver", "operation"].includes(role);
 
   const [services, setServices] = useState([]);
   const [pending, setPending] = useState([]);
@@ -986,6 +988,12 @@ function ServicePage() {
                       ))}
                     </div>
                   </div>
+
+                  {/* Photos — each with an optional description. Writers match
+                      the backend: service managers plus driver / operation. */}
+                  {detail.service?.id && (
+                    <RecordPhotos key={detail.service.id} basePath="service-cases" recordId={detail.service.id} canEdit={canEditPhotos} />
+                  )}
 
                   {/* Customer info */}
                   {detail.order && (
