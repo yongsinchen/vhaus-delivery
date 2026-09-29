@@ -115,7 +115,7 @@ const EMPTY_ORDER = {
   customer_id_type: "ic", customer_id_no: "", customer_email: "", einvoice_requested: false,
   status: "draft", notes: "", items: [],
   order_date: "",
-  delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", delivery_address: "", remark: "",
+  delivery_type: "Delivery", delivery_date: "", delivery_time_slot: "", delivery_address: "", remark: "", internal_remark: "",
   discount: "", deposit: "", payment_method: "", payment_proofs: [], admin_charges: "",
   branch_id: "", salesman_names: "",
   country: "", gst_rate: 0, gst_waived: false,
@@ -1247,7 +1247,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       delivery_date: f.delivery_date || "",
       delivery_time_slot: f.delivery_time_slot || "",
       delivery_address: f.delivery_address || "",
-      remark: f.remark || "",
+      remark: f.remark || "", internal_remark: f.internal_remark || "",
       discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
       country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
@@ -1547,7 +1547,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
       delivery_type: form.delivery_type, delivery_date: form.delivery_date || null,
       delivery_time_slot: form.delivery_time_slot || null,
       delivery_address: (deliverElsewhere && form.delivery_address?.trim()) || null,
-      remark: form.remark || null,
+      remark: form.remark || null, internal_remark: form.internal_remark || null,
       discount: form.discount === "" ? 0 : Number(form.discount),
       deposit: form.deposit === "" ? 0 : Number(form.deposit),
       payment_method: form.payment_method || null, payment_proofs: JSON.stringify(form.payment_proofs || []),
@@ -2288,6 +2288,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
 
                   {/* Notes & Remark */}
                   {view.remark && <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-amber-700">Remark: </span>{view.remark}</div>}
+                  {view.internal_remark && <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm"><span className="font-bold text-slate-600">Internal Remark: </span>{view.internal_remark}<span className="block text-[10px] text-slate-400 mt-0.5">Staff only — never shown to the customer</span></div>}
                   {o.status !== "amended" && o.notes && <div className="bg-gray-50 rounded-xl p-2.5 text-sm text-gray-600"><span className="font-bold">Notes: </span>{o.notes}</div>}
 
                   {/* Action buttons */}
@@ -2957,6 +2958,10 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
               )}
               <Field label="Order Notes" value={form.notes} onChange={v => setForm(f => ({ ...f, notes: v }))} />
               <Field label="Remark" value={form.remark} onChange={v => setForm(f => ({ ...f, remark: v }))} />
+              <div>
+                <Field label="Internal Remark" value={form.internal_remark} onChange={v => setForm(f => ({ ...f, internal_remark: v }))} />
+                <p className="text-[11px] text-gray-400 mt-0.5">Staff only — never shown to the customer or on any printed document.</p>
+              </div>
 
               {(Number(form.gst_rate) || 0) > 0 && (
                 <label className={`flex items-center gap-2 text-xs cursor-pointer ${form.gst_waived ? "text-amber-600" : "text-gray-500"}`}>
