@@ -1608,6 +1608,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
         };
       }),
     };
+    // Edits also send the Deposit value this form LOADED (sales_orders.deposit
+    // when the drawer opened). The backend uses it to tell an untouched Deposit
+    // field from a real change, so a payment recorded by someone else while
+    // this form was open can never rewrite the upfront deposit; a real Deposit
+    // change on a stale form is refused (409 stale_deposit) instead of guessed.
+    if (editId) body.deposit_loaded = editingOrder?.deposit != null ? Number(editingOrder.deposit) : null;
     const url = editId ? `${API}/sales-orders/${editId}` : `${API}/sales-orders`;
     const method = editId ? "PUT" : "POST";
     const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
