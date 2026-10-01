@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast } from "./UIComponents";
+import { myToday, paymentDateError } from "./paymentDate";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
@@ -1080,6 +1081,7 @@ export default function App() {
   const [paymentModal, setPaymentModal] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [paymentDate, setPaymentDate] = useState(myToday); // actual date the customer paid (payments.payment_date)
   const [paymentSaving, setPaymentSaving] = useState(false);
   // URGENT FIX — Finance cross-order payment allocation. paymentAllocations
   // is the editable, previewed distribution across the primary order (always
@@ -1454,6 +1456,7 @@ export default function App() {
   // reusing the same key (nothing was ever written under it — the rejected
   // attempt never reached the insert).
   const openPaymentModalFresh = (o) => {
+    setPaymentDate(myToday());
     paymentIdempotencyKeyRef.current = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return openPaymentModal(o);
   };
@@ -1527,6 +1530,7 @@ export default function App() {
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return alert("Invalid amount.");
     if (paymentUnallocated !== 0) return; // Confirm button is disabled for this too — defense in depth
+    if (paymentDateError(paymentDate)) return setPaymentError(paymentDateError(paymentDate));
     paymentSavingRef.current = true;
     setPaymentSaving(true);
     setPaymentError(null);
@@ -1534,7 +1538,7 @@ export default function App() {
       const allocations = paymentAllocations.filter(a => Number(a.amount) > 0).map(a => ({ order_id: a.order_id, amount: Number(a.amount) }));
       const res = await authFetch(`${BACKEND}/payments/record`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_id: paymentModal.customerId || null, amount, payment_method: paymentMethod, allocations, idempotency_key: paymentIdempotencyKeyRef.current }),
+        body: JSON.stringify({ customer_id: paymentModal.customerId || null, amount, payment_method: paymentMethod, payment_date: paymentDate, allocations, idempotency_key: paymentIdempotencyKeyRef.current }),
       });
       const d = await res.json();
       if (!res.ok) {
@@ -2266,6 +2270,9 @@ export default function App() {
             <select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 mb-4">
               {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Payment Date</label>
+            <input type="date" value={paymentDate} max={myToday()} onChange={e=>setPaymentDate(e.target.value)} className={`w-full border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 ${paymentDateError(paymentDate) ? "border-red-300 mb-1" : "border-gray-200 mb-4"}`} />
+            {paymentDateError(paymentDate) && <p className="text-xs text-red-600 mb-4">{paymentDateError(paymentDate)}</p>}
 
             {parseFloat(paymentAmount) > 0 && (
               <div className="mb-4">
@@ -2299,7 +2306,7 @@ export default function App() {
 
             <div className="flex gap-3 justify-end">
               <button onClick={closePaymentModal} disabled={paymentSaving} className="px-4 py-2 text-sm bg-gray-100 rounded-xl hover:bg-gray-200">Cancel</button>
-              <button onClick={recordPayment} disabled={paymentSaving || !paymentAmount || paymentUnallocated !== 0} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50">{paymentSaving?"Saving...":"Confirm Payment"}</button>
+              <button onClick={recordPayment} disabled={paymentSaving || !paymentAmount || paymentUnallocated !== 0 || !!paymentDateError(paymentDate)} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50">{paymentSaving?"Saving...":"Confirm Payment"}</button>
             </div>
           </div>
         </div>

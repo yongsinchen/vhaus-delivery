@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
+import { paymentDateOf, fmtYmd } from "./paymentDate";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
@@ -376,7 +377,7 @@ function CustomerPage() {
                             <span className="text-xs text-gray-500 ml-2">{p.payment_method}</span>
                             {p._deposit && p.so_number && <span className="text-xs text-gray-400 ml-2">SO {p.so_number}</span>}
                             {p.reference_no && <span className="text-xs text-gray-400 ml-2">Ref: {p.reference_no}</span>}
-                            <p className="text-xs text-gray-400">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : ""}{p._deposit ? " · deposit" : ""}</p>
+                            <p className="text-xs text-gray-400">{fmtYmd(paymentDateOf(p))}{p._deposit ? " · deposit" : ""}</p>
                             {p.proof_url && (
                               <div className="mt-1 flex flex-wrap gap-2">
                                 {p.proof_url.split(",").map(u => u.trim()).filter(Boolean).map((u, i) => (

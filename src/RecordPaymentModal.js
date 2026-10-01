@@ -23,6 +23,7 @@ import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import { allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2, allocatedByOrder } from "./paymentAllocation";
+import { myToday, paymentDateError, paymentDateOf } from "./paymentDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -56,6 +57,10 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
   const [payMethod, setPayMethod] = useState(amending ? (amendPayment.payment_method || "Cash") : "Cash");
   const [payKind, setPayKind] = useState(initialKind); // "deposit" | "balance" — descriptive label on the payment
   const [payRef, setPayRef] = useState(amending ? (amendPayment.reference_no || "") : "");
+  // Actual date the customer paid — defaults to today (Malaysia); staff pick
+  // an earlier date when uploading a payment made before today.
+  const [payDate, setPayDate] = useState(() => (amending && paymentDateOf(amendPayment)) || myToday());
+  const payDateError = paymentDateError(payDate);
   const [payAdmin, setPayAdmin] = useState(amending && amendPayment.admin_charges != null ? String(amendPayment.admin_charges) : ""); // instalment admin charges
   const [payAllocations, setPayAllocations] = useState(() => (amending ? amendAllocs(withBalance) : allocsFor(withBalance, initialKind, initiatingOrderId)));
   const [payProofs, setPayProofs] = useState(() => (amending ? String(amendPayment.proof_url || "").split(",").map(s => s.trim()).filter(Boolean) : [])); // uploaded proof URLs
@@ -95,6 +100,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
     if (paySavingRef.current) return; // ignore rapid re-clicks while a request is in flight
     const total = Number(payAmount);
     if (!total || total <= 0) { toast.warning("Enter payment amount"); return; }
+    if (payDateError) { toast.warning(payDateError); return; }
     if (payUnallocated !== 0) { toast.warning("Total Allocated must equal Payment Received before you can confirm."); return; } // defense in depth — Confirm is already disabled for this
     if (hasInvalidAllocation) { toast.warning("Every allocation amount must be zero or positive."); return; } // defense in depth — Confirm is already disabled for this
     if (payMethod === "Cash Rebate" && !payRef.trim()) { toast.warning("Please enter a reason for the cash rebate"); return; }
@@ -104,7 +110,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
     setPaySaving(true);
     try {
       await withLoading(amending ? "Saving payment…" : "Recording payment…", async () => {
-        const fields = { amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind };
+        const fields = { amount: total, payment_method: payMethod, reference_no: payRef || null, proof_url: payProofs.join(", ") || null, allocations, admin_charges: payMethod === "Instalment" && payAdmin !== "" ? Number(payAdmin) : null, kind: payKind, payment_date: payDate };
         const res = amending
           ? await af(`${API}/payments/${amendPayment.id}`, { method: "PATCH", body: JSON.stringify(fields) })
           : await af(`${API}/payments/record`, { method: "POST", body: JSON.stringify({ customer_id: customer?.id || null, ...fields, idempotency_key: idempotencyKeyRef.current }) });
@@ -198,6 +204,14 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
             <label className="block text-xs font-medium text-gray-500 mb-1">Total Amount (RM)</label>
             <input type="number" value={payAmount} onChange={e => { setPayAmount(e.target.value); autoAllocate(e.target.value); }} autoFocus
               className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg font-bold text-center focus:outline-none focus:ring-2 focus:ring-violet-300" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Payment Date</label>
+            <input type="date" value={payDate} max={myToday()} onChange={e => setPayDate(e.target.value)}
+              className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 ${payDateError ? "border-red-300" : "border-gray-200"}`} />
+            {payDateError
+              ? <p className="text-xs text-red-600 mt-1">{payDateError}</p>
+              : <p className="text-[11px] text-gray-400 mt-1">The date the customer actually paid.</p>}
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Method</label>
@@ -295,7 +309,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
           </div>
         </div>
         <div className="px-6 py-4 border-t">
-          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0 || payUnallocated !== 0 || hasInvalidAllocation}
+          <button onClick={submitPayment} disabled={paySaving || payUploading || !payAmount || Number(payAmount) <= 0 || payUnallocated !== 0 || hasInvalidAllocation || !!payDateError}
             className="w-full py-3 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
             {paySaving ? (amending ? "Saving…" : "Recording…") : `${amending ? "Save" : "Confirm"} ${money(payAmount || 0)} ${payKind === "deposit" ? "Deposit" : "Balance"}`}
           </button>
