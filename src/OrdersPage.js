@@ -362,6 +362,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
        body: Payment Method (heading + block) moves as one unit, and the
        Important Notes / Terms blocks are each kept whole. */
     .keep, .blk { page-break-inside: avoid; break-inside: avoid; }
+    /* The whole closing section — Remarks + totals, Payment Method, Notes,
+       Terms and the signatures — is ONE unit that always prints together on
+       the copy's LAST page. When the items run long, earlier pages carry only
+       items; the closing section never splits across pages. */
+    .closing { page-break-inside: avoid; break-inside: avoid; }
     /* Continuation context, inside the repeating <thead>: every printed page
        of the item table says which SO / copy / customer it belongs to. */
     table.items thead tr.ctx th { background: #fff; border-top: none; border-bottom: none; border-right: none; padding: 2px 8px 3px; font-size: 8px; font-weight: 600; letter-spacing: 0.3px; text-transform: none; color: #6b7280; text-align: right; }
@@ -503,6 +508,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
         <thead><tr class="ctx"><th colspan="5">Sales Order ${esc(order.order_number || "")} · ${copyTag} · ${esc(order.customer_name || "")}</th></tr><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
         <tbody>${itemRows.join("")}</tbody>
       </table>
+      <div class="closing">
       <div class="midrow sec">
         <div class="remarks">
           <div class="h">Remarks</div>
@@ -549,6 +555,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           <div class="simg"><span class="sname">${esc(order.salesman_name || "")}</span></div>
           <div class="sline">Authorised Signature</div>
         </div>
+      </div>
       </div>
     </div></div>`).join("")}
   </body></html>`;

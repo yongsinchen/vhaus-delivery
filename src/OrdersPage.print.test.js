@@ -31,6 +31,14 @@ describe("Sales Order print pagination", () => {
     expect(fn).toMatch(/<div class="keep sec"><div class="sectitle">Payment Method<\/div>/);
   });
 
+  test("remark, totals and signature print together only on the copy's last page", () => {
+    expect(fn).toMatch(/\.closing \{ page-break-inside: avoid; break-inside: avoid; \}/);
+    const open = fn.indexOf('<div class="closing">');
+    expect(open).toBeGreaterThan(fn.indexOf("</table>"));
+    expect(fn.indexOf('<div class="midrow sec">')).toBeGreaterThan(open);
+    expect(fn.indexOf('class="sign')).toBeGreaterThan(open);
+  });
+
   test("continuation pages carry SO number / copy / customer via the repeating thead", () => {
     expect(fn).toMatch(/<thead><tr class="ctx"><th colspan="5">Sales Order \$\{esc\(order\.order_number/);
   });
