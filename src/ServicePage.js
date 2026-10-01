@@ -3,6 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RecordPhotos from "./RecordPhotos";
+import { parseServiceItemQty, serviceItemQty } from "./serviceItemQty";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -64,7 +65,7 @@ function printServiceNote(detail, company = {}) {
     <div class="section">ITEMS</div>
     <table class="items">
       <thead><tr><th class="name">Item</th><th class="qty">Qty</th></tr></thead>
-      <tbody>${items.map(it => `<tr><td class="name">${esc(it.description || "—")}</td><td class="qty">${esc(Number(it.quantity) || 1)}</td></tr>`).join("")}</tbody>
+      <tbody>${items.map(it => `<tr><td class="name">${esc(it.description || "—")}</td><td class="qty">${esc(serviceItemQty(it.quantity))}</td></tr>`).join("")}</tbody>
     </table>` : "";
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Service Note ${esc(order.so_number || svc.id || "")}</title>
@@ -175,7 +176,7 @@ async function exportServiceNoteExcel(detail, company = {}) {
       r++;
     };
     writeRow("Item", "Qty", true);
-    for (const it of items) writeRow(it.description || "—", Number(it.quantity) || 1, false);
+    for (const it of items) writeRow(it.description || "—", serviceItemQty(it.quantity), false);
   }
 
   const buf = await wb.xlsx.writeBuffer();
@@ -234,7 +235,7 @@ function RequestDetailModal({ req, isApprover, onApprove, onReject, onClose }) {
               <div className="space-y-1">
                 {items.map((it, i) => (
                   <div key={i} className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-1.5">
-                    <span className="text-gray-800">{it.description || "—"} <span className="text-gray-400">×{Number(it.quantity) || 1}</span></span>
+                    <span className="text-gray-800">{it.description || "—"} <span className={serviceItemQty(it.quantity) > 1 ? "text-gray-700 font-semibold" : "text-gray-400"}>×{serviceItemQty(it.quantity)}</span></span>
                     <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${it.arrival_date ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"}`}>{it.arrival_date ? `arrives ${dmy(it.arrival_date)}` : "no arrival date"}</span>
                   </div>
                 ))}
@@ -395,10 +396,13 @@ function ServicePage() {
     if (!description || !description.trim()) return;
     const qtyRaw = window.prompt("Quantity:", "1");
     if (qtyRaw === null) return; // cancelled
-    const quantity = Number(qtyRaw) > 0 ? Math.floor(Number(qtyRaw)) : 1;
+    const parsed = parseServiceItemQty(qtyRaw);
+    if (!parsed.ok) { toast.warning(parsed.error); return; } // never coerce 2.5 → 2 or 0 → 1
+    const quantity = parsed.value;
     try {
       await withLoading("Adding item…", async () => {
-        await af(`${API}/service-cases/${serviceId}/items`, { method: "POST", body: JSON.stringify({ description: description.trim(), action_type: 2, quantity }) });
+        const res = await af(`${API}/service-cases/${serviceId}/items`, { method: "POST", body: JSON.stringify({ description: description.trim(), action_type: 2, quantity }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
         if (detail?.service) openDetail(detail.service);
         loadServices();
       });
@@ -408,7 +412,8 @@ function ServicePage() {
   const updateServiceItem = async (itemId, updates) => {
     try {
       await withLoading("Updating item…", async () => {
-        await af(`${API}/service-items/${itemId}`, { method: "PATCH", body: JSON.stringify(updates) });
+        const res = await af(`${API}/service-items/${itemId}`, { method: "PATCH", body: JSON.stringify(updates) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
         if (detail?.service) openDetail(detail.service);
         loadServices();
       });
@@ -965,8 +970,8 @@ function ServicePage() {
                             </select>
                             <label className="flex items-center gap-1 text-xs text-gray-500">
                               Qty
-                              <input type="number" min="1" step="1" defaultValue={Number(it.quantity) || 1}
-                                onBlur={e => { const q = Number(e.target.value) > 0 ? Math.floor(Number(e.target.value)) : 1; if (q !== (Number(it.quantity) || 1)) updateServiceItem(it.id, { quantity: q }); else e.target.value = q; }}
+                              <input type="number" min="1" step="1" inputMode="numeric" defaultValue={serviceItemQty(it.quantity)}
+                                onBlur={e => { const p = parseServiceItemQty(e.target.value); const cur = serviceItemQty(it.quantity); if (!p.ok) { toast.warning(p.error); e.target.value = cur; return; } if (p.value !== cur) updateServiceItem(it.id, { quantity: p.value }); }}
                                 className="w-14 px-1.5 py-1 rounded-lg border border-gray-200 text-center" />
                             </label>
                             <button onClick={() => updateServiceItem(it.id, { status: it.status === "done" ? "pending" : "done" })}

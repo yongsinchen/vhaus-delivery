@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./AuthContext";
 import { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS } from "./ServiceCaseFormModal";
+import { serviceItemQty } from "./serviceItemQty";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const af = async (url) => {
@@ -63,7 +64,7 @@ function ServiceCard({ s, muted }) {
                 {ITEM_ACTIONS[it.action_type] && <span className="text-violet-700 font-medium">[{ITEM_ACTIONS[it.action_type]}] </span>}
                 {it.description || "—"}
               </span>
-              <span className="text-gray-500 whitespace-nowrap">×{Number(it.quantity) || 1}{it.status === "done" ? " · ✓ done" : ""}</span>
+              <span className="text-gray-500 whitespace-nowrap">×{serviceItemQty(it.quantity)}{it.status === "done" ? " · ✓ done" : ""}</span>
             </li>
           ))}
         </ul>

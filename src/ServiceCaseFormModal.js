@@ -17,6 +17,7 @@ import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import RecordPhotos, { usePhotoStaging, StagedPhotoList, uploadStagedPhotos } from "./RecordPhotos";
+import { parseServiceItemQty, serviceItemQty } from "./serviceItemQty";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -63,7 +64,7 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
     }
     return { ...EMPTY_FORM(), order_id: fixedOrder?.id || "" };
   });
-  const [items, setItems] = useState(() => (amending && Array.isArray(request.items) ? request.items.map(i => ({ description: i.description || "", action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) || 1, arrival_date: i.arrival_date || "" })) : []));
+  const [items, setItems] = useState(() => (amending && Array.isArray(request.items) ? request.items.map(i => ({ description: i.description || "", action_type: Number(i.action_type) || 2, quantity: serviceItemQty(i.quantity), arrival_date: i.arrival_date || "" })) : []));
   const [orderSearch, setOrderSearch] = useState(fixedOrder?.label || "");
   const [orderResults, setOrderResults] = useState([]);
   // Photos picked on create upload right after the save: to the case (direct)
@@ -86,11 +87,15 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
   };
 
   const save = async () => {
+    // Whole number >= 1 per item — reported, never coerced (the server
+    // enforces the same rule).
+    const badQty = items.findIndex(i => String(i.description || "").trim() && !parseServiceItemQty(i.quantity).ok);
+    if (badQty >= 0) { toast.warning(`Item ${badQty + 1}: quantity must be a whole number of at least 1`); return; }
     try {
       await withLoading(amending ? "Saving request…" : direct ? "Creating service case…" : "Submitting request…", async () => {
         const cleanItems = items
           .filter(i => String(i.description || "").trim())
-          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: Number(i.quantity) > 0 ? Number(i.quantity) : 1, arrival_date: i.arrival_date || null }));
+          .map(i => ({ description: i.description.trim(), action_type: Number(i.action_type) || 2, quantity: parseServiceItemQty(i.quantity).value, arrival_date: i.arrival_date || null }));
         const body = { ...form, items: cleanItems };
         let res;
         if (amending) {
@@ -208,8 +213,8 @@ export default function ServiceCaseFormModal({ mode = "create", isApprover = fal
                         className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs bg-white shrink-0">
                         {Object.entries(ITEM_ACTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
-                      <input type="number" min="1" value={it.quantity} onChange={e => setItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
-                        className="w-12 px-1.5 py-1.5 rounded-lg border border-gray-200 text-xs text-center shrink-0" />
+                      <input type="number" min="1" step="1" inputMode="numeric" aria-label={`Item ${i + 1} quantity`} title="Quantity" value={it.quantity} onChange={e => setItems(a => a.map((x, idx) => idx === i ? { ...x, quantity: e.target.value } : x))}
+                        className={`w-12 px-1.5 py-1.5 rounded-lg border text-xs text-center shrink-0 ${parseServiceItemQty(it.quantity).ok ? "border-gray-200" : "border-red-400 bg-red-50"}`} />
                       <button type="button" onClick={() => setItems(a => a.filter((_, idx) => idx !== i))}
                         className="text-gray-300 hover:text-red-500 text-base px-1 shrink-0">×</button>
                     </div>
