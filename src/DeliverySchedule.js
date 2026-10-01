@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback , memo } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
+import LinkedServicesSection from "./LinkedServicesSection";
 import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -1894,6 +1895,10 @@ function UnassignedPreviewModal({ data, onClose }) {
             <Row label="Amount" value={amount != null && Number(amount) > 0 ? `RM ${Number(amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
             <Row label="Balance" value={parseFloat(balance) > 0 ? `RM ${Number(balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
           </div>
+          {/* Linked Service cases of this delivery's Sales Order — internal,
+              read-only, from the canonical Service records (renders nothing
+              when there are none). Not shown for a Service stop itself. */}
+          {type !== "service" && <LinkedServicesSection soNumber={isDo ? so.order_number : item.so_number} />}
           {item.service_note && (
             <div>
               <p className="text-xs font-medium text-gray-500 mb-1">Service note</p>
