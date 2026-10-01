@@ -7,7 +7,7 @@
 // DeliverySchedule.printOrder.test.js and .printExclusion.test.js continue to
 // assert the same rules through the rendered print DOM; together they prove the
 // extraction preserved behaviour on both sides.
-import { buildTeamScheduleRows } from "./DeliverySchedule";
+import { buildTeamScheduleRows, serviceDetailOf } from "./DeliverySchedule";
 
 const stop = (id, sort_order, so_number, extra = {}) => ({
   id, sort_order, slot: null,
@@ -123,6 +123,38 @@ describe("buildTeamScheduleRows — legacy and service stops", () => {
     const rows = buildTeamScheduleRows({ schedules: [sc] });
     expect(rows).toHaveLength(1);
     expect(rows[0].item.itemName).toBe("Replace sofa leg");
+  });
+
+  test("a Service order WITH line items carries its Service Note as the stop's remark (not as an item)", () => {
+    const sc = { ...stop(1, 1, "SV-3"), orders: {
+      id: 1, so_number: "SV-3", customer_name: "C", balance: 0, type: "Service",
+      linked_so: "55732 55733", remark: "Linked to SO: 55732 55733 | PREFER AFTER 3PM\nQC first",
+      service_note: "Linked to SO: 55732 55733 | PREFER AFTER 3PM\nQC first",
+      items: JSON.stringify([{ itemName: "Sofa leg" }, { itemName: "Cushion zip" }]),
+    } };
+    const rows = buildTeamScheduleRows({ schedules: [sc] });
+    expect(rows.map(r => r.item.itemName)).toEqual(["Sofa leg", "Cushion zip"]);
+    expect(rows.map(r => r.serviceRemark)).toEqual(["PREFER AFTER 3PM\nQC first", "PREFER AFTER 3PM\nQC first"]);
+  });
+
+  test("a Service order whose detail is printed as the Item does not repeat it as the remark", () => {
+    const sc = { ...stop(1, 1, "SV-4"), orders: { id: 1, so_number: "SV-4", customer_name: "C", items: "[]", balance: 0, type: "Service", service_note: "Linked to SO: 1 2 | Fix door" } };
+    const rows = buildTeamScheduleRows({ schedules: [sc] });
+    expect(rows[0].item.itemName).toBe("Fix door");
+    expect(rows[0].serviceRemark).toBe("");
+  });
+
+  test("non-Service stops never get a service remark", () => {
+    const sc = { ...stop(1, 1, "SO-9"), orders: { id: 1, so_number: "SO-9", customer_name: "C", balance: 0, remark: "SO remark", items: JSON.stringify([{ itemName: "Bed" }]) } };
+    expect(buildTeamScheduleRows({ schedules: [sc] })[0].serviceRemark).toBe("");
+  });
+
+  test("serviceDetailOf strips single- and multi-SO prefixes, and a bare prefix to empty", () => {
+    expect(serviceDetailOf({ service_note: "Linked to SO: 56190 | Replace sofa leg" })).toBe("Replace sofa leg");
+    expect(serviceDetailOf({ service_note: "Linked to SO: 55801 55802 (FLW 55779) | ARRANGE ASAP" })).toBe("ARRANGE ASAP");
+    expect(serviceDetailOf({ service_note: "Linked to SO: 55908 55909" })).toBe("");
+    expect(serviceDetailOf({ service_note: "No prefix | keeps pipes" })).toBe("No prefix | keeps pipes");
+    expect(serviceDetailOf({})).toBe("");
   });
 
   test("a Service order with no detail at all still labels the row 'Service'", () => {

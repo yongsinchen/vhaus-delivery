@@ -472,6 +472,14 @@ const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.
 //
 // Returns a flat row list; the rows of one stop share `o`/`sc` and carry
 // `isFirst`/`rowspan` so a renderer can span the stop-level columns.
+// The Service Note text of a Service stop's legacy order: orders.service_note
+// is the backend-maintained copy of services.description, composed as
+// "Linked to SO: <one or more SOs> | <description>". Strip that prefix (up to
+// the first "|", so multi-SO links like "55732 55733" are handled).
+export function serviceDetailOf(o) {
+  return String(o?.service_note || o?.remark || "").replace(/^Linked to SO:[^|]*(\||$)\s*/i, "").trim();
+}
+
 export function buildTeamScheduleRows(team) {
   const allRows = [];
   sortSchedulesForPrint(team?.schedules).forEach(sc => {
@@ -502,12 +510,17 @@ export function buildTeamScheduleRows(team) {
           arrivalDate: arrivalFor(i),
         }))
       : parseItemsSafe(o.items);
-    if (o.type === "Service" && items.length === 0) {
-      const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
-      items = [{ itemName: detail || "Service" }];
+    // Service stops: the Service Note (the case's own description) prints as
+    // the stop's Remark — or as its Item when the case has no line items, in
+    // which case it is not repeated in the Remark.
+    let serviceRemark = "";
+    if (o.type === "Service") {
+      const detail = serviceDetailOf(o);
+      if (items.length === 0) items = [{ itemName: detail || "Service" }];
+      else serviceRemark = detail;
     }
     const displayItems = items.length > 0 ? items : [{}];
-    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
+    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0, serviceRemark }); });
   });
   return allRows;
 }
@@ -636,6 +649,7 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     const remarkParts = [];
     if (o.type === "Service") {
       if (o.linked_so) remarkParts.push({ font: { size: 10 }, text: `Linked SO: ${o.linked_so}` });
+      if (gRows[0].serviceRemark) remarkParts.push({ font: { size: 10 }, text: (remarkParts.length ? "\n" : "") + gRows[0].serviceRemark });
     } else if (rowRemark) {
       remarkParts.push({ font: { size: 10 }, text: rowRemark });
     }
@@ -1211,7 +1225,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
           labelled fields instead of the combined "Linked to SO: <n> | …" blob
           the service RPC writes into remark/service_note. */}
       {o.type === "Service" ? (() => {
-        const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
+        const detail = serviceDetailOf(o);
         if (!o.linked_so && !detail) return null;
         return (
           <div className="bg-violet-50 border border-violet-200 text-violet-800 rounded px-2 py-1 text-[11px] mt-1 space-y-0.5">
@@ -1357,7 +1371,10 @@ export function TeamPrintView({ team, onClose, company }) {
                           const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
                           return (
                             <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>
-                              {o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
+                              {o.type==="Service" ? (<>
+                                {o.linked_so&&<div>Linked SO: {o.linked_so}</div>}
+                                {rows[0].serviceRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rows[0].serviceRemark}</div>}
+                              </>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
                               {sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}
                             </td>
                           );
