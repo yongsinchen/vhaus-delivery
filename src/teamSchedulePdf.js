@@ -18,6 +18,7 @@
 // a self-hosted Noto Sans SC subset fetched only when the user downloads.
 import {
   buildTeamScheduleRows, teamScheduleStopCells, teamScheduleItemCells, TEAM_SCHEDULE_COLUMNS,
+  teamScheduleStopUnits, teamScheduleGroupBanner,
 } from "./DeliverySchedule";
 
 const PAGE_W = 297, PAGE_H = 210, MARGIN = 8;
@@ -126,9 +127,9 @@ const baseTableOptions = {
 
 // autotable body rows for one stop — the same cells, in the same column order,
 // as the printed sheet (stop-level cells span the stop's item rows).
-function stopBody(doc, group, team) {
+function stopBody(doc, group, team, banner) {
   const { o, sc, rows } = group;
-  const cells = teamScheduleStopCells(o, sc, rows, team);
+  const cells = teamScheduleStopCells(o, sc, rows, team, { bannerAddress: banner?.address });
   const n = rows.length;
   const info = layoutParts(doc, cells.info, COL_W[0] - PAD.left - PAD.right);
   const remark = layoutParts(doc, cells.remark, COL_W[15] - PAD.left - PAD.right);
@@ -157,6 +158,18 @@ function stopBody(doc, group, team) {
     if (i === 0) row.push({ content: "", rowSpan: n, _rich: remark.lines, styles: { minCellHeight: remark.height } });
     return row;
   });
+}
+
+// A grouped Customer Stop's banner row (customer once + the orders delivered
+// together), spanning all 16 columns above its child orders.
+function bannerRow(doc, banner) {
+  const parts = [
+    { text: banner.label, bold: true, color: "#0f766e" },
+    { text: [banner.customer, banner.contact].filter(Boolean).join("    "), bold: true },
+    { text: [banner.address, banner.orders.join("  ·  ")].filter(Boolean).join("    ·    "), small: true, color: "#555555" },
+  ];
+  const laid = layoutParts(doc, parts, CONTENT_W - PAD.left - PAD.right);
+  return [{ content: "", colSpan: 16, _rich: laid.lines, styles: { minCellHeight: laid.height, fillColor: [230, 246, 244] } }];
 }
 
 const drawRichCell = (data) => {
@@ -209,13 +222,15 @@ export function buildTeamSchedulePdf({ jsPDF, createTable, drawTable, team, comp
     if (!headerPages.has(page)) { headerPages.add(page); drawHeader(doc, MARGIN, hl); }
   };
 
-  // Group rows by stop, exactly as the printed sheet does.
-  const groups = [];
-  let cur = null;
-  for (const row of buildTeamScheduleRows(team)) {
-    if (row.isFirst) { cur = { sc: row.sc, o: row.o, rows: [] }; groups.push(cur); }
-    if (cur) cur.rows.push(row);
-  }
+  // Route units, exactly as the printed sheet: one per stop; a Deliver
+  // Together group is ONE customer stop (banner + its child orders), measured
+  // and kept together as a whole.
+  const units = teamScheduleStopUnits(buildTeamScheduleRows(team));
+  const groups = units.flatMap(u => u.children);
+  const unitBody = (unit) => {
+    const banner = unit.grouped ? teamScheduleGroupBanner(unit.children) : null;
+    return [...(banner ? [bannerRow(doc, banner)] : []), ...unit.children.flatMap(g => stopBody(doc, g, team, banner))];
+  };
 
   const tableOptions = (body, startY) => ({
     ...baseTableOptions, body, startY,
@@ -230,9 +245,9 @@ export function buildTeamSchedulePdf({ jsPDF, createTable, drawTable, team, comp
     y = doc.lastAutoTable.finalY;
   }
 
-  for (const g of groups) {
-    const body = stopBody(doc, g, team);
-    let t = createTable(doc, tableOptions(body, y));
+  for (const unit of units) {
+    const g = { ...unit.children[0], children: unit.children, stopNo: unit.stopNo, grouped: unit.grouped };
+    let t = createTable(doc, tableOptions(unitBody(unit), y));
     const height = t.body.reduce((h, r) => h + r.height, 0);
     // Keep a stop whole: move it to a fresh page when it doesn't fit here but
     // would fit on an empty page. A stop taller than a page continues across
@@ -240,7 +255,7 @@ export function buildTeamSchedulePdf({ jsPDF, createTable, drawTable, team, comp
     if (y + height > bottom + 0.01 && y > pageTop + 0.01 && height <= bottom - pageTop) {
       doc.addPage(); withHeader();
       y = pageTop;
-      t = createTable(doc, tableOptions(stopBody(doc, g, team), y));
+      t = createTable(doc, tableOptions(unitBody(unit), y));
     }
     const firstPage = doc.getCurrentPageInfo().pageNumber;
     drawTable(doc, t);
