@@ -3,6 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
+import { effectiveDeliveryDisplay } from "./effectiveDelivery";
 import RecordPaymentModal from "./RecordPaymentModal";
 import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
@@ -1920,7 +1921,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                   {o.salesman_name ? ` · ${o.salesman_name}` : ""}
                   {o.delivery_type ? ` · ${o.delivery_type}` : ""}
                   {o.order_date ? ` · 🧾 ${o.order_date}` : ""}
-                  {o.delivery_date ? ` · 📅 ${o.delivery_date === "TBC" ? "TBC" : o.delivery_date}` : ""}
+                  {(() => { const ed = effectiveDeliveryDisplay(o); return ed.text ? ` · 📅 ${ed.text}` : ""; })()}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -2105,7 +2106,26 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                   {/* Delivery info */}
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Type</p><p className="font-medium">{view.delivery_type || "Delivery"}</p></div>
-                    <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Date</p><p className={`font-medium ${view.delivery_date === "TBC" ? "text-amber-600" : ""}`}>{view.delivery_date || "-"}</p></div>
+                    {(() => {
+                      // A pending amendment's preview shows its proposed date; otherwise
+                      // the effective date (active DO's when one exists — effectiveDelivery.js).
+                      const ed = showingProposed ? effectiveDeliveryDisplay({ delivery_date: view.delivery_date }) : effectiveDeliveryDisplay(o);
+                      return (
+                        <div className="bg-gray-50 rounded-xl p-2.5" data-testid="so-delivery-date">
+                          <p className="text-xs text-gray-400">Date</p>
+                          {ed.kind === "multiple" ? (
+                            <div className="space-y-0.5">
+                              {ed.deliveries.map(d => (
+                                <p key={d.delivery_order_id} className="text-xs"><span className={`font-medium ${d.date ? "" : "text-amber-600"}`}>{d.date || "TBC"}</span> <span className="text-gray-400">{d.do_number}</span></p>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={`font-medium ${ed.kind === "tbc" ? "text-amber-600" : ""}`}>{ed.text || "-"}</p>
+                          )}
+                          {ed.doNumber && <p className="text-[10px] text-gray-400" title="Delivery Order date — the active DO is authoritative">{ed.doNumber}</p>}
+                        </div>
+                      );
+                    })()}
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{view.delivery_time_slot || "-"}</p></div>
                   </div>
 
@@ -2158,7 +2178,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
                   {!isDateApprover && !["cancelled", "delivered"].includes(o.status) && (
                     <RequestDeliveryDatePanel order={o} onChanged={() => {
                       loadOrders(page);
-                      getFullOrder(o).then(({ order: full }) => { if (full) setViewingOrder(full); }).catch(() => {});
+                      // { id } only: force a refetch — an auto-approved request has just
+                      // moved the active DO, and the Date box shows the DO's date.
+                      getFullOrder({ id: o.id }).then(({ order: full }) => { if (full?.sales_order_items) setViewingOrder(full); }).catch(() => {});
                     }} />
                   )}
 
