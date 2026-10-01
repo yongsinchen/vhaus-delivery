@@ -546,6 +546,53 @@ function arrivalCellFor(item) {
     : { text: "No arrival", color: "#ff0000", bold: true };
 }
 
+// The stop-level cells of the team schedule — SO / Customer block, salesman,
+// trip, plate and Remark — as styled text parts, built once from a stop's rows
+// (buildTeamScheduleRows). Shared by the Excel export and the PDF download so
+// they render the same text with the same rules as the printed sheet:
+//  - a DO stop shows ITS OWN remark, never the legacy order's (P0);
+//  - a Service stop's Remark is "Linked SO" + its Service Note (rows carry
+//    serviceRemark only when the note isn't already printed as the Item);
+//  - the stop's dispatcher note (sc.notes) follows, italic grey.
+// Part flags: bold, italic, small (one size smaller), color (CSS hex).
+const fmtBalance = (v) => `Bal: RM ${Number(v).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export function teamScheduleStopCells(o, sc, rows, team) {
+  const info = [{ text: String(o.so_number || ""), bold: true }];
+  if (o.customer_name) info.push({ text: o.customer_name });
+  if (o.contact) info.push({ text: o.contact, color: "#555555" });
+  if (o.address) info.push({ text: o.address, color: "#555555", small: true });
+  if (parseFloat(o.balance) > 0) info.push({ text: fmtBalance(o.balance), bold: true, color: "#ff0000" });
+  if (sc.slot) info.push({ text: `Slot: ${sc.slot}`, bold: true, color: "#1e40af" });
+
+  const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
+  const remark = [];
+  if (o.type === "Service") {
+    if (o.linked_so) remark.push({ text: `Linked SO: ${o.linked_so}` });
+    if (rows[0]?.serviceRemark) remark.push({ text: rows[0].serviceRemark });
+  } else if (rowRemark) {
+    remark.push({ text: rowRemark });
+  }
+  if (sc.notes) remark.push({ text: sc.notes, italic: true, color: "#555555" });
+
+  return {
+    info, remark,
+    salesman: o.salesman || "-",
+    trip: { text: sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", color: sc.trip_no > 1 ? "#6b7280" : "#059669" },
+    plate: team?.vehicle_plate || "-",
+  };
+}
+
+// The per-item cells of one schedule row, in TEAM_SCHEDULE_COLUMNS order
+// (minus the stop-level columns), shared by the Excel export and the PDF.
+export function teamScheduleItemCells(item, idx) {
+  const name = Object.keys(item).length ? itemDisplayName(item) : { text: "", isFallback: false };
+  return {
+    no: idx + 1, code: item.itemCode || "", name, unit: item.unit || "", supplier: item.supplier || "",
+    orderDate: item.itemOrderDate || "", sentDate: item.supplierSentDate || "", arrival: arrivalCellFor(item),
+  };
+}
+export { TEAM_SCHEDULE_COLUMNS };
+
 // CSS hex (#rrggbb) -> ExcelJS ARGB (FFrrggbb).
 const argb = css => (css ? "FF" + css.replace("#", "").toUpperCase() : null);
 
@@ -633,34 +680,24 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     const { o, sc, rows: gRows } = g;
     const first = r;
     const span = gRows.length;
-    const hasBalance = parseFloat(o.balance) > 0;
-
-    // SO / Customer — one rich-text block matching the printed cell.
-    const infoParts = [{ font: { bold: true, size: 10 }, text: String(o.so_number || "") }];
-    if (o.customer_name) infoParts.push({ font: { size: 10 }, text: "\n" + o.customer_name });
-    if (o.contact) infoParts.push({ font: { size: 10, color: { argb: "FF555555" } }, text: "\n" + o.contact });
-    if (o.address) infoParts.push({ font: { size: 9, color: { argb: "FF555555" } }, text: "\n" + o.address });
-    if (hasBalance) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FFFF0000" } }, text: `\nBal: RM ${Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` });
-    if (sc.slot) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FF1E40AF" } }, text: `\nSlot: ${sc.slot}` });
+    // Stop-level cells from the shared builder (teamScheduleStopCells) — the
+    // same parts the PDF download renders — as ExcelJS rich text, one line per
+    // part, so the content can't drift between the two exports.
+    const cells = teamScheduleStopCells(o, sc, gRows, team);
+    const toRich = (parts) => parts.map((part, i) => ({
+      font: { ...(part.bold ? { bold: true } : {}), size: part.small ? 9 : 10, ...(part.italic ? { italic: true } : {}), ...(part.color ? { color: { argb: argb(part.color) } } : {}) },
+      text: (i ? "\n" : "") + part.text,
+    }));
+    const infoParts = toRich(cells.info);
+    const remarkParts = toRich(cells.remark);
     const infoText = infoParts.map(p => p.text).join("");
-
-    // Remark — a DO stop shows ITS OWN remark, never the legacy order's (P0).
-    const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
-    const remarkParts = [];
-    if (o.type === "Service") {
-      if (o.linked_so) remarkParts.push({ font: { size: 10 }, text: `Linked SO: ${o.linked_so}` });
-      if (gRows[0].serviceRemark) remarkParts.push({ font: { size: 10 }, text: (remarkParts.length ? "\n" : "") + gRows[0].serviceRemark });
-    } else if (rowRemark) {
-      remarkParts.push({ font: { size: 10 }, text: rowRemark });
-    }
-    if (sc.notes) remarkParts.push({ font: { size: 10, italic: true, color: { argb: "FF555555" } }, text: (remarkParts.length ? "\n" : "") + sc.notes });
     const remarkText = remarkParts.map(p => p.text).join("");
 
     gRows.forEach(({ item, idx }, i) => {
       const row = r + i;
       const isFirstRow = i === 0;
-      const name = Object.keys(item).length ? itemDisplayName(item) : { text: "", isFallback: false };
-      const arrival = arrivalCellFor(item);
+      const ic = teamScheduleItemCells(item, idx);
+      const { name, arrival } = ic;
 
       const put = (col, value, opts = {}) => {
         const c = ws.getCell(row, col);
@@ -673,12 +710,12 @@ export async function exportTeamScheduleExcel(team, company = {}) {
 
       if (isFirstRow) {
         put(1, infoParts.length ? { richText: infoParts } : "", { alignment: { wrapText: true, vertical: "top" } });
-        put(2, o.salesman || "-", { font: { size: 9 } });
-        put(3, sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", {
-          font: { size: 9, color: { argb: sc.trip_no > 1 ? "FF6B7280" : "FF059669" } },
+        put(2, cells.salesman, { font: { size: 9 } });
+        put(3, cells.trip.text, {
+          font: { size: 9, color: { argb: argb(cells.trip.color) } },
           alignment: { horizontal: "center", vertical: "top" },
         });
-        put(6, team?.vehicle_plate || "-", { alignment: { horizontal: "center", vertical: "top" } });
+        put(6, cells.plate, { alignment: { horizontal: "center", vertical: "top" } });
         put(16, remarkParts.length ? { richText: remarkParts } : "", { alignment: { wrapText: true, vertical: "top" } });
       } else {
         // Cells inside a vertical merge still need their borders drawn.
@@ -687,16 +724,16 @@ export async function exportTeamScheduleExcel(team, company = {}) {
 
       put(4, "", { alignment: { horizontal: "center" } });  // Check — filled by hand
       put(5, "", { alignment: { horizontal: "center" } });  // Naik  — filled by hand
-      put(7, idx + 1, { alignment: { horizontal: "center" } });
-      put(8, item.itemCode || "");
+      put(7, ic.no, { alignment: { horizontal: "center" } });
+      put(8, ic.code);
       put(9, name.text, {
         font: name.isFallback ? { size: 10, italic: true, color: { argb: "FFFF0000" } } : { size: 10 },
         alignment: { wrapText: true, vertical: "top" },
       });
-      put(10, item.unit || "", { alignment: { horizontal: "center" } });
-      put(11, item.supplier || "");
-      put(12, item.itemOrderDate || "", { alignment: { horizontal: "center" } });
-      put(13, item.supplierSentDate || "", { alignment: { horizontal: "center" } });
+      put(10, ic.unit, { alignment: { horizontal: "center" } });
+      put(11, ic.supplier);
+      put(12, ic.orderDate, { alignment: { horizontal: "center" } });
+      put(13, ic.sentDate, { alignment: { horizontal: "center" } });
       put(14, "", { alignment: { horizontal: "center" } });  // JB Sent — filled by hand
       put(15, arrival.text, {
         font: { size: 10, bold: arrival.bold, ...(arrival.color ? { color: { argb: argb(arrival.color) } } : {}) },
@@ -1264,6 +1301,21 @@ const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .p
 
 // -- Team Print View ---------------------------------------------------
 export function TeamPrintView({ team, onClose, company }) {
+  const toast = useToast();
+  const [pdfBusy, setPdfBusy] = useState(false);
+  // Real PDF download (no print dialog) — lazily loads the PDF module, jsPDF
+  // and the font so none of it weighs on the board until it's used.
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { exportTeamSchedulePdf } = await import("./teamSchedulePdf");
+      await exportTeamSchedulePdf(team, company);
+    } catch (e) {
+      if (toast?.error) toast.error(`Could not create the PDF: ${e.message || e}`); else console.error("PDF export failed:", e);
+    } finally {
+      setPdfBusy(false);
+    }
+  };
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
     if (!printArea) return;
@@ -1298,6 +1350,9 @@ export function TeamPrintView({ team, onClose, company }) {
             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
             {/* Same rows as the preview below — see buildTeamScheduleRows. */}
             <button onClick={() => exportTeamScheduleExcel(team, company).catch(() => {})} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700" title="Download as Excel">Excel</button>
+            {/* Same team/date and the same rows as this preview — the PDF is
+                built from buildTeamScheduleRows + the shared cell builders. */}
+            <button onClick={downloadPdf} disabled={pdfBusy} className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60" title="Download as PDF">{pdfBusy ? "Preparing PDF…" : "Download PDF"}</button>
             <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Print</button>
           </div>
         </div>
