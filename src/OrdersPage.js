@@ -346,7 +346,9 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
        rather than being shrunk to fit one page). */
     .page + .page { page-break-before: always; }
     .copytag { background: rgba(255,255,255,.18); border: 0.5px solid rgba(255,255,255,.6); border-radius: 3px; padding: 1px 8px; font-weight: 800; letter-spacing: 1.5px; }
-    .doc { width: 100%; border: 1px solid #1f2937; }
+    /* clone: each printed page's fragment of the copy gets its own closed frame
+       instead of open side lines running off the page edge. */
+    .doc { width: 100%; border: 1px solid #1f2937; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
     /* Pagination: repeat the item-table column header on every printed page
        (native <thead> behaviour), never split a single item row across a
        page break, and keep the totals block and the signature block each
@@ -356,6 +358,13 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     table.items tbody tr { page-break-inside: avoid; break-inside: avoid; }
     .midrow { page-break-inside: avoid; break-inside: avoid; }
     .sign { page-break-inside: avoid; break-inside: avoid; }
+    /* A section heading never stays behind at the foot of a page without its
+       body: Payment Method (heading + block) moves as one unit, and the
+       Important Notes / Terms blocks are each kept whole. */
+    .keep, .blk { page-break-inside: avoid; break-inside: avoid; }
+    /* Continuation context, inside the repeating <thead>: every printed page
+       of the item table says which SO / copy / customer it belongs to. */
+    table.items thead tr.ctx th { background: #fff; border-top: none; border-bottom: none; border-right: none; padding: 2px 8px 3px; font-size: 8px; font-weight: 600; letter-spacing: 0.3px; text-transform: none; color: #6b7280; text-align: right; }
     .sec { border-bottom: 0.5px solid #1f2937; }
     .sec:last-child { border-bottom: none; }
     .pad { padding: 6px 13px; }
@@ -491,7 +500,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
         </div>
       </div>
       <table class="items sec">
-        <thead><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
+        <thead><tr class="ctx"><th colspan="5">Sales Order ${esc(order.order_number || "")} · ${copyTag} · ${esc(order.customer_name || "")}</th></tr><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
         <tbody>${itemRows.join("")}</tbody>
       </table>
       <div class="midrow sec">
@@ -508,15 +517,15 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
           <div class="srow grand"><span class="lab">BALANCE DUE</span><span class="num">${money(balance)}</span></div>
         </div>
       </div>
-      <div class="sectitle sec">Payment Method</div>
-      <div class="blk sec">
+      <div class="keep sec"><div class="sectitle">Payment Method</div>
+      <div class="blk" style="border-top:0.5px solid #1f2937">
         <div class="pay-grid">${payOptions}</div>
         <div class="pay-fields">
           ${COMPANY.bank ? `<div class="pf"><span class="lab">Bank Account :</span><span class="line">${esc(COMPANY.bank)}</span></div>` : ""}
           <div class="pf"><span class="lab">Reference :</span><span class="line">&nbsp;</span></div>
           <div class="pf"><span class="lab">Paid Amount :</span><span class="line">RM ${money(deposit)}</span></div>
         </div>
-      </div>
+      </div></div>
       <div class="blk notes sec">
         <div class="h">Important Notes</div>
         <ul>
