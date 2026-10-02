@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback , memo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
+import LinkedServicesSection from "./LinkedServicesSection";
 import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -472,12 +473,86 @@ const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.
 //
 // Returns a flat row list; the rows of one stop share `o`/`sc` and carry
 // `isFirst`/`rowspan` so a renderer can span the stop-level columns.
+// The Service Note text of a Service stop's legacy order: orders.service_note
+// is the backend-maintained copy of services.description, composed as
+// "Linked to SO: <one or more SOs> | <description>". Strip that prefix (up to
+// the first "|", so multi-SO links like "55732 55733" are handled).
+export function serviceDetailOf(o) {
+  return String(o?.service_note || o?.remark || "").replace(/^Linked to SO:[^|]*(\||$)\s*/i, "").trim();
+}
+
+// ── Deliver Together → one Customer Stop (delivery-layer grouping only) ──
+// The canonical grouping is the Deliver Together link from the delivery date
+// requests (delivery_date_requests.link_group_id), served company-scoped by
+// GET /delivery-links as groups of members { order_id (legacy orders.id),
+// sales_order_id, so_number, delivery_order_id, ... }. The board stamps each
+// scheduled stop with the group it belongs to — matched on stable SO-level ids
+// (legacy order id, else sales order id), never on name/phone/address, and at
+// SO level so a superseded → regenerated DO stays in its group. Nothing is
+// merged commercially: each SO / DO stays its own child with its own items.
+export function annotateLinkGroups(teams, groups, boardDate = null) {
+  const byOrderId = new Map(), bySalesOrderId = new Map();
+  for (const g of (groups || [])) {
+    for (const m of (g.members || [])) {
+      const entry = { id: g.link_group_id, date: g.requested_date };
+      if (m.order_id != null) (byOrderId.get(String(m.order_id)) || byOrderId.set(String(m.order_id), []).get(String(m.order_id))).push(entry);
+      if (m.sales_order_id) (bySalesOrderId.get(String(m.sales_order_id)) || bySalesOrderId.set(String(m.sales_order_id), []).get(String(m.sales_order_id))).push(entry);
+    }
+  }
+  return (teams || []).map(t => ({
+    ...t,
+    schedules: (t.schedules || []).map(sc => {
+      const cands = byOrderId.get(String(sc.orders?.id ?? sc.order_id ?? "")) || bySalesOrderId.get(String(sc.delivery_orders?.sales_order_id ?? "")) || [];
+      // An SO in more than one live group: prefer the group requested for this date.
+      const day = t.team_date || boardDate;
+      const pick = cands.find(c => c.date && c.date === day) || cands[0];
+      return pick ? { ...sc, _link_group_id: pick.id } : sc;
+    }),
+  }));
+}
+
+// Collapse ONE team's (already ordered) stops into route units: stops of the
+// same Deliver Together group become one unit at the position of the group's
+// first stop; every other stop keeps its place. Grouping is per team list, so
+// different teams / dates never merge, and only stops already on this
+// schedule are ever involved (a link id can't pull anything in). Superseded
+// DO rows never join a group. Returns [[entry, …], …].
+export function groupLinkedStops(entries, scOf = e => e) {
+  const counts = new Map();
+  for (const e of entries) { const sc = scOf(e); const id = sc?._link_group_id; if (id && !sc?.delivery_orders?.superseded_at) counts.set(id, (counts.get(id) || 0) + 1); }
+  const units = [], unitOf = new Map();
+  for (const e of entries) {
+    const sc = scOf(e);
+    const id = sc?._link_group_id;
+    const groupable = id && !sc?.delivery_orders?.superseded_at && counts.get(id) > 1;
+    if (groupable && unitOf.has(id)) { unitOf.get(id).push(e); continue; }
+    const unit = [e];
+    if (groupable) unitOf.set(id, unit);
+    units.push(unit);
+  }
+  return units;
+}
+
+// The shared banner of a grouped Customer Stop: the customer shown ONCE
+// (first child's details) plus which orders are delivered together.
+export function teamScheduleGroupBanner(children) {
+  const o = children[0]?.o || {};
+  const orders = children.map(c => c.o.so_number).filter(Boolean);
+  return {
+    customer: o.customer_name || "", contact: o.contact || "", address: o.address || "",
+    label: `Customer stop — deliver together · ${children.length} orders`,
+    orders,
+  };
+}
+
 export function buildTeamScheduleRows(team) {
-  const allRows = [];
+  const perStop = [];
   sortSchedulesForPrint(team?.schedules).forEach(sc => {
     const o = sc.orders;
     if (!o) return;
     if (isSupersededPrintRow(sc)) return;
+    const allRows = [];
+    perStop.push({ sc, rows: allRows });
 
     const jsonItems = parseItemsSafe(o.items);
     const usedJson = new Set();
@@ -502,14 +577,45 @@ export function buildTeamScheduleRows(team) {
           arrivalDate: arrivalFor(i),
         }))
       : parseItemsSafe(o.items);
-    if (o.type === "Service" && items.length === 0) {
-      const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
-      items = [{ itemName: detail || "Service" }];
+    // Service stops: the Service Note (the case's own description) prints as
+    // the stop's Remark — or as its Item when the case has no line items, in
+    // which case it is not repeated in the Remark.
+    let serviceRemark = "";
+    if (o.type === "Service") {
+      const detail = serviceDetailOf(o);
+      if (items.length === 0) items = [{ itemName: detail || "Service" }];
+      else serviceRemark = detail;
     }
     const displayItems = items.length > 0 ? items : [{}];
-    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0 }); });
+    displayItems.forEach((item, idx) => { allRows.push({ o: sc.delivery_orders ? { ...o, so_number: `${o.so_number} · ${sc.delivery_orders.do_number}` } : o, sc, item, idx, rowspan: displayItems.length, isFirst: idx === 0, serviceRemark }); });
   });
-  return allRows;
+  // Route units: a Deliver Together group on this team is ONE customer stop
+  // (its children stay separate orders); everything else is one stop each.
+  // Rows gain stop metadata — stopNo (route position), stopSize (child orders
+  // in the stop), childIndex, isStopFirst, stopRows, grouped, linkGroupId.
+  const out = [];
+  groupLinkedStops(perStop, p => p.sc).forEach((unit, u) => {
+    const grouped = unit.length > 1;
+    const stopRows = unit.reduce((n, p) => n + p.rows.length, 0);
+    unit.forEach((p, childIndex) => p.rows.forEach(r => out.push({
+      ...r, stopNo: u + 1, stopSize: unit.length, childIndex, stopRows,
+      isStopFirst: childIndex === 0 && r.isFirst, grouped, linkGroupId: grouped ? p.sc._link_group_id : null,
+    })));
+  });
+  return out;
+}
+
+// Rows → stop units [{ stopNo, grouped, children: [{ o, sc, rows }] }] — the
+// shape every renderer (print, Excel, PDF) walks.
+export function teamScheduleStopUnits(rows) {
+  const units = [];
+  let unit = null, child = null;
+  for (const r of rows) {
+    if (r.isStopFirst) { unit = { stopNo: r.stopNo, grouped: r.grouped, children: [] }; units.push(unit); }
+    if (r.isFirst) { child = { o: r.o, sc: r.sc, rows: [] }; unit.children.push(child); }
+    child.rows.push(r);
+  }
+  return units;
 }
 
 // The 16 operational columns of the team schedule, shared by print and Excel.
@@ -532,6 +638,57 @@ function arrivalCellFor(item) {
     ? { text: String(item.arrivalDate), color: null, bold: false }
     : { text: "No arrival", color: "#ff0000", bold: true };
 }
+
+// The stop-level cells of the team schedule — SO / Customer block, salesman,
+// trip, plate and Remark — as styled text parts, built once from a stop's rows
+// (buildTeamScheduleRows). Shared by the Excel export and the PDF download so
+// they render the same text with the same rules as the printed sheet:
+//  - a DO stop shows ITS OWN remark, never the legacy order's (P0);
+//  - a Service stop's Remark is "Linked SO" + its Service Note (rows carry
+//    serviceRemark only when the note isn't already printed as the Item);
+//  - the stop's dispatcher note (sc.notes) follows, italic grey.
+// Part flags: bold, italic, small (one size smaller), color (CSS hex).
+const fmtBalance = (v) => `Bal: RM ${Number(v).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Inside a grouped Customer Stop (rows[0].grouped) the customer name and
+// contact are shown once in the stop banner, not per child; a child's address
+// is only repeated when it differs from the banner's.
+export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {}) {
+  const grouped = !!rows[0]?.grouped;
+  const info = [{ text: String(o.so_number || ""), bold: true }];
+  if (o.customer_name && !grouped) info.push({ text: o.customer_name });
+  if (o.contact && !grouped) info.push({ text: o.contact, color: "#555555" });
+  if (o.address && (!grouped || o.address !== bannerAddress)) info.push({ text: o.address, color: "#555555", small: true });
+  if (parseFloat(o.balance) > 0) info.push({ text: fmtBalance(o.balance), bold: true, color: "#ff0000" });
+  if (sc.slot) info.push({ text: `Slot: ${sc.slot}`, bold: true, color: "#1e40af" });
+
+  const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
+  const remark = [];
+  if (o.type === "Service") {
+    if (o.linked_so) remark.push({ text: `Linked SO: ${o.linked_so}` });
+    if (rows[0]?.serviceRemark) remark.push({ text: rows[0].serviceRemark });
+  } else if (rowRemark) {
+    remark.push({ text: rowRemark });
+  }
+  if (sc.notes) remark.push({ text: sc.notes, italic: true, color: "#555555" });
+
+  return {
+    info, remark,
+    salesman: o.salesman || "-",
+    trip: { text: sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", color: sc.trip_no > 1 ? "#6b7280" : "#059669" },
+    plate: team?.vehicle_plate || "-",
+  };
+}
+
+// The per-item cells of one schedule row, in TEAM_SCHEDULE_COLUMNS order
+// (minus the stop-level columns), shared by the Excel export and the PDF.
+export function teamScheduleItemCells(item, idx) {
+  const name = Object.keys(item).length ? itemDisplayName(item) : { text: "", isFallback: false };
+  return {
+    no: idx + 1, code: item.itemCode || "", name, unit: item.unit || "", supplier: item.supplier || "",
+    orderDate: item.itemOrderDate || "", sentDate: item.supplierSentDate || "", arrival: arrivalCellFor(item),
+  };
+}
+export { TEAM_SCHEDULE_COLUMNS };
 
 // CSS hex (#rrggbb) -> ExcelJS ARGB (FFrrggbb).
 const argb = css => (css ? "FF" + css.replace("#", "").toUpperCase() : null);
@@ -602,13 +759,10 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     empty.border = boxAll;
   }
 
-  // Group rows by stop, exactly as the printed sheet does.
-  const groups = [];
-  let cur = null;
-  rows.forEach(row => {
-    if (row.isFirst) { cur = { sc: row.sc, o: row.o, rows: [] }; groups.push(cur); }
-    if (cur) cur.rows.push(row);
-  });
+  // Route units, exactly as the printed sheet: a Deliver Together group is one
+  // customer stop — a merged banner row naming the customer once and the
+  // orders delivered together, then each child SO / DO with its own rows.
+  const units = teamScheduleStopUnits(rows);
 
   const ITEM_CHARS_PER_LINE = 25;  // approx chars fitting the Item column width
   const INFO_CHARS_PER_LINE = 22;  // approx chars fitting the SO / Customer column
@@ -616,37 +770,46 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / per)), 0);
 
   let r = HEAD + 1;
-  groups.forEach(g => {
+  units.forEach(unit => {
+  const banner = unit.grouped ? teamScheduleGroupBanner(unit.children) : null;
+  if (banner) {
+    ws.mergeCells(r, 1, r, COLS);
+    const b = ws.getCell(r, 1);
+    b.value = { richText: [
+      { font: { bold: true, size: 10, color: { argb: "FF0F766E" } }, text: `🔗 ${banner.label}   ` },
+      { font: { bold: true, size: 10 }, text: banner.customer },
+      ...(banner.contact ? [{ font: { size: 10, color: { argb: "FF555555" } }, text: `   ${banner.contact}` }] : []),
+      ...(banner.address ? [{ font: { size: 9, color: { argb: "FF555555" } }, text: `   ${banner.address}` }] : []),
+      { font: { size: 10, color: { argb: "FF555555" } }, text: `   · ${banner.orders.join("  ·  ")}` },
+    ] };
+    b.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6F6F4" } };
+    b.border = boxAll;
+    b.alignment = { vertical: "middle", wrapText: true };
+    ws.getRow(r).height = 18;
+    r += 1;
+  }
+  unit.children.forEach(g => {
     const { o, sc, rows: gRows } = g;
     const first = r;
     const span = gRows.length;
-    const hasBalance = parseFloat(o.balance) > 0;
-
-    // SO / Customer — one rich-text block matching the printed cell.
-    const infoParts = [{ font: { bold: true, size: 10 }, text: String(o.so_number || "") }];
-    if (o.customer_name) infoParts.push({ font: { size: 10 }, text: "\n" + o.customer_name });
-    if (o.contact) infoParts.push({ font: { size: 10, color: { argb: "FF555555" } }, text: "\n" + o.contact });
-    if (o.address) infoParts.push({ font: { size: 9, color: { argb: "FF555555" } }, text: "\n" + o.address });
-    if (hasBalance) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FFFF0000" } }, text: `\nBal: RM ${Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` });
-    if (sc.slot) infoParts.push({ font: { size: 10, bold: true, color: { argb: "FF1E40AF" } }, text: `\nSlot: ${sc.slot}` });
+    // Stop-level cells from the shared builder (teamScheduleStopCells) — the
+    // same parts the PDF download renders — as ExcelJS rich text, one line per
+    // part, so the content can't drift between the two exports.
+    const cells = teamScheduleStopCells(o, sc, gRows, team, { bannerAddress: banner?.address });
+    const toRich = (parts) => parts.map((part, i) => ({
+      font: { ...(part.bold ? { bold: true } : {}), size: part.small ? 9 : 10, ...(part.italic ? { italic: true } : {}), ...(part.color ? { color: { argb: argb(part.color) } } : {}) },
+      text: (i ? "\n" : "") + part.text,
+    }));
+    const infoParts = toRich(cells.info);
+    const remarkParts = toRich(cells.remark);
     const infoText = infoParts.map(p => p.text).join("");
-
-    // Remark — a DO stop shows ITS OWN remark, never the legacy order's (P0).
-    const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
-    const remarkParts = [];
-    if (o.type === "Service") {
-      if (o.linked_so) remarkParts.push({ font: { size: 10 }, text: `Linked SO: ${o.linked_so}` });
-    } else if (rowRemark) {
-      remarkParts.push({ font: { size: 10 }, text: rowRemark });
-    }
-    if (sc.notes) remarkParts.push({ font: { size: 10, italic: true, color: { argb: "FF555555" } }, text: (remarkParts.length ? "\n" : "") + sc.notes });
     const remarkText = remarkParts.map(p => p.text).join("");
 
     gRows.forEach(({ item, idx }, i) => {
       const row = r + i;
       const isFirstRow = i === 0;
-      const name = Object.keys(item).length ? itemDisplayName(item) : { text: "", isFallback: false };
-      const arrival = arrivalCellFor(item);
+      const ic = teamScheduleItemCells(item, idx);
+      const { name, arrival } = ic;
 
       const put = (col, value, opts = {}) => {
         const c = ws.getCell(row, col);
@@ -659,12 +822,12 @@ export async function exportTeamScheduleExcel(team, company = {}) {
 
       if (isFirstRow) {
         put(1, infoParts.length ? { richText: infoParts } : "", { alignment: { wrapText: true, vertical: "top" } });
-        put(2, o.salesman || "-", { font: { size: 9 } });
-        put(3, sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", {
-          font: { size: 9, color: { argb: sc.trip_no > 1 ? "FF6B7280" : "FF059669" } },
+        put(2, cells.salesman, { font: { size: 9 } });
+        put(3, cells.trip.text, {
+          font: { size: 9, color: { argb: argb(cells.trip.color) } },
           alignment: { horizontal: "center", vertical: "top" },
         });
-        put(6, team?.vehicle_plate || "-", { alignment: { horizontal: "center", vertical: "top" } });
+        put(6, cells.plate, { alignment: { horizontal: "center", vertical: "top" } });
         put(16, remarkParts.length ? { richText: remarkParts } : "", { alignment: { wrapText: true, vertical: "top" } });
       } else {
         // Cells inside a vertical merge still need their borders drawn.
@@ -673,16 +836,16 @@ export async function exportTeamScheduleExcel(team, company = {}) {
 
       put(4, "", { alignment: { horizontal: "center" } });  // Check — filled by hand
       put(5, "", { alignment: { horizontal: "center" } });  // Naik  — filled by hand
-      put(7, idx + 1, { alignment: { horizontal: "center" } });
-      put(8, item.itemCode || "");
+      put(7, ic.no, { alignment: { horizontal: "center" } });
+      put(8, ic.code);
       put(9, name.text, {
         font: name.isFallback ? { size: 10, italic: true, color: { argb: "FFFF0000" } } : { size: 10 },
         alignment: { wrapText: true, vertical: "top" },
       });
-      put(10, item.unit || "", { alignment: { horizontal: "center" } });
-      put(11, item.supplier || "");
-      put(12, item.itemOrderDate || "", { alignment: { horizontal: "center" } });
-      put(13, item.supplierSentDate || "", { alignment: { horizontal: "center" } });
+      put(10, ic.unit, { alignment: { horizontal: "center" } });
+      put(11, ic.supplier);
+      put(12, ic.orderDate, { alignment: { horizontal: "center" } });
+      put(13, ic.sentDate, { alignment: { horizontal: "center" } });
       put(14, "", { alignment: { horizontal: "center" } });  // JB Sent — filled by hand
       put(15, arrival.text, {
         font: { size: 10, bold: arrival.bold, ...(arrival.color ? { color: { argb: argb(arrival.color) } } : {}) },
@@ -705,6 +868,7 @@ export async function exportTeamScheduleExcel(team, company = {}) {
     }
 
     r += span;
+  });
   });
 
   const stamp = ws.getCell(r + 1, 1);
@@ -784,6 +948,9 @@ export async function parseTeamScheduleWorkbook(file) {
     if (!first) continue;
     const low = first.toLowerCase();
     if (low.startsWith("printed:") || low === "no orders assigned.") continue;
+    // A grouped Customer Stop's banner row names no stop of its own — its child
+    // SO / DO rows follow it and are read normally.
+    if (first.startsWith("🔗") || low.includes("customer stop — deliver together")) continue;
     // A DO stop is written as "SO-123 · DO-9" by the exporter.
     const [soRaw, doRaw] = first.split("·").map(s => (s || "").trim());
     if (!soRaw) continue;
@@ -982,7 +1149,11 @@ const ITEM_COLS = ["#", "Code", "Item", "Qty", "Supplier", "Ordered", "Sent", "A
 
 const DO_TERMINAL_STATUSES = ["delivered", "completed", "cancelled"];
 
-const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith }) {
+// displayNo: the route position label (a Customer Stop's children are "3.1",
+// "3.2"); index stays the row's position in team.schedules for drag & drop.
+// inCustomerStop: the customer name / contact are shown once by the stop
+// banner, so the child row omits them (and its address unless it differs).
+const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith, displayNo, inCustomerStop = false, groupAddress }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
@@ -1082,7 +1253,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
         <div className="w-48 sm:w-56 flex-shrink-0 min-w-0">
           <div className="flex items-center gap-1 flex-wrap">
             {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab leading-none">&#8942;&#8942;</span>}
-            <span className="text-[11px] text-gray-400 font-medium">#{index + 1}</span>
+            <span className="text-[11px] text-gray-400 font-medium">#{displayNo ?? index + 1}</span>
             <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
             {dord && <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1 py-0.5 rounded" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>}
             <LinkedBadge others={linkedWith} />
@@ -1141,8 +1312,8 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             {o.order_amount != null && <span className="text-gray-600 text-[10px] font-bold">RM {Number(o.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
             {parseFloat(o.balance) > 0 && <span className="text-red-500 text-[10px] font-bold">Bal RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
           </div>
-          <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>
-          {o.contact && (
+          {!inCustomerStop && <p className="text-xs font-medium text-gray-800 mt-0.5 truncate">{o.customer_name}</p>}
+          {!inCustomerStop && o.contact && (
             waNumber(o.contact, o.country, o.address)
               ? <a href={`https://wa.me/${waNumber(o.contact, o.country, o.address)}`} target="_blank" rel="noopener noreferrer" draggable={false} onClick={e => e.stopPropagation()}
                   className="text-[11px] text-emerald-600 hover:text-emerald-700 hover:underline leading-tight inline-flex items-center gap-1" title="Message on WhatsApp">
@@ -1150,7 +1321,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
                 </a>
               : <p className="text-[11px] text-gray-500 leading-tight">{o.contact}</p>
           )}
-          <p className="text-[11px] text-gray-400 leading-tight break-words">{o.address}</p>
+          {(!inCustomerStop || o.address !== groupAddress) && <p className="text-[11px] text-gray-400 leading-tight break-words">{o.address}</p>}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[11px]">
             <span className="text-gray-400">Ord: {o.order_date || "-"}</span>
             {preferredTime && <span className="font-medium text-purple-600 bg-purple-50 rounded px-1">{preferredTime}</span>}
@@ -1211,7 +1382,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
           labelled fields instead of the combined "Linked to SO: <n> | …" blob
           the service RPC writes into remark/service_note. */}
       {o.type === "Service" ? (() => {
-        const detail = String(o.service_note || o.remark || "").replace(/^Linked to SO:\s*\S+\s*(\|\s*)?/i, "").trim();
+        const detail = serviceDetailOf(o);
         if (!o.linked_so && !detail) return null;
         return (
           <div className="bg-violet-50 border border-violet-200 text-violet-800 rounded px-2 py-1 text-[11px] mt-1 space-y-0.5">
@@ -1250,6 +1421,21 @@ const PRINT_STYLE = `@media print { body * { visibility: hidden !important; } .p
 
 // -- Team Print View ---------------------------------------------------
 export function TeamPrintView({ team, onClose, company }) {
+  const toast = useToast();
+  const [pdfBusy, setPdfBusy] = useState(false);
+  // Real PDF download (no print dialog) — lazily loads the PDF module, jsPDF
+  // and the font so none of it weighs on the board until it's used.
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      const { exportTeamSchedulePdf } = await import("./teamSchedulePdf");
+      await exportTeamSchedulePdf(team, company);
+    } catch (e) {
+      if (toast?.error) toast.error(`Could not create the PDF: ${e.message || e}`); else console.error("PDF export failed:", e);
+    } finally {
+      setPdfBusy(false);
+    }
+  };
   const handlePrint = () => {
     const printArea = document.querySelector(".print-area");
     if (!printArea) return;
@@ -1284,6 +1470,9 @@ export function TeamPrintView({ team, onClose, company }) {
             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-gray-100 rounded-lg hover:bg-gray-200">Close</button>
             {/* Same rows as the preview below — see buildTeamScheduleRows. */}
             <button onClick={() => exportTeamScheduleExcel(team, company).catch(() => {})} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700" title="Download as Excel">Excel</button>
+            {/* Same team/date and the same rows as this preview — the PDF is
+                built from buildTeamScheduleRows + the shared cell builders. */}
+            <button onClick={downloadPdf} disabled={pdfBusy} className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60" title="Download as PDF">{pdfBusy ? "Preparing PDF…" : "Download PDF"}</button>
             <button onClick={handlePrint} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Print</button>
           </div>
         </div>
@@ -1296,13 +1485,11 @@ export function TeamPrintView({ team, onClose, company }) {
             const COL = <colgroup><col style={{width:"13%"}}/><col style={{width:"5%"}}/><col style={{width:"3.5%"}}/><col style={{width:"3%"}}/><col style={{width:"3%"}}/><col style={{width:"5.5%"}}/><col style={{width:"2.5%"}}/><col style={{width:"7%"}}/><col style={{width:"17%"}}/><col style={{width:"3%"}}/><col style={{width:"5.5%"}}/><col style={{width:"5.5%"}}/><col style={{width:"5%"}}/><col style={{width:"5%"}}/><col style={{width:"6%"}}/><col style={{width:"6%"}}/></colgroup>;
             const TS = { width:"100%", borderCollapse:"collapse", fontSize:"10px", tableLayout:"fixed" };
             const BD = { border:"1px solid #000", padding:"3px 4px" };
-            // Group allRows by schedule (order)
-            const groups = [];
-            let cur = null;
-            allRows.forEach(row => {
-              if (row.isFirst) { cur = { sc: row.sc, o: row.o, rows: [] }; groups.push(cur); }
-              if (cur) cur.rows.push(row);
-            });
+            // Route units from the shared builder: a Deliver Together group is
+            // ONE customer stop (banner + its child orders, kept together as one
+            // block); every other stop is a single order exactly as before.
+            const units = teamScheduleStopUnits(allRows);
+            const groups = units.flatMap(u => u.children);
             return (<>
               {/* Header table */}
               <table style={TS}>{COL}<thead><tr style={{backgroundColor:"#c6efce",textAlign:"center"}}>
@@ -1312,18 +1499,22 @@ export function TeamPrintView({ team, onClose, company }) {
               </tr></thead></table>
               {/* One table per order group — allows page break between orders */}
               {groups.length === 0 && <table style={TS}>{COL}<tbody><tr><td colSpan={15} style={{...BD,textAlign:"center",color:"#888"}}>No orders assigned.</td></tr></tbody></table>}
-              {groups.map((g, gi) => {
+              {units.map((unit, ui) => {
+                const banner = unit.grouped ? teamScheduleGroupBanner(unit.children) : null;
+                const renderOrder = (g, gi) => {
                 const { o, sc, rows } = g;
                 const hasBalance = parseFloat(o.balance) > 0;
                 const tripLabel = sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-";
+                // Inside a customer stop the customer is shown once, in the banner.
+                const showCustomer = !banner;
+                const showAddress = o.address && (!banner || o.address !== banner.address);
                 return (
-                  <table key={gi} className="order-block" style={TS}>{COL}<tbody>
-                    {rows.map(({ item, idx, rowspan, isFirst }) => (
-                      <tr key={idx} style={{verticalAlign:"top"}}>
+                    rows.map(({ item, idx, rowspan, isFirst }) => (
+                      <tr key={`${gi}-${idx}`} style={{verticalAlign:"top"}}>
                         {isFirst && <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden"}}>
-                          <div style={{fontWeight:"bold"}}>{o.so_number}</div><div>{o.customer_name}</div>
-                          {o.contact&&<div style={{color:"#555"}}>{o.contact}</div>}
-                          {o.address&&<div style={{color:"#555",fontSize:"9px",wordBreak:"break-word"}}>{o.address}</div>}
+                          <div style={{fontWeight:"bold"}}>{o.so_number}</div>{showCustomer&&<div>{o.customer_name}</div>}
+                          {showCustomer&&o.contact&&<div style={{color:"#555"}}>{o.contact}</div>}
+                          {showAddress&&<div style={{color:"#555",fontSize:"9px",wordBreak:"break-word"}}>{o.address}</div>}
                           {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                           {sc.slot&&<div style={{color:"#1e40af",fontWeight:"bold"}}>Slot: {sc.slot}</div>}
                         </td>}
@@ -1357,13 +1548,32 @@ export function TeamPrintView({ team, onClose, company }) {
                           const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
                           return (
                             <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>
-                              {o.type==="Service" ? (o.linked_so&&<div>Linked SO: {o.linked_so}</div>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
+                              {o.type==="Service" ? (<>
+                                {o.linked_so&&<div>Linked SO: {o.linked_so}</div>}
+                                {rows[0].serviceRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rows[0].serviceRemark}</div>}
+                              </>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
                               {sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}
                             </td>
                           );
                         })()}
                       </tr>
-                    ))}
+                    ))
+                );
+                };
+                return (
+                  <table key={ui} className="order-block" style={TS}>{COL}<tbody>
+                    {banner && (
+                      <tr className="customer-stop-banner">
+                        <td colSpan={16} style={{...BD,backgroundColor:"#e6f6f4",borderTop:"2px solid #0f766e"}}>
+                          <span style={{fontWeight:"bold",color:"#0f766e"}}>🔗 {banner.label}</span>
+                          <span style={{marginLeft:"8px",fontWeight:"bold"}}>{banner.customer}</span>
+                          {banner.contact&&<span style={{marginLeft:"8px",color:"#555"}}>{banner.contact}</span>}
+                          {banner.address&&<span style={{marginLeft:"8px",color:"#555",fontSize:"9px"}}>{banner.address}</span>}
+                          <span style={{marginLeft:"8px",color:"#555"}}>· {banner.orders.join("  ·  ")}</span>
+                        </td>
+                      </tr>
+                    )}
+                    {unit.children.map(renderOrder)}
                   </tbody></table>
                 );
               })}
@@ -1822,6 +2032,10 @@ function UnassignedPreviewModal({ data, onClose }) {
             <Row label="Amount" value={amount != null && Number(amount) > 0 ? `RM ${Number(amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
             <Row label="Balance" value={parseFloat(balance) > 0 ? `RM ${Number(balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null} />
           </div>
+          {/* Linked Service cases of this delivery's Sales Order — internal,
+              read-only, from the canonical Service records (renders nothing
+              when there are none). Not shown for a Service stop itself. */}
+          {type !== "service" && <LinkedServicesSection soNumber={isDo ? so.order_number : item.so_number} />}
           {item.service_note && (
             <div>
               <p className="text-xs font-medium text-gray-500 mb-1">Service note</p>
@@ -2388,6 +2602,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   // Linked deliveries: so_number -> other so_numbers delivered together
   // (GET /delivery-links; empty until the backend + migration 106 are live).
   const [linkedMap, setLinkedMap] = useState(() => new Map());
+  const [linkGroups, setLinkGroups] = useState([]); // raw GET /delivery-links groups → one Customer Stop per group per team
   const [readiness, setReadiness] = useState(null);
   const [smartPlan, setSmartPlan] = useState(null); // Smart Assign proposal: area clusters of unassigned DOs
   const [assignTeam, setAssignTeam] = useState({}); // Smart Assign: area -> chosen team id (override)
@@ -2467,6 +2682,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
         for (const no of nos) m.set(no, nos.filter(n => n !== no));
       }
       setLinkedMap(m);
+      setLinkGroups(ld.groups || []);
     } catch { /* keep prior links */ }
   }, [date, companyId, vehicles]);
 
@@ -2779,6 +2995,11 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
   // the same rows as the Print preview (buildTeamScheduleRows), so the file and
   // the paper sheet always agree. team_date falls back to the board's selected
   // date exactly as the Print button does.
+  // Teams with each stop stamped with its Deliver Together group (if any) —
+  // the board, Print, PDF and Excel all render from this, so a linked group is
+  // one Customer Stop everywhere. Derived only; nothing is saved.
+  const teamsLinked = useMemo(() => annotateLinkGroups(teams, linkGroups, date), [teams, linkGroups, date]);
+
   const exportTeamSchedule = useCallback(async (team) => {
     try {
       await withLoading("Building Excel…", async () => {
@@ -3239,7 +3460,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           {/* Full-width stacked vehicle cards — each stop hosts a logistics
               item table, which needs the horizontal room a 2-col grid denies */}
           <div className="space-y-3">
-            {teams.map(team => {
+            {teamsLinked.map(team => {
               const teamStatus = deriveTeamStatus(team.schedules);
               const isLocked = readOnly || teamStatus === "Out for Delivery" || teamStatus === "Delivered";
               const isConfirmed = teamStatus === "Confirmed";
@@ -3271,7 +3492,7 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           {team.area && <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full">{team.area}</span>}
                           {isLocked && <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium">Locked</span>}
                         </div>
-                        <p className="text-xs text-gray-400 mt-0.5">{team.schedules?.length || 0} stops</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{(() => { const n = team.schedules?.length || 0; const stops = groupLinkedStops(team.schedules || []).length; return stops === n ? `${n} stops` : `${stops} stops · ${n} orders`; })()}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap justify-end">
                         <div className="flex flex-col items-end gap-1">
@@ -3321,7 +3542,12 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                         {isLocked ? "No orders in this team." : isConfirmed ? "Team confirmed — unlock to Pending to edit." : "Drop orders or trips here"}
                       </p>
                     )}
-                    {team.schedules?.map((sc, index) => {
+                    {groupLinkedStops((team.schedules || []).map((sc, index) => ({ sc, index })), e => e.sc).map((unit, ui) => {
+                      // One route position per unit; a Deliver Together group
+                      // is ONE Customer Stop with each SO / DO as its own row.
+                      const grouped = unit.length > 1;
+                      const head = unit[0].sc.orders || {};
+                      const rowsOf = unit.map(({ sc, index }, ci) => {
                       const linkedTrip = trips.find(t => t.so_number === sc.orders?.so_number);
                       return (
                         <StopRow
@@ -3329,6 +3555,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           schedule={sc}
                           teamId={team.id}
                           index={index}
+                          displayNo={grouped ? `${ui + 1}.${ci + 1}` : String(ui + 1)}
+                          inCustomerStop={grouped}
+                          groupAddress={grouped ? head.address : undefined}
                           isLocked={isLocked}
                           tripInfo={linkedTrip ? { trip_no: linkedTrip.trip_no, total_trips: linkedTrip.total_trips, trip_status: linkedTrip.status } : null}
                           teams={teams}
@@ -3339,6 +3568,21 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                           onDrop={handleAssignedDrop}
                           onSaved={loadData}
                         />
+                      );
+                      });
+                      if (!grouped) return rowsOf;
+                      return (
+                        <div key={`stop-${unit[0].sc.id}`} className="my-1 rounded-lg border-l-4 border-teal-500 bg-teal-50/40" data-testid="customer-stop">
+                          <div className="flex items-center gap-2 flex-wrap px-2 pt-1.5 text-xs">
+                            <span className="text-[11px] text-gray-400 font-medium">#{ui + 1}</span>
+                            <span className="font-bold text-teal-800">🔗 Customer stop</span>
+                            <span className="font-semibold text-gray-800">{head.customer_name}</span>
+                            {head.contact && <span className="text-gray-500">{head.contact}</span>}
+                            <span className="text-[11px] text-teal-700">deliver together · {unit.length} orders</span>
+                          </div>
+                          {head.address && <p className="px-2 text-[11px] text-gray-500 break-words">{head.address}</p>}
+                          <div className="pl-2">{rowsOf}</div>
+                        </div>
                       );
                     })}
                   </div>

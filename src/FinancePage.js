@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
+import { paymentDateOf, fmtYmd, fmtMyDateTime } from "./paymentDate";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
@@ -391,14 +392,14 @@ function FinancePage() {
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Type</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
+              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Payment Date</th><th className="px-4 py-2 text-left">Type</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
                 {methodRows.length === 0 && <tr><td colSpan={isMaster ? 7 : 6} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter || typeFilter ? " matching the filter" : ""} in this period</td></tr>}
                 {methodRows.map((p, idx) => (
                   <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
                     className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
                     <td className="px-4 py-2 font-medium text-gray-700">{p.or_number != null ? `#${p.or_number}` : "-"}</td>
-                    <td className="px-4 py-2 text-gray-700">{p.paid_at ? new Date(p.paid_at).toLocaleDateString("en-MY") : "-"}</td>
+                    <td className="px-4 py-2 text-gray-700">{fmtYmd(paymentDateOf(p)) || "-"}</td>
                     <td className="px-4 py-2">
                       {(() => { const t = txnType(p); return t === "Other" ? <span className="text-xs text-gray-400">Payment</span> : <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${t === "Deposit" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>{t}</span>; })()}
                       {apprOf(p) === "pending" && <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">Pending</span>}
@@ -597,7 +598,12 @@ function FinancePage() {
               <div className="flex justify-between"><span className="text-gray-500">Amount</span><span className={`font-bold ${detailTxn._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(detailTxn.amount)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-800">{txnType(detailTxn)}{detailTxn._deposit ? " (on order)" : ""}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Method</span><span className="text-gray-800">{detailTxn.payment_method || "-"}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Date</span><span className="text-gray-800">{detailTxn.paid_at ? new Date(detailTxn.paid_at).toLocaleString("en-MY") : "-"}</span></div>
+              {/* Payment Date = when the customer actually paid (payments.payment_date);
+                  Recorded / Approved are system audit timestamps. Legacy rows
+                  without a Payment Date show the date they were recorded. */}
+              <div className="flex justify-between"><span className="text-gray-500">Payment Date</span><span className="text-gray-800 font-medium">{fmtYmd(paymentDateOf(detailTxn)) || "-"}{!detailTxn.payment_date && detailTxn.paid_at && !detailTxn._deposit ? <span className="ml-1 text-[11px] text-gray-400">(recorded date)</span> : null}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">{detailTxn._deposit ? "Order created" : "Recorded"}</span><span className="text-gray-600 text-xs">{fmtMyDateTime(detailTxn.paid_at) || "-"}</span></div>
+              {detailTxn.approved_at && <div className="flex justify-between"><span className="text-gray-500">{detailTxn.approval_status === "rejected" ? "Rejected" : "Approved"}</span><span className="text-gray-600 text-xs">{fmtMyDateTime(detailTxn.approved_at)}</span></div>}
               {detailTxn.so_number && <div className="flex justify-between"><span className="text-gray-500">Sales Order</span><span className="text-gray-800">SO {detailTxn.so_number}</span></div>}
               {detailTxn.customer_name && <div className="flex justify-between"><span className="text-gray-500">Customer</span><span className="text-gray-800">{detailTxn.customer_name}</span></div>}
               {detailTxn.reference_no && <div className="flex justify-between"><span className="text-gray-500">Reference</span><span className="text-gray-800">{detailTxn.reference_no}</span></div>}
