@@ -358,10 +358,10 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     .sign { page-break-inside: avoid; break-inside: avoid; }
     .sec { border-bottom: 0.5px solid #1f2937; }
     .sec:last-child { border-bottom: none; }
-    .pad { padding: 6px 13px; }
+    .pad { padding: 4px 13px; }
 
     /* Branch bar */
-    .branchbar { background: #1f2937; color: #fff; padding: 5px 13px; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+    .branchbar { background: #1f2937; color: #fff; padding: 4px 13px; font-size: 10px; letter-spacing: 1.5px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
     .branchbar .r { font-weight: 500; letter-spacing: 0.5px; opacity: .85; }
 
     /* Letterhead */
@@ -376,7 +376,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     .co .branches { font-size: 8px; color: #6b7280; margin-top: 2px; }
 
     /* Title */
-    .titlebar { display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 6px 13px; }
+    .titlebar { display: flex; justify-content: space-between; align-items: center; background: #f3f4f6; padding: 4px 13px; }
     .title { font-size: 23px; font-weight: 800; letter-spacing: 3px; color: #1f2937; }
     .sono { text-align: right; font-size: 8px; letter-spacing: 1px; color: #6b7280; line-height: 1.5; text-transform: uppercase; }
     .sono .no { font-size: 14px; font-weight: 800; color: #b42318; letter-spacing: 0.5px; text-transform: none; }
@@ -387,7 +387,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     /* Customer info — two aligned columns */
     .cust { display: flex; }
-    .cust .col { flex: 1; padding: 6px 13px; }
+    .cust .col { flex: 1; padding: 4px 13px; }
     .cust .col + .col { border-left: 0.5px solid #1f2937; }
     .frow { display: flex; font-size: 12px; padding: 1.5px 0; }
     .frow .lbl { width: 94px; flex-shrink: 0; color: #6b7280; font-weight: 600; }
@@ -396,8 +396,8 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     /* Items */
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
-    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 5px 8px; font-size: 12px; height: 20px; vertical-align: top; }
+    table.items th { background: #f3f4f6; border-top: 0.5px solid #1f2937; border-bottom: 0.5px solid #1f2937; border-right: 0.5px solid #e5e7eb; padding: 3.5px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #374151; }
+    table.items td { border-right: 0.5px solid #e5e7eb; border-bottom: 0.5px solid #e5e7eb; padding: 3.5px 8px; font-size: 12px; height: 20px; vertical-align: top; }
     table.items th:last-child, table.items td:last-child { border-right: none; }
     .c { text-align: center; } .r { text-align: right; }
     .desc .pname { font-weight: 600; }
@@ -405,11 +405,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     /* Remarks + summary */
     .midrow { display: flex; border-top: 0.5px solid #1f2937; }
-    .remarks { flex: 1.5; padding: 7px 13px; border-right: 0.5px solid #1f2937; }
+    .remarks { flex: 1.5; padding: 4px 13px; border-right: 0.5px solid #1f2937; }
     .remarks .h, .blk .h { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #374151; margin-bottom: 4px; }
     .remarks .body { font-size: 10px; color: #1f2937; line-height: 1.45; min-height: 36px; }
     .summary { flex: 1; }
-    .srow { display: flex; justify-content: space-between; align-items: center; padding: 3.5px 13px; font-size: 10px; border-bottom: 0.5px solid #e5e7eb; }
+    .srow { display: flex; justify-content: space-between; align-items: center; padding: 2.5px 13px; font-size: 10px; border-bottom: 0.5px solid #e5e7eb; }
     .srow .lab { color: #6b7280; font-weight: 600; }
     .srow .num { font-weight: 600; font-variant-numeric: tabular-nums; }
     .srow.dep { font-size: 9px; }
@@ -418,13 +418,13 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     .srow:last-child { border-bottom: none; }
 
     /* Notes / terms / payment blocks */
-    .blk { padding: 7px 13px; }
+    .blk { padding: 4px 13px; }
     .notes ul { list-style: none; }
-    .notes li { position: relative; padding-left: 12px; margin-bottom: 2px; font-size: 9px; line-height: 1.45; color: #374151; }
+    .notes li { position: relative; padding-left: 12px; margin-bottom: 1px; font-size: 9px; line-height: 1.45; color: #374151; }
     .notes li:before { content: "•"; position: absolute; left: 2px; color: #9ca3af; }
     .terms ol { padding-left: 15px; font-size: 8px; line-height: 1.4; color: #374151; }
-    .terms li { margin-bottom: 1.5px; padding-left: 2px; }
-    .ack { margin-top: 4px; font-size: 8.5px; font-style: italic; color: #475467; }
+    .terms li { margin-bottom: 1px; padding-left: 2px; }
+    .ack { margin-top: 2px; font-size: 8.5px; font-style: italic; color: #475467; }
 
     /* Payment method */
     .pay-grid { display: flex; flex-wrap: wrap; margin: 3px 0 6px; }
@@ -439,7 +439,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     /* Signatures — centered */
     .sign { display: flex; }
-    .sign .scol { flex: 1; padding: 7px 13px 6px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .sign .scol { flex: 1; padding: 4px 13px 4px; display: flex; flex-direction: column; align-items: center; text-align: center; }
     .sign .scol + .scol { border-left: 0.5px solid #1f2937; }
     .sign .stitle { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; }
     .sign .sname { font-size: 11px; font-weight: 700; color: #1f2937; padding-bottom: 2px; }
