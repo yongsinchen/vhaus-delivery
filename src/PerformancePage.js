@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, formatMoney } from "./UIComponents";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 const firstOfMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 

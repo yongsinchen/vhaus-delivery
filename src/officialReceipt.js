@@ -9,8 +9,9 @@
 // content flow to decide the boundary. Internal sections use break-inside:avoid
 // so a table/notice/signature can't overflow onto the next page.
 import { printHtml } from "./printDocument";
+import { formatMoney } from "./UIComponents";
 
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
 export function printOfficialReceipt({ company = {}, receiptNo, customer = {}, date, rows = [], totalReceived, creditBalance, kindLabel, voided = false }) {

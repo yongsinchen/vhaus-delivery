@@ -339,6 +339,24 @@ export function SkeletonTable({ rows = 5, cols = 6 }) {
   );
 }
 
+// Canonical MYR amount formatter — the single source every screen's own
+// `money`/`RM ${...}` helper should delegate to, instead of each calling
+// toLocaleString directly. Rounds to the cent first (the codebase's existing
+// round2 convention, also used in lib/commission.js and server.js) so a
+// binary-float tail from upstream arithmetic (e.g. 5640 + 507.6 - 2500 ===
+// 3647.6000000000004) never reaches the formatter, then renders exactly 2
+// decimals — toLocaleString's own default maximumFractionDigits (3) is not
+// enough on its own and still shows a 3rd digit for inputs like 1000.105.
+// Returns just the number part ("3,647.60") — the RM prefix (or its absence,
+// per each screen's existing style) stays the caller's concern.
+export function formatMoney(value) {
+  let n = Number(value);
+  if (!Number.isFinite(n)) n = 0;
+  n = Math.round((n + Number.EPSILON) * 100) / 100;
+  if (n === 0) n = 0; // collapses -0 (e.g. from a tiny negative rounding to zero) to a plain 0
+  return n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // Skeleton drawer
 export function SkeletonDrawer() {
   return (

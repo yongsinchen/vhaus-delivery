@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast, useLoading } from "./UIComponents";
+import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 // Parse a response that is SUPPOSED to be JSON, but say something useful when it
 // isn't. An unknown route returns Express's HTML 404 page, which would otherwise
 // surface to the user as "Unexpected token '<'" and tell them nothing.

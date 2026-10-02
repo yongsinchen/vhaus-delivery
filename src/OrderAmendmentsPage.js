@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast, useModal } from "./UIComponents";
+import { useToast, useModal, formatMoney } from "./UIComponents";
 import AmendmentRebaseReview from "./AmendmentRebaseReview";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -11,7 +11,7 @@ const af = async (url, opts = {}) => {
   return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
 const fmtDateTime = d => d ? new Date(d).toLocaleString("en-MY", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-const money = v => `RM ${(Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 
 const STATUS = {
   pending:  { label: "Pending approval", cls: "bg-amber-100 text-amber-700" },

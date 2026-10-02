@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, formatMoney } from "./UIComponents";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -9,7 +9,7 @@ const af = async (url, opts = {}) => {
   const cid = localStorage.getItem("pulseActiveCompanyId");
   return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
-const money = v => `RM ${(Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 
 // Simple business labels — never expose internal field names to the user.
 const HEADER_LABELS = {

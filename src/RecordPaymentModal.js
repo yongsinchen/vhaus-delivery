@@ -20,7 +20,7 @@
 //                 same OR number, still pending Finance).
 import React, { useState, useRef } from "react";
 import { supabase } from "./AuthContext";
-import { useToast, useLoading } from "./UIComponents";
+import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import { allocsFor, tagOutstanding, defaultKind, autoAllocateInto, round2, allocatedByOrder } from "./paymentAllocation";
 import { myToday, paymentDateError, paymentDateOf } from "./paymentDate";
@@ -28,7 +28,7 @@ import { myToday, paymentDateError, paymentDateOf } from "./paymentDate";
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 ? v + "T00:00:00" : v); return isNaN(d) ? "" : d.toLocaleDateString("en-MY"); };
 
 export const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate", "2C2P", "eZbeli"];

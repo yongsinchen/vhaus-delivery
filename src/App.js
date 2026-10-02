@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense } from "react";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
-import { FullPageLoader, useLoading, useToast } from "./UIComponents";
+import { FullPageLoader, useLoading, useToast, formatMoney } from "./UIComponents";
 import { myToday, paymentDateError } from "./paymentDate";
 
 // Lazy load all pages — only loaded when navigated to
@@ -1096,7 +1096,7 @@ export default function App() {
   // retry of that SAME attempt (double-click, or a timed-out request retry)
   // — opening the modal again (a genuinely new attempt) mints a new one.
   const paymentIdempotencyKeyRef = useRef(null);
-  const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+  const money = v => `RM ${formatMoney(v)}`;
   const [opsTab, setOpsTab] = useState("service_pending");
   const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
   const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");

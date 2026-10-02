@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce, useToast, useLoading } from "./UIComponents";
+import { useDebounce, useToast, useLoading, formatMoney } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import { effectiveDeliveryDisplay } from "./effectiveDelivery";
@@ -140,7 +140,7 @@ const TERMS = [
   "The Company's total liability shall not exceed the purchase value of the goods. This agreement is governed by the laws of Malaysia.",
 ];
 
-const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const money = (v) => (v == null || v === "" ? "" : formatMoney(v));
 
 // Order total and outstanding balance — same formula as the detail view.
 // sales_orders.deposit is the amount paid to date (kept in sync with payments).

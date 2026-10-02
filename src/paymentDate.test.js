@@ -9,6 +9,13 @@ jest.mock("./AuthContext", () => ({ supabase: { auth: { getSession: async () => 
 jest.mock("./UIComponents", () => ({
   useToast: () => ({ success: jest.fn(), warning: jest.fn(), error: jest.fn() }),
   useLoading: () => ({ withLoading: async (_m, fn) => fn() }),
+  formatMoney: (v) => {
+    let n = Number(v);
+    if (!Number.isFinite(n)) n = 0;
+    n = Math.round((n + Number.EPSILON) * 100) / 100;
+    if (n === 0) n = 0;
+    return n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
 }));
 
 describe("paymentDate helpers", () => {

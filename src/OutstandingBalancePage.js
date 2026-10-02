@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo , memo } from "react";
 import { supabase } from "./AuthContext";
+import { formatMoney } from "./UIComponents";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -8,7 +9,7 @@ const af = async (url, opts = {}) => {
   const cid = localStorage.getItem("pulseActiveCompanyId");
   return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } });
 };
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 
 const FILTERS = [
   { id: "all", label: "All" },

@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
 import { paymentDateOf, fmtYmd, fmtMyDateTime } from "./paymentDate";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast, useLoading } from "./UIComponents";
+import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import { printHtml } from "./printDocument";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
-const money = v => `RM ${(Number(v) || 0).toLocaleString("en-MY", { minimumFractionDigits: 2 })}`;
+const money = v => `RM ${formatMoney(v)}`;
 
 const AGING_STYLE = {
   current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current", sub: "0-30 days" },

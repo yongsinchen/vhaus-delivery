@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useToast } from "./UIComponents";
+import { useToast, formatMoney } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import DeliveryDateRequestActions, { AmendDeliveryDateRequestModal, canChangeRequest } from "./DeliveryDateRequestActions";
 import LinkedDeliveryPicker, { LinkedChip, linkedSoNumbers } from "./LinkedDeliveryPicker";
@@ -464,7 +464,7 @@ function DeliveryDateRequestsPage() {
             (name && String(j.itemName || "").toLowerCase().trim() === name));
           return m?.arrivalDate ? String(m.arrivalDate).slice(0, 10) : null;
         };
-        const money = v => (v != null && v !== "") ? `RM ${Number(v).toLocaleString("en-MY", { minimumFractionDigits: 2 })}` : "";
+        const money = v => (v != null && v !== "") ? `RM ${formatMoney(v)}` : "";
         const Info = ({ label, value }) => value ? (
           <div className="flex gap-2 text-sm"><span className="text-gray-400 w-24 shrink-0">{label}</span><span className="text-gray-800">{value}</span></div>
         ) : null;
