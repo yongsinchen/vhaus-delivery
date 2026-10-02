@@ -190,13 +190,38 @@ function RemarkNote({ label, text, className = "" }) {
   );
 }
 
+// Canonical customer-facing item description for a Delivery Order line —
+// matches Order Detail's own convention exactly: product_code/size/color/
+// custom_dimensions. A delivery_order_item's own snapshot columns (written
+// once by snapshotFromSoi at DO-creation time) never carried
+// custom_dimensions at all, so a CUSTOM item's full spec (e.g. "LEG: T416")
+// was silently dropped even though Order Detail — reading sales_order_items
+// directly — always showed it. DELIVERY_ORDER_LIST_SELECT now also joins the
+// source sales_order_item (via the stable sales_order_item_id link); this
+// reads from there, falling back to the DO item's own fields for a legacy
+// row with no source link or no joined data.
+//
+// Deliberately NOT included: sales_order_items.notes. Order Detail's own
+// read-only item view never shows it either (only the item-edit FORM does,
+// labelled plainly "Item Note" — a staff annotation, not a customer-facing
+// spec) and in production it is frequently an auto-written internal
+// arrival-tracking stamp ("Arrived: 2026-05-08"), never meant for a
+// customer-facing printed document. Internal Remark (sales_orders-level)
+// isn't read here at all — a different field entirely.
+function doItemSpec(it) {
+  const src = it.sales_order_items || {};
+  const customDimensions = it.custom_dimensions || src.custom_dimensions || "";
+  const spec = [...new Set([it.size, it.color, customDimensions].filter(Boolean))].join(" · ");
+  return { spec };
+}
+
 // Print one Delivery Order — its OWN shipment lines (delivery_order_items), not
 // the whole sales order. `company` supplies the printed header/logo.
 function printDeliveryOrder(o, company = {}) {
   const so = o.sales_orders || {};
   const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
   const itemRows = items.map((it, i) => {
-    const spec = [it.size, it.color].filter(Boolean).join(" · ");
+    const { spec } = doItemSpec(it);
     return `<tr>
       <td class="c">${i + 1}</td>
       <td>${esc(it.product_code || "")}</td>
@@ -334,7 +359,7 @@ async function exportDeliveryOrderExcel(o, company = {}) {
   const codeTexts = [];
   items.forEach((it, i) => {
     const r = headRow + 1 + i;
-    const spec = [it.size, it.color].filter(Boolean).join(" · ");
+    const { spec } = doItemSpec(it);
     const desc = (it.product_name || "") + (spec ? ` — ${spec}` : "");
     descTexts.push(desc); codeTexts.push(it.product_code || "");
     const vals = [i + 1, it.product_code || "", desc, Number(it.quantity) || 1];
