@@ -4,6 +4,7 @@ import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { printHtml } from "./printDocument";
+import { normalizeOrderItems } from "./safeData";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -131,10 +132,9 @@ const getMalaysiaDate = () => new Intl.DateTimeFormat("en-CA", {
 
 const todayMY = getMalaysiaDate();
 
-const parseItems = items => {
-  try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); }
-  catch { return []; }
-};
+// Always a real array (canonical normalizer — a double-encoded or object-shaped
+// items value must never reach a downstream .some/.map/.filter).
+const parseItems = items => normalizeOrderItems(items);
 
 // Short local date for an item's arrival date (date-only strings are anchored
 // to local midnight so they don't slip a day across time zones).
@@ -475,7 +475,7 @@ const itemDisplayName = (item) => {
 
 // Tolerant items parser for the printed/exported schedule — accepts either a
 // JSON string or an already-parsed array, never throws on malformed legacy data.
-const parseItemsSafe = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
+const parseItemsSafe = items => normalizeOrderItems(items);
 
 // THE canonical row set for one team's operational schedule — the single
 // source that BOTH the printed sheet (TeamPrintView) and the Excel export

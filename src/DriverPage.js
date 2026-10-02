@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
+import { normalizeOrderItems } from "./safeData";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -110,7 +111,7 @@ function DriverPage() {
   const allSchedules = teams.flatMap(t => (t.schedules || []).map(s => ({ ...s, _vehicle: t.vehicle_plate, _driver: t.driver_name })));
   const delivered = allSchedules.filter(s => s.status === "delivered").length;
   const total = allSchedules.length;
-  const parseItems = items => { try { return typeof items === "string" ? JSON.parse(items || "[]") : (items || []); } catch { return []; } };
+  const parseItems = items => normalizeOrderItems(items);
 
   return (
     <div className="min-h-screen bg-gray-50" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>

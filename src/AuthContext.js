@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { normalizePermissionKeys, normalizePermissionResponse, normalizeAvailableCompanies, isValidCompanyId, readStoredCompanyId } from "./safeData";
 
 const SUPABASE_URL = "https://lrfyjcupucpdqmbqqbbk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_eAA_n21UDdPrecDlwfa8xQ_3PmFAMkm";
@@ -98,7 +99,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [availableCompanies, setAvailableCompanies] = useState([]);
-  const [activeCompanyId, setActiveCompanyId] = useState(() => localStorage.getItem("pulseActiveCompanyId") || null);
+  const [activeCompanyId, setActiveCompanyId] = useState(() => readStoredCompanyId());
   const [activeRoleKey, setActiveRoleKey] = useState(null);
   const [permissions, setPermissions] = useState({});
 
@@ -127,18 +128,41 @@ export function AuthProvider({ children }) {
       const res = await authFetch(`${API}/permissions/effective`);
       if (res.ok) {
         const data = await res.json();
-        // permissions may be an array of strings or an object — normalize to Set-like lookup
-        const permsArr = Array.isArray(data.permissions) ? data.permissions : Object.keys(data.permissions || {});
-        setPermissions(new Set(permsArr));
-        if (data.activeCompanyId) setActiveCompanyId(data.activeCompanyId);
-        if (data.roleKey) setActiveRoleKey(data.roleKey);
+        // permissions may be an array of keys or an object map — normalized once
+        // (fail-closed: anything unrecognized is an EMPTY set, never a guess)
+        setPermissions(new Set(normalizePermissionResponse(data?.permissions)));
+        if (isValidCompanyId(data?.activeCompanyId)) setActiveCompanyId(data.activeCompanyId);
+        if (typeof data?.roleKey === "string" && data.roleKey) setActiveRoleKey(data.roleKey);
       }
     } catch (e) { console.error("loadPermissions error:", e); }
   };
 
+  // The ONE place /auth/profile's companies / active company / role / permissions
+  // enter state. Every field is normalized (fail-closed): a wrong-shaped value
+  // becomes empty/null rather than a permissive default, so a bad response can
+  // never grant access or crash a downstream .some/.map/.has. Returns true when
+  // a usable permission list was applied (false -> caller refreshes from the
+  // server's /permissions/effective).
+  const applyProfileAuth = (d) => {
+    setAvailableCompanies(normalizeAvailableCompanies(d?.availableCompanies));
+    if (isValidCompanyId(d?.activeCompanyId)) {
+      setActiveCompanyId(d.activeCompanyId);
+      try { localStorage.setItem("pulseActiveCompanyId", d.activeCompanyId); } catch {}
+    }
+    const role = typeof d?.effectiveRole === "string" && d.effectiveRole ? d.effectiveRole
+      : (typeof d?.activeRoleKey === "string" && d.activeRoleKey ? d.activeRoleKey : null);
+    if (role) setActiveRoleKey(role);
+    const perms = normalizePermissionKeys(d?.effectivePermissions);
+    // Always REPLACE (never keep a previous user's/company's set): an empty or
+    // malformed list leaves the user with no engine permissions until the
+    // server refresh answers.
+    setPermissions(new Set(perms));
+    return perms.length > 0;
+  };
+
   const loadUserProfile = async (authUser) => {
     loadedUserIdRef.current = authUser?.id ?? null;
-    if (!authUser) { setUser(null); setLoading(false); return; }
+    if (!authUser) { setUser(null); setPermissions(new Set()); setActiveRoleKey(null); setAvailableCompanies([]); setLoading(false); return; }
     // First sign-in / initial boot: flip loading back on so the app shows the
     // boot screen instead of a frozen login page. Skip on token refresh
     // (user already loaded) to avoid flashing the loader mid-session.
@@ -156,25 +180,14 @@ export function AuthProvider({ children }) {
           localStorage.removeItem("pulseActiveCompanyId");
           setActiveCompanyId(null);
           const retry = await fetch(`${API}/auth/profile`, { headers: { Authorization: `Bearer ${token}` } });
-          if (retry.ok) { const d = await retry.json(); setUser({ ...d, email: authUser.email }); setAvailableCompanies(d.availableCompanies || []); if (d.activeCompanyId) { setActiveCompanyId(d.activeCompanyId); localStorage.setItem("pulseActiveCompanyId", d.activeCompanyId); } if (d.effectiveRole) setActiveRoleKey(d.effectiveRole); if (d.effectivePermissions?.length > 0) setPermissions(new Set(d.effectivePermissions)); setLoading(false); return; }
+          if (retry.ok) { const d = await retry.json(); setUser({ ...d, email: authUser.email }); if (!applyProfileAuth(d)) setTimeout(loadPermissions, 100); setLoading(false); return; }
         }
         setUser(null); setLoading(false); return;
       }
       const data = await res.json();
       setUser({ ...data, email: authUser.email });
-      setAvailableCompanies(data.availableCompanies || []);
-      if (data.activeCompanyId) {
-        setActiveCompanyId(data.activeCompanyId);
-        localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
-      }
-      if (data.effectiveRole) setActiveRoleKey(data.effectiveRole);
-      else if (data.activeRoleKey) setActiveRoleKey(data.activeRoleKey);
-      // Store effectivePermissions from profile (array of action key strings)
-      if (data.effectivePermissions && data.effectivePermissions.length > 0) {
-        setPermissions(new Set(data.effectivePermissions));
-      } else {
-        setTimeout(loadPermissions, 100);
-      }
+      // Empty/malformed effectivePermissions -> canonical server refresh
+      if (!applyProfileAuth(data)) setTimeout(loadPermissions, 100);
     } catch (e) {
       console.error("loadUserProfile error:", e);
       setUser(null);
@@ -190,10 +203,10 @@ export function AuthProvider({ children }) {
       });
       if (!res.ok) { const d = await res.json(); alert(d.error || "Failed to switch"); return false; }
       const data = await res.json();
+      if (!isValidCompanyId(data?.activeCompanyId)) return false;
       setActiveCompanyId(data.activeCompanyId);
       setActiveRoleKey(data.effectiveRole || data.activeRoleKey);
-      const permsArr = Array.isArray(data.effectivePermissions) ? data.effectivePermissions : [];
-      setPermissions(new Set(permsArr));
+      setPermissions(new Set(normalizePermissionKeys(data.effectivePermissions)));
       localStorage.setItem("pulseActiveCompanyId", data.activeCompanyId);
       return true;
     } catch (e) { console.error("switchCompany error:", e); return false; }

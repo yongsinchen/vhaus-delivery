@@ -3,6 +3,7 @@ import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast, formatMoney } from "./UIComponents";
 import { myToday, paymentDateError } from "./paymentDate";
+import { normalizeOrderItems } from "./safeData";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
@@ -62,30 +63,13 @@ const timeAgo = (iso) => {
 
 // toDb removed — dashboard writes now go through backend API
 
-// URGENT FIX: normalize orders.items to a real array ONCE, at this single
-// DB-row boundary — every .some()/.map()/.filter() downstream then always
-// receives a stable array, never a string/object/null. Root cause of a
-// production login-blocking crash ("t.some is not a function"): a stray row
-// had a DOUBLE-JSON-ENCODED items column (raw DB value '"[]"'), so
-// JSON.parse() succeeded but returned the STRING "[]", not an array — the
-// old `typeof o.items === "string" ? JSON.parse(...) : (o.items || [])`
-// only handled the outer string case and never verified what JSON.parse()
-// actually produced. Any array-shaped value (or a JSON string that decodes
-// to one) still passes through unchanged; anything else (a mis-encoded
-// string, an object, a stray non-array value) falls back to [] instead of
-// crashing every dashboard load that includes the row. Logs once so a real
-// data-quality anomaly stays visible instead of being silently swallowed.
-export function normalizeOrderItems(raw, orderId) {
-  let v = raw;
-  if (typeof v === "string") {
-    try { v = JSON.parse(v || "[]"); } catch { v = []; }
-  }
-  if (!Array.isArray(v)) {
-    if (v != null) console.warn(`[fromDb] order ${orderId ?? "?"} has a non-array items value after parsing — defaulting to []`, v);
-    return [];
-  }
-  return v;
-}
+// orders.items is normalized to a real array ONCE, at this single DB-row
+// boundary (see safeData.js — the canonical normalizer, shared with
+// DeliverySchedule/DriverPage so no page re-parses items unsafely). Root cause
+// of the earlier production login-blocking crash ("t.some is not a function"):
+// a row with a DOUBLE-JSON-ENCODED items column (raw '"[]"') parsed to the
+// STRING "[]", not an array. Re-exported so existing imports keep working.
+export { normalizeOrderItems };
 
 export const fromDb = o => ({
   id: o.id, created_at: o.created_at, soNumber: o.so_number, customerName: o.customer_name,
