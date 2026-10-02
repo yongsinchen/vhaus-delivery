@@ -28,6 +28,17 @@ const STATUS = {
   rejected:         { label: "Rejected", cls: "bg-gray-100 text-gray-500" },
 };
 
+// A Service order never goes through the sales_order_id -> delivery_orders
+// lifecycle — it's scheduled straight onto delivery_schedules instead (same
+// table the Delivery Schedule board reads), so "no Delivery Order" is its
+// normal, permanent state, not a pending step. Same status vocabulary/colors
+// as ServicePage.js's STATUS_STYLE — no new label invented.
+const SERVICE_STATUS_STYLE = {
+  open: "bg-gray-100 text-gray-700", scheduled: "bg-blue-100 text-blue-700",
+  in_progress: "bg-amber-100 text-amber-700", claiming: "bg-violet-100 text-violet-700",
+  resolved: "bg-emerald-100 text-emerald-700", closed: "bg-gray-100 text-gray-400",
+};
+
 function DeliveryDateRequestsPage() {
   const { user } = useAuth();
   const toast = useToast();
@@ -178,7 +189,9 @@ function DeliveryDateRequestsPage() {
   const done = rows.filter(r => r.status === "approved" || r.status === "rejected");
 
   // "Awaiting DO" = approved (date agreed) but no Delivery Order created yet.
-  const awaitingDo = r => r.status === "approved" && !r.has_delivery_order;
+  // Never applies to a Service request — it has no Delivery Order lifecycle
+  // to wait on at all (see SERVICE_STATUS_STYLE above).
+  const awaitingDo = r => r.status === "approved" && !r.is_service && !r.has_delivery_order;
   const matchStatus = (r, k) => k === "all" ? true : k === "awaiting_do" ? awaitingDo(r) : r.status === k;
 
   // Filter (status + text) then paginate — applies to the approver's full queue.
@@ -247,9 +260,17 @@ function DeliveryDateRequestsPage() {
             )}
             <Badge s={r.status} />
             {r.status === "approved" && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.has_delivery_order ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>
-                {r.has_delivery_order ? "DO created" : "Awaiting DO"}
-              </span>
+              r.is_service ? (
+                r.service_status && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SERVICE_STATUS_STYLE[r.service_status] || "bg-gray-100 text-gray-500"}`}>
+                    {r.service_status}
+                  </span>
+                )
+              ) : (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.has_delivery_order ? "bg-violet-100 text-violet-700" : "bg-amber-100 text-amber-700"}`}>
+                  {r.has_delivery_order ? "DO created" : "Awaiting DO"}
+                </span>
+              )
             )}
             {r.auto_approved && <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700">Auto-approved</span>}
             <LinkedChip others={linkedSoNumbers(r, rows)} />
