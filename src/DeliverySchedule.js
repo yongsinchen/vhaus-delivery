@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo, Fragment } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { printHtml } from "./printDocument";
 import { normalizeOrderItems } from "./safeData";
+import { copyStopDetails } from "./stopCopy";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -1173,12 +1174,15 @@ function TripCard({ trip, teams, isLocked, onAssign, onDragStart }) {
 const ITEM_COLS = ["#", "Code", "Item", "Qty", "Supplier", "Ordered", "Sent", "Arrival"];
 
 const DO_TERMINAL_STATUSES = ["delivered", "completed", "cancelled"];
+// Sentinel option value in a stop's Reassign dropdown meaning "remove the team
+// assignment" (never a real team id).
+const UNASSIGNED_TARGET = "__unassigned__";
 
 // displayNo: the route position label (a Customer Stop's children are "3.1",
 // "3.2"); index stays the row's position in team.schedules for drag & drop.
 // inCustomerStop: the customer name / contact are shown once by the stop
 // banner, so the child row omits them (and its address unless it differs).
-const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith, displayNo, inCustomerStop = false, groupAddress }) {
+export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith, displayNo, inCustomerStop = false, groupAddress }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
@@ -1187,6 +1191,7 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
   const [showReschedule, setShowReschedule] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduling, setRescheduling] = useState(false);
+  const stopToast = useToast();
   const isTrip = !!tripInfo;
 
   // Phase 2B: a DO schedule shows ONLY that shipment's items. DO items were
@@ -1287,8 +1292,15 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
                 Superseded{dord.superseded_by?.do_number ? ` → ${dord.superseded_by.do_number}` : ""}
               </span>
             )}
+            {/* ONE copy action per Customer Stop: a standalone stop carries it here;
+                a Deliver Together group carries it once on the group banner. */}
+            {!inCustomerStop && (
+              <button type="button" draggable={false} onClick={e => { e.stopPropagation(); copyStopDetails([o], stopToast); }}
+                className={`text-[10px] text-gray-400 hover:text-blue-600 border border-gray-200 rounded px-1 leading-4 ${isLocked ? "ml-auto" : ""}`}
+                title="Copy name, contact, address and balance" data-testid="copy-stop">Copy</button>
+            )}
             {!isLocked && (
-              <button onClick={() => onUnassign(schedule.id)} className="text-gray-300 hover:text-red-500 text-xs ml-auto" title="Unassign">×</button>
+              <button onClick={() => onUnassign(schedule.id)} className={`text-gray-300 hover:text-red-500 text-xs ${inCustomerStop ? "ml-auto" : ""}`} title="Unassign">×</button>
             )}
           </div>
           {/* Fix #4 / #8: reassign to another team, or reschedule a DO's date,
@@ -1301,14 +1313,24 @@ const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUna
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               {onReassign && (
                 showReassign ? (
-                  <select autoFocus defaultValue="" onChange={e => { const tid = e.target.value; setShowReassign(false); if (tid) onReassign(schedule.id, tid); }}
+                  <select autoFocus defaultValue="" onChange={e => {
+                      const tid = e.target.value; setShowReassign(false);
+                      if (!tid) return;
+                      // Move to Unassigned = the board's one canonical "unassign" (DELETE
+                      // /delivery-schedules/:id): the delivery and its date are kept, only
+                      // this team assignment is removed. Same gate as Reassign (never shown
+                      // for a locked team / superseded DO; the backend also refuses locked).
+                      if (tid === UNASSIGNED_TARGET) onUnassign(schedule.id, { successMessage: "Moved to Unassigned" });
+                      else onReassign(schedule.id, tid);
+                    }}
                     onBlur={() => setShowReassign(false)}
-                    className="text-[10px] border rounded px-1 py-0.5 text-gray-600 max-w-[110px]">
+                    className="text-[10px] border rounded px-1 py-0.5 text-gray-600 max-w-[130px]" data-testid="reassign-select">
                     <option value="">Move to…</option>
+                    <option value={UNASSIGNED_TARGET}>Unassigned</option>
                     {reassignTargets.map(t => <option key={t.id} value={t.id}>{t.vehicle_plate || t.driver_name}</option>)}
                   </select>
                 ) : (
-                  <button onClick={() => setShowReassign(true)} disabled={reassignTargets.length === 0} className="text-[10px] text-blue-500 hover:underline disabled:text-gray-300 disabled:no-underline" title={reassignTargets.length === 0 ? "No other open teams" : "Reassign to another team"}>Reassign</button>
+                  <button onClick={() => setShowReassign(true)} className="text-[10px] text-blue-500 hover:underline" title="Reassign to another team, or move to Unassigned">Reassign</button>
                 )
               )}
               {canReschedule && (
@@ -2395,7 +2417,7 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 // Delivery Orders tab — a flat list of every Delivery Order created for the
 // company, so undated (TBC) DOs have a home (they no longer clutter each date's
 // unassigned pool) and their delivery date can be set/changed from one place.
-function DeliveryOrdersTab({ onChanged }) {
+export function DeliveryOrdersTab({ onChanged }) {
   const toast = useToast();
   const [dos, setDos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2404,6 +2426,8 @@ function DeliveryOrdersTab({ onChanged }) {
   const [savingId, setSavingId] = useState(null);
   const [dateFilter, setDateFilter] = useState(""); // filter list by delivery date
   const [teamFilter, setTeamFilter] = useState(""); // "" = all, "unassigned" = no team, else a team_id
+  const [openDetail, setOpenDetail] = useState(() => new Set()); // DO ids whose detail row (items + linked Service) is expanded
+  const toggleDetail = id => setOpenDetail(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [company, setCompany] = useState({});       // header/logo for the printed DO
   const TERMINAL = ["completed", "cancelled"];
 
@@ -2530,9 +2554,16 @@ function DeliveryOrdersTab({ onChanged }) {
                   // approved active-DO amendment) — its raw status can still
                   // read as e.g. "scheduled", so treat it as terminal too.
                   const terminal = !!o.superseded_at || TERMINAL.includes(String(o.status || "").toLowerCase());
+                  const detailOpen = openDetail.has(o.id);
                   return (
-                    <tr key={o.id} className="border-t">
-                      <td className="px-3 py-2 font-bold text-violet-700 whitespace-nowrap">{o.do_number}</td>
+                    <Fragment key={o.id}>
+                    <tr className="border-t">
+                      <td className="px-3 py-2 font-bold text-violet-700 whitespace-nowrap">
+                        <button type="button" onClick={() => toggleDetail(o.id)} aria-expanded={detailOpen} data-testid="do-detail-toggle"
+                          className="inline-flex items-center gap-1 hover:underline" title="Show items and linked Service">
+                          <span aria-hidden="true" className="text-gray-400 text-[10px]">{detailOpen ? "▾" : "▸"}</span>{o.do_number}
+                        </button>
+                      </td>
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{so.order_number}</td>
                       <td className="px-3 py-2">{so.customer_name}</td>
                       <td className="px-3 py-2 text-gray-500 max-w-[240px] truncate">{items.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</td>
@@ -2571,6 +2602,29 @@ function DeliveryOrdersTab({ onChanged }) {
                         </div>
                       </td>
                     </tr>
+                    {detailOpen && (
+                      <tr className="bg-gray-50/70" data-testid="do-detail-row">
+                        <td colSpan={7} className="px-4 py-3">
+                          <div className="space-y-3 max-w-3xl">
+                            <div>
+                              <p className="text-xs font-bold text-gray-600 mb-1">ITEMS</p>
+                              {items.length === 0 ? <p className="text-xs text-gray-400">No items.</p> : (
+                                <ul className="space-y-0.5">
+                                  {items.map((i, ix) => { const spec = doItemSpec(i).spec; return (
+                                    <li key={i.id || ix} className="text-xs text-gray-800 break-words">{i.product_name || i.product_code || "item"}{spec ? ` · ${spec}` : ""} <span className="text-gray-500">×{Number(i.quantity)}</span></li>
+                                  ); })}
+                                </ul>
+                              )}
+                            </div>
+                            {/* Linked Service cases of this DO's Sales Order — the canonical Service
+                                records (GET /service-cases?so_number=), internal and read-only; renders
+                                nothing when the SO has no Service. Never the Internal Remark. */}
+                            <LinkedServicesSection soNumber={so.order_number} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -3005,12 +3059,13 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
     loadData();
   });
 
-  const unassignOrder = useCallback(async (scheduleId) => {
+  const unassignOrder = useCallback(async (scheduleId, opts) => {
     try {
       await withLoading("Removing from route…", async () => {
         const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "DELETE" });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        if (opts?.successMessage) toast.success(opts.successMessage);
         loadData();
       });
     } catch (e) { toast.error(e.message); }
@@ -3604,6 +3659,9 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
                             <span className="font-semibold text-gray-800">{head.customer_name}</span>
                             {head.contact && <span className="text-gray-500">{head.contact}</span>}
                             <span className="text-[11px] text-teal-700">deliver together · {unit.length} orders</span>
+                            <button type="button" onClick={() => copyStopDetails(unit.map(u => u.sc.orders), toast)}
+                              className="ml-auto text-[10px] text-gray-500 hover:text-blue-600 border border-gray-300 bg-white rounded px-1.5 leading-4"
+                              title="Copy name, contact, address and total balance (with per-SO breakdown)" data-testid="copy-stop">Copy</button>
                           </div>
                           {head.address && <p className="px-2 text-[11px] text-gray-500 break-words">{head.address}</p>}
                           <div className="pl-2">{rowsOf}</div>

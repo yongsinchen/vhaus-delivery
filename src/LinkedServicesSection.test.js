@@ -112,11 +112,20 @@ describe("11. customer-facing DO print never includes internal Service info", ()
     expect(start).toBeGreaterThan(-1);
     expect(body).not.toMatch(/service|LinkedServices/i);
   });
-  test("the Service section is mounted only in the internal preview modal", () => {
+  test("the Service section is mounted only in INTERNAL, interactive views: the unassigned preview modal and the Delivery Orders tab detail row — never print/export", () => {
     const uses = [...src.matchAll(/<LinkedServicesSection /g)].map(m => m.index);
-    expect(uses).toHaveLength(1);
+    expect(uses).toHaveLength(2);
     const modalStart = src.indexOf("function UnassignedPreviewModal(");
-    expect(uses[0]).toBeGreaterThan(modalStart);
-    expect(uses[0]).toBeLessThan(src.indexOf("\nfunction ", modalStart + 10));
+    const modalEnd = src.indexOf("\nfunction ", modalStart + 10);
+    const tabStart = src.indexOf("function DeliveryOrdersTab(");
+    const tabEnd = src.indexOf("\nfunction ", tabStart + 10);
+    expect(uses.filter(i => i > modalStart && i < modalEnd)).toHaveLength(1);
+    expect(uses.filter(i => i > tabStart && i < tabEnd)).toHaveLength(1);
+    // and never inside the DO print / export builders
+    const exStart = src.indexOf("async function exportDeliveryOrderExcel(");
+    const exRest = src.slice(exStart + 10);
+    const exEnd = exRest.search(/\n(async function |function |export function |export default )/);
+    const exBody = exRest.slice(0, exEnd);
+    expect(exBody).not.toMatch(/LinkedServices/);
   });
 });

@@ -44,6 +44,7 @@ function ServiceCard({ s, muted }) {
       data-testid="linked-service-card">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm">{TYPE_ICON[s.service_type] || "🔧"}</span>
+        <span className="text-[11px] text-gray-500">Service No:</span>
         <span className="font-bold text-sm text-violet-800">{label}</span>
         <span className="text-xs text-gray-600">{SERVICE_TYPES[s.service_type] || `Type ${s.service_type}`}</span>
         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${STATUS_STYLE[s.status] || "bg-gray-100 text-gray-600"}`}>{STATUS_LABEL[s.status] || s.status}</span>
@@ -54,7 +55,10 @@ function ServiceCard({ s, muted }) {
         {s._assigned?.name && <span>Assigned: <span className="font-medium text-gray-800">{s._assigned.name}</span></span>}
       </div>
       {s.description && (
-        <p className="mt-1.5 text-sm text-gray-800 whitespace-pre-line break-words">{s.description}</p>
+        <div className="mt-1.5">
+          <p className="text-[11px] font-semibold text-gray-500">Service Note:</p>
+          <p className="text-sm text-gray-800 whitespace-pre-line break-words" data-testid="service-note">{s.description}</p>
+        </div>
       )}
       {items.length > 0 && (
         <ul className="mt-1.5 space-y-0.5">
