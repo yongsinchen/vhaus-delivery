@@ -5,7 +5,7 @@ const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.ra
 
 const GREETING = {
   from: "bot",
-  text: "Hi! I'm the delivery assistant. Ask me naturally:\n• \"move 31006 to next Friday\"\n• \"where is 31006\"\n• \"how busy is tomorrow\"\n• \"best date\" — emptiest delivery days\nOr just type an SO number to reschedule it.",
+  text: "Hi! I'm the delivery assistant. Ask me:\n• an SO number (e.g. SO31006) — customer, balance, delivery, readiness, items, Service\n• \"balance SO31006\", \"is DO2610-0001 ready\", \"remaining items SO31006\"\n• \"deliveries tomorrow\", \"not ready tomorrow\", \"unassigned tomorrow\"\n• \"customer Tan\" or a phone number\n• \"reschedule 31006\" to move a delivery date, or \"best date\"",
   suggestions: ["best date"],
 };
 
@@ -65,7 +65,7 @@ export default function AssistantChat() {
           <div className="px-4 py-3 bg-violet-600 text-white flex items-center justify-between">
             <div>
               <p className="text-sm font-bold leading-tight">Delivery Assistant</p>
-              <p className="text-xs text-violet-200 leading-tight">Schedule deliveries by chat</p>
+              <p className="text-xs text-violet-200 leading-tight">Look up orders · schedule deliveries</p>
             </div>
             <button onClick={() => setOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-violet-500 text-violet-100">×</button>
           </div>
@@ -101,7 +101,7 @@ export default function AssistantChat() {
           <div className="p-2 border-t border-gray-100 bg-white flex gap-2">
             <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && send()}
-              placeholder="SO number, date, or 'best date'…"
+              placeholder="SO number, customer, or 'deliveries tomorrow'…"
               className="flex-1 text-sm px-3 py-2 rounded-xl border border-gray-200 focus:outline-none focus:border-violet-400" />
             <button onClick={() => send()} disabled={busy || !input.trim()}
               className="px-3.5 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-40">➤</button>
