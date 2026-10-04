@@ -7,6 +7,7 @@ import { effectiveDeliveryDisplay } from "./effectiveDelivery";
 import RecordPaymentModal from "./RecordPaymentModal";
 import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
+import { addDaysISO } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -581,11 +582,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 // warehouse staff to click month-by-month for common backdated entries.
 // Quick-pick buttons cover the common cases; direct typing into the native
 // input still works unchanged.
-function ArrivalDateInput({ value, disabled, onChange, className }) {
+export function ArrivalDateInput({ value, disabled, onChange, className }) {
   const isoOffset = (days) => {
-    const d = new Date(`${todayMY()}T00:00:00`);
-    d.setDate(d.getDate() + days);
-    return d.toISOString().split("T")[0];
+    // Phase 2D: pure calendar arithmetic. The old `new Date("YYYY-MM-DDT00:00:00")` + toISOString() read local midnight back as UTC,
+    // so in a Malaysian browser "Today" produced YESTERDAY and "-1d" two days ago.
+    return addDaysISO(todayMY(), days);
   };
   const presets = [
     { label: "Today", days: 0 },

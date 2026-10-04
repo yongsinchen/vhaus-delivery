@@ -2640,7 +2640,7 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
 function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
-  const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(initialDate || getMalaysiaDate());
   // Open on the date passed in (e.g. clicked from the overview calendar).
   useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
   // Company header/logo for printing a Delivery Order from the board.

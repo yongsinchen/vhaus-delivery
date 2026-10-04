@@ -4,6 +4,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import { printHtml } from "./printDocument";
+import { malaysiaToday, malaysiaMonthStart } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -28,8 +29,8 @@ function FinancePage() {
   const [aging, setAging] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => malaysiaMonthStart())   // Phase 2D: Malaysia business month;
+  const [dateTo, setDateTo] = useState(() => malaysiaToday());
   const [methodFilter, setMethodFilter] = useState(""); // Payments tab: filter by payment method
   const [typeFilter, setTypeFilter] = useState("");     // Payments tab: filter by type (Deposit / Balance)
   const [refFilter, setRefFilter] = useState("");       // Payments tab: filter by approval code (reference_no)

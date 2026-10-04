@@ -4,6 +4,7 @@ import { useToast, formatMoney } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import DeliveryDateRequestActions, { AmendDeliveryDateRequestModal, canChangeRequest } from "./DeliveryDateRequestActions";
 import LinkedDeliveryPicker, { LinkedChip, linkedSoNumbers } from "./LinkedDeliveryPicker";
+import { malaysiaToday } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -19,7 +20,7 @@ const fmt = d => d ? new Date(d + "T00:00").toLocaleDateString("en-MY", { weekda
 // yet — every existing and new row has it NULL today) — show "TBC / Not Set"
 // instead, same as any other genuinely unset date on this page.
 const fmtOrTBC = d => d ? fmt(d) : "TBC / Not Set";
-const todayStr = new Date().toISOString().slice(0, 10);
+const todayStr = malaysiaToday();   // Phase 2D: Malaysia business date
 
 const STATUS = {
   pending:          { label: "Pending review", cls: "bg-amber-100 text-amber-700" },

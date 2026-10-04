@@ -18,6 +18,7 @@ import { supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import RecordPhotos, { usePhotoStaging, StagedPhotoList, uploadStagedPhotos } from "./RecordPhotos";
 import { parseServiceItemQty, serviceItemQty } from "./serviceItemQty";
+import { malaysiaToday } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -28,7 +29,7 @@ export const TYPE_ICON = { 1: "🔧", 2: "🪛", 3: "🔄", 4: "🚚", 5: "📦"
 // Per-item action on a service case (matches backend service_items.action_type).
 export const ITEM_ACTIONS = { 1: "Assemble", 2: "Service", 3: "Claim" };
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => malaysiaToday();   // Phase 2D: Malaysia business date
 const EMPTY_FORM = () => ({ order_id: "", service_type: 1, description: "", service_date: today(), delivery_date: "", schedule_tbc: false, amount: "", customer_name: "", customer_phone: "", customer_address: "" });
 
 // The requester's own pending request can be amended / deleted.

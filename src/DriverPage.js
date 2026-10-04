@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
 import { normalizeOrderItems } from "./safeData";
+import { malaysiaToday, formatCalendarDate } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -40,7 +41,7 @@ const itemDisplayName = (item) => {
 function DriverPage() {
   useAuth();
   const toast = useToast();
-  const [date] = useState(new Date().toISOString().slice(0, 10));
+  const [date] = useState(() => malaysiaToday());   // Phase 2D: Malaysia business date — at 07:30 MYT the UTC date is still yesterday
   const [teams, setTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedStop, setExpandedStop] = useState(null);
@@ -120,7 +121,7 @@ function DriverPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold">Today's Route</h1>
-            <p className="text-xs text-violet-200">{new Date(date).toLocaleDateString("en-MY", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}</p>
+            <p className="text-xs text-violet-200">{formatCalendarDate(date)}</p>
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold">{delivered}/{total}</p>

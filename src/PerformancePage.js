@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, formatMoney } from "./UIComponents";
+import { malaysiaToday, malaysiaMonthStart } from "./malaysiaDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 const money = v => `RM ${formatMoney(v)}`;
-const firstOfMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; };
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const firstOfMonth = () => malaysiaMonthStart();   // Phase 2D: Malaysia business month
+const todayStr = () => malaysiaToday();   // Phase 2D: Malaysia business date
 
 function StatCard({ label, value, sub, tone = "violet" }) {
   const tones = { violet: "text-violet-700", emerald: "text-emerald-700", amber: "text-amber-700", red: "text-red-600", gray: "text-gray-800" };

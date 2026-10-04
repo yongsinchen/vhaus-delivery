@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import { malaysiaToday } from "./malaysiaDate";
 let jsQR = null;
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -47,7 +48,7 @@ function WarehousePage() {
 
   // Loading
   const [loadingItems, setLoadingItems] = useState([]);
-  const [loadDate, setLoadDate] = useState(new Date().toISOString().slice(0, 10));
+  const [loadDate, setLoadDate] = useState(() => malaysiaToday());
   const [loadRoute, setLoadRoute] = useState("");
   const [routes, setRoutes] = useState([]);
 

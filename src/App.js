@@ -4,6 +4,7 @@ import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast, formatMoney } from "./UIComponents";
 import { myToday, paymentDateError } from "./paymentDate";
 import { normalizeOrderItems } from "./safeData";
+import { malaysiaToday, malaysiaMonth, addDaysISO, malaysiaDaysAgo, formatCalendarDate } from "./malaysiaDate";
 
 // Lazy load all pages — only loaded when navigated to
 const DeliverySchedule = lazy(() => import("./DeliverySchedule"));
@@ -43,7 +44,7 @@ const PAYMENT_METHODS = ["Cash", "Bank Transfer", "QR Pay", "Credit Card", "Touc
 // ── Helpers ───────────────────────────────────────────────────────
 const fmt = d => d ? new Date(d).toLocaleDateString("en-MY") : "-";
 const now = new Date();
-const todayStr = now.toISOString().split("T")[0];
+const todayStr = malaysiaToday();   // Phase 2D: Malaysia business date (the UTC date is still yesterday 00:00-08:00 MYT)
 
 // Relative-time label for the Recent Delivery Updates panel ("2h ago"),
 // falling back to a short date once it's more than a week old.
@@ -298,8 +299,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
           <h2 className="font-bold text-gray-800 mb-3">Next 3 Days</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[1,2,3].map(offset => {
-              const d = new Date(now); d.setDate(d.getDate()+offset);
-              const ds = d.toISOString().split("T")[0];
+              const ds = addDaysISO(todayStr, offset);
               const dayOrders = orders.filter(o => o.deliveryDate === ds);
               // Fix (SEV-3): shadow DO cards carry the whole matched order's
               // items (no per-shipment detail in the by-month feed), so their
@@ -312,7 +312,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
                 <div key={ds} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <p className="font-bold text-gray-800 text-sm">{d.toLocaleDateString("en-MY",{weekday:"long"})}</p>
+                      <p className="font-bold text-gray-800 text-sm">{formatCalendarDate(ds, { weekday: "long" })}</p>
                       <p className="text-xs text-gray-400">{fmt(ds)}</p>
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${dayOrders.length > 0 ? "bg-violet-100 text-violet-700" : "bg-gray-100 text-gray-400"}`}>{dayOrders.length} orders</span>
@@ -383,7 +383,7 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
                   <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const pm = m===1?12:m-1; const py = m===1?y-1:y; setCalMonthStr(`${py}-${String(pm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">‹</button>
                   <span className="text-sm font-semibold text-gray-700 min-w-32 text-center">{new Date(calYear, calMonth-1, 1).toLocaleString("en-MY",{month:"long",year:"numeric"})}</span>
                   <button onClick={() => { const [y,m] = calMonthStr.split("-").map(Number); const nm = m===12?1:m+1; const ny = m===12?y+1:y; setCalMonthStr(`${ny}-${String(nm).padStart(2,"0")}`); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-bold">›</button>
-                  <button onClick={() => setCalMonthStr(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`)} className="text-xs text-violet-600 hover:underline px-2">Today</button>
+                  <button onClick={() => setCalMonthStr(malaysiaMonth())} className="text-xs text-violet-600 hover:underline px-2">Today</button>
                 </div>
               </div>
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -641,7 +641,7 @@ function DeliveryActivityPanel() {
 // OverviewPage's prop surface doesn't grow. Shows each branch's total sales
 // (RM) for the picked month, biggest first, with a share bar.
 function BranchSalesPanel() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => malaysiaMonth());
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -1082,7 +1082,7 @@ export default function App() {
   const paymentIdempotencyKeyRef = useRef(null);
   const money = v => `RM ${formatMoney(v)}`;
   const [opsTab, setOpsTab] = useState("service_pending");
-  const [calMonthStr, setCalMonthStr] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
+  const [calMonthStr, setCalMonthStr] = useState(() => malaysiaMonth());
   const [calSalesman, setCalSalesman] = useState(isSalesman ? (user?.salesman_name || "") : "");
   const [services, setServices] = useState([]); // eslint-disable-line -- used in overview calendar
   const [servicesLoading, setServicesLoading] = useState(false); // eslint-disable-line
@@ -1134,7 +1134,7 @@ export default function App() {
 
   const loadOrders = async () => {
     if (orders.length === 0) setLoading(true); setError(null);
-    const cutoff = new Date(Date.now() - ORDER_WINDOW_DAYS * 86400000).toISOString().split("T")[0];
+    const cutoff = malaysiaDaysAgo(ORDER_WINDOW_DAYS);
     // Windowed fetch instead of the full table: an order is loaded when it is
     // still open, OR still owes money, OR is recent enough for the dashboard
     // views (today / next-3-days / recent calendar months). Closed months
@@ -1180,7 +1180,7 @@ export default function App() {
   // Trigger the lazy month fetch whenever the calendar month falls outside the window
   useEffect(() => {
     if (!user || !calMonthStr) return;
-    const cutoffMonth = new Date(Date.now() - ORDER_WINDOW_DAYS * 86400000).toISOString().slice(0, 7);
+    const cutoffMonth = malaysiaDaysAgo(ORDER_WINDOW_DAYS).slice(0, 7);
     if (calMonthStr < cutoffMonth) loadCalendarMonth(calMonthStr);
   }, [calMonthStr, user, companyId]); // eslint-disable-line
 
