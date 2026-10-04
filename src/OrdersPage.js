@@ -248,8 +248,16 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     @page { size: A4; margin: 8mm; }
     body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page { width: 725px; margin: 0 auto; }
-    /* Two copies (Customer + Company) — each on its own sheet. */
+    /* A second .page (only when content overflows) starts on its own sheet. */
     .page + .page { page-break-before: always; }
+    /* One-page target: a normal order fits one A4 sheet. If the order is long
+       enough to overflow, it EXTENDS to a second page (never shrunk to fit).
+       Keep each SMALL block whole across a page boundary, but let the items
+       table itself split (rows kept whole, header repeated) so a long list
+       flows instead of jumping an entire block to page 2. */
+    .cust, .midrow, .blk, .sign, .titlebar, .head { break-inside: avoid; }
+    table.items tr { break-inside: avoid; }
+    table.items thead { display: table-header-group; }
     .copytag { background: rgba(255,255,255,.18); border: 0.5px solid rgba(255,255,255,.6); border-radius: 3px; padding: 1px 8px; font-weight: 800; letter-spacing: 1.5px; }
     .doc { width: 100%; border: 1px solid #1f2937; }
     .sec { border-bottom: 0.5px solid #1f2937; }
@@ -345,11 +353,10 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     @media print { body { margin: 0; } }
   </style></head><body>
-    ${["Customer Copy", "Company Copy"].map(copyTag => `
+    ${[null].map(() => `
     <div class="page"><div class="doc">
       <div class="branchbar sec">
         <span>BRANCH : ${branchLine}</span>
-        <span class="copytag">${copyTag}</span>
         <span class="r">DATE : ${dateStr}</span>
       </div>
       <div class="head pad sec">
@@ -440,27 +447,12 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     </div></div>`).join("")}
   </body></html>`;
 
-  // Auto-fit to a single A4 page: the .page wrapper is fixed at the A4 printable
-  // width (725px @96dpi), so its rendered height matches the print layout. If the
-  // document is taller than the printable height (~1050px), scale it down to fit.
-  printHtml(html, {
-    onBeforePrint: (w) => {
-      // Scale each copy independently so both fit their own A4 sheet.
-      w.document.querySelectorAll(".page").forEach(page => {
-        const doc = page.querySelector(".doc");
-        if (!doc) return;
-        const maxH = 1050;
-        const h = doc.getBoundingClientRect().height;
-        if (h > maxH) {
-          const s = maxH / h;
-          doc.style.transformOrigin = "top left";
-          doc.style.transform = `scale(${s})`;
-          page.style.height = Math.ceil(h * s) + "px";
-          page.style.overflow = "hidden";
-        }
-      });
-    },
-  });
+  // Single copy, one A4 page for a normal order. The layout is sized to fit one
+  // sheet (725px printable width); a long item list flows onto a second page via
+  // the break-inside rules above rather than being shrunk to fit — per the
+  // "fit one page, extend only if it cannot" requirement. No transform-scale /
+  // clip-to-fit (it risked hiding content and shrinking readable text).
+  printHtml(html);
 }
 
 // Fix #9: arrival-date entry via a bare native <input type="date"> forced
