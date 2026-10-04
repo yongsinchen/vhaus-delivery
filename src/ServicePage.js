@@ -4,6 +4,7 @@ import { useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RecordPhotos from "./RecordPhotos";
 import { parseServiceItemQty, serviceItemQty } from "./serviceItemQty";
+import { serviceDateUpdateNotice } from "./serviceDateUpdate";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -453,13 +454,17 @@ function ServicePage() {
 
   // Patch arbitrary service-case fields (creation date, schedule date, TBC, …)
   const updateService = async (id, fields) => {
+    let notice = null;
     try {
       await withLoading("Updating…", async () => {
         const res = await af(`${API}/service-cases/${id}`, { method: "PATCH", body: JSON.stringify(fields) });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Update failed"); }
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || "Update failed");
+        notice = serviceDateUpdateNotice(body);
         if (detail?.service) openDetail(detail.service);
         loadServices();
       });
+      if (notice) toast[notice.type](notice.message);
     } catch (e) { toast.error("Failed to update: " + e.message); }
   };
 

@@ -1182,7 +1182,7 @@ const UNASSIGNED_TARGET = "__unassigned__";
 // "3.2"); index stays the row's position in team.schedules for drag & drop.
 // inCustomerStop: the customer name / contact are shown once by the stop
 // banner, so the child row omits them (and its address unless it differs).
-export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith, displayNo, inCustomerStop = false, groupAddress }) {
+export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked, onUnassign, onDragStart, onDrop, onSaved, tripInfo, teams, onReassign, linkedWith, displayNo, inCustomerStop = false, groupAddress, canEditDo = true }) {
   const o = schedule.orders || {};
   const [notes, setNotes] = useState(schedule.notes || "");
   const [slotVal, setSlotVal] = useState(schedule.slot || "");
@@ -1228,7 +1228,9 @@ export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked
   const isSuperseded = !!(dord && dord.superseded_at);
   // Fix #8: a DO can be rescheduled until it's completed/cancelled — no more
   // cancel+recreate to move a shipment's date.
-  const canReschedule = dord && !isSuperseded && !DO_TERMINAL_STATUSES.includes(String(dord.status || "").toLowerCase());
+  // The board's Reschedule calls PATCH /delivery-orders/:id, which needs DELIVERY_ORDER_EDIT (a separate permission
+  // from editing the schedule) — so it is only offered to a user who holds it, never shown-then-403.
+  const canReschedule = canEditDo && dord && !isSuperseded && !DO_TERMINAL_STATUSES.includes(String(dord.status || "").toLowerCase());
   // Fix #4: reassigning a stop to another team on the same date — only other
   // teams still open for assignment are offered.
   const reassignTargets = (teams || []).filter(t => t.id !== teamId && ["Pending", "Confirmed"].includes(deriveTeamStatus(t.schedules)));
@@ -2417,7 +2419,7 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 // Delivery Orders tab — a flat list of every Delivery Order created for the
 // company, so undated (TBC) DOs have a home (they no longer clutter each date's
 // unassigned pool) and their delivery date can be set/changed from one place.
-export function DeliveryOrdersTab({ onChanged }) {
+export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
   const toast = useToast();
   const [dos, setDos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2585,12 +2587,12 @@ export function DeliveryOrdersTab({ onChanged }) {
                       <td className="sticky right-0 z-10 bg-white px-3 py-2 whitespace-nowrap border-l border-gray-200 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.08)]">
                         <div className="flex flex-col gap-1">
                           <div>
-                            {terminal ? <span className="text-gray-500">{o.delivery_date || "—"}</span>
+                            {terminal || !canEditDo ? <span className="text-gray-500" data-testid="do-date-readonly">{o.delivery_date || "—"}{!terminal && !o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</span>
                               : <><input type="date" value={edit[o.id] || ""} onChange={e => setEdit(p => ({ ...p, [o.id]: e.target.value }))} className="border rounded px-2 py-1 text-xs" />
                                   {!o.delivery_date && <span className="ml-1 text-amber-600 font-semibold">TBC</span>}</>}
                           </div>
                           <div className="flex items-center gap-1">
-                            {!terminal && (
+                            {!terminal && canEditDo && (
                               <>
                                 <button disabled={savingId === o.id || !edit[o.id] || edit[o.id] === (o.delivery_date || "")} onClick={() => applyDate(o.id, edit[o.id])} className="bg-blue-600 text-white px-2 py-1 rounded disabled:opacity-40">{savingId === o.id ? "…" : "Save"}</button>
                                 {o.delivery_date && <button disabled={savingId === o.id} onClick={() => applyDate(o.id, null)} className="bg-amber-500 text-white px-2 py-1 rounded disabled:opacity-40" title="Set to TBC (clear date)">TBC</button>}
@@ -2635,7 +2637,7 @@ export function DeliveryOrdersTab({ onChanged }) {
   );
 }
 
-function DeliverySchedule({ readOnly = false, canImport = true, companyId = null, currentUser = null, initialDate = null }) {
+function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
@@ -3469,7 +3471,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, companyId = null
         </div>
       )}
 
-      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} />}
+      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} />}
 
       <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
         {/* Unassigned Panel — also a drop zone: dragging an assigned stop here
@@ -3632,6 +3634,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, companyId = null
                       const linkedTrip = trips.find(t => t.so_number === sc.orders?.so_number);
                       return (
                         <StopRow
+                          canEditDo={!readOnly && canEditDo}
                           key={sc.id}
                           schedule={sc}
                           teamId={team.id}
