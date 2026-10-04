@@ -342,7 +342,9 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     @page { size: A4; margin: 8mm; }
     body { font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; color: #1f2937; font-size: 10px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page { width: 725px; margin: 0 auto; }
-    /* A second .page (only when content overflows) starts on its own sheet. */
+    /* Two copies (Customer + Company) — each starts on its own sheet. A copy
+       fits one A4 page for a normal order and extends to a further page only if
+       its own content overflows (never shrunk to fit). */
     .page + .page { page-break-before: always; }
     /* One-page target: a normal order fits one A4 sheet. If the order is long
        enough to overflow, it EXTENDS to a second page (never shrunk to fit).
@@ -470,10 +472,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
     @media print { body { margin: 0; } }
   </style></head><body>
-    ${[null].map(() => `
+    ${["Customer Copy", "Company Copy"].map(copyTag => `
     <div class="page"><div class="doc">
       <div class="branchbar sec">
         <span>BRANCH : ${branchLine}</span>
+        <span class="copytag">${copyTag}</span>
         <span class="r">DATE : ${dateStr}</span>
       </div>
       <div class="head pad sec">
@@ -511,7 +514,7 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
         </div>
       </div>
       <table class="items sec">
-        <thead><tr class="ctx"><th colspan="5">Sales Order ${esc(order.order_number || "")} · ${esc(order.customer_name || "")}</th></tr><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
+        <thead><tr class="ctx"><th colspan="5">Sales Order ${esc(order.order_number || "")} · ${copyTag} · ${esc(order.customer_name || "")}</th></tr><tr><th style="width:30px">No</th><th>Description</th><th style="width:42px">Qty</th><th style="width:78px">Unit Price</th><th style="width:92px">Amount (MYR)</th></tr></thead>
         <tbody>${itemRows.join("")}</tbody>
       </table>
       <div class="closing">
@@ -566,11 +569,11 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     </div></div>`).join("")}
   </body></html>`;
 
-  // Single copy, one A4 page for a normal order. The layout is sized to fit one
-  // sheet (725px printable width); a long item list flows onto a second page via
-  // the break-inside rules above rather than being shrunk to fit — per the
-  // "fit one page, extend only if it cannot" requirement. No transform-scale /
-  // clip-to-fit (readable font size preserved regardless of order length).
+  // Two copies (Customer + Company), each on its own A4 sheet; a normal order's
+  // copy fits one page and a long one extends to a further page via the
+  // break-inside rules above rather than being shrunk — "fit one page, extend
+  // only if it cannot". No transform-scale / clip-to-fit (readable font size
+  // preserved regardless of order length).
   printHtml(html);
 }
 
