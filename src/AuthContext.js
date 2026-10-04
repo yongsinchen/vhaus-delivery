@@ -59,6 +59,9 @@ export const can = (user, action) => {
 
     // Schedule edit (fulfilment side + company admin)
     editSchedule:         [...opsSide, "company_admin"].includes(role),
+    // Moving a Delivery Order's date (PATCH /delivery-orders/:id — what Schedule Import "move" and the
+    // board's Reschedule call) is a SEPARATE backend permission from editing the schedule.
+    editDeliveryOrder:    [...opsSide, "company_admin"].includes(role),
 
     // Order actions (revenue side + company admin + salesman)
     addOrder:             orderCapable.includes(role),
@@ -257,7 +260,7 @@ export function AuthProvider({ children }) {
     viewDaily: "DASHBOARD_VIEW", viewSchedule: "DELIVERY_VIEW", viewFlagged: "DASHBOARD_VIEW",
     viewServicePending: "SERVICE_VIEW", viewDoReview: "SUPPLIER_DO_REVIEW",
     viewAddOrder: "ORDERS_CREATE", viewFinance: "FINANCE_VIEW",
-    editSchedule: "DELIVERY_EDIT", addOrder: "ORDERS_CREATE",
+    editSchedule: "DELIVERY_EDIT", editDeliveryOrder: "DELIVERY_ORDER_EDIT", addOrder: "ORDERS_CREATE",
     editOrder: "ORDERS_EDIT", deleteOrder: "ORDERS_DELETE",
     recordPayment: "FINANCE_RECORD_PAYMENT", manageUsers: "SYSTEM_MANAGE_USERS",
     manageCompanies: "SYSTEM_MANAGE_COMPANIES",

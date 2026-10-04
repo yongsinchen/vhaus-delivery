@@ -1651,7 +1651,7 @@ export function TeamPrintView({ team, onClose, company }) {
 //     Reschedule makes. It refuses superseded / completed / cancelled DOs.
 //   DELETE /delivery-schedules/:id — used only when a DO is already on the
 //     target date but still sits on a vehicle: take it off that vehicle.
-function ImportScheduleModal({ date, companyId, onClose, onDone }) {
+export function ImportScheduleModal({ date, companyId, onClose, onDone }) {
   const toast = useToast();
   const [fileName, setFileName] = useState("");
   const [meta, setMeta] = useState(null);      // { fileDate, fileVehicle } — display only
@@ -2635,7 +2635,7 @@ export function DeliveryOrdersTab({ onChanged }) {
   );
 }
 
-function DeliverySchedule({ readOnly = false, companyId = null, currentUser = null, initialDate = null }) {
+function DeliverySchedule({ readOnly = false, canImport = true, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || new Date().toISOString().split("T")[0]);
@@ -3329,7 +3329,8 @@ function DeliverySchedule({ readOnly = false, companyId = null, currentUser = nu
           )}
           <button onClick={loadData} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs hover:bg-gray-50">Refresh</button>
           <button onClick={loadReadiness} className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-amber-600">⚠️ Readiness</button>
-          {!readOnly && <button onClick={() => setShowImport(true)} className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-gray-50" title={`Import a schedule file — move its Delivery Orders to ${date} with no vehicle`}>📥 Import</button>}
+          {/* Import moves DOs (PATCH /delivery-orders/:id → DELIVERY_ORDER_EDIT) and unassigns stops (DELETE /delivery-schedules/:id → DELIVERY_EDIT). A user holding only one of the two would hit a predictable 403 on every row, so the action is disabled — with the reason — unless they hold BOTH. */}
+          {!readOnly && <button onClick={() => canImport && setShowImport(true)} disabled={!canImport} data-testid="import-schedule" className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white" title={canImport ? `Import a schedule file — move its Delivery Orders to ${date} with no vehicle` : "Importing needs permission to edit Delivery Orders as well as the schedule"}>📥 Import</button>}
           {!readOnly && <button onClick={buildSmartPlan} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
