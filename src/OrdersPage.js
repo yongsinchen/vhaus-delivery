@@ -1648,11 +1648,17 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     if (d.delivery_order_updated) {
       toast.info(`${d.delivery_order_updated.do_number}: delivery date ${d.delivery_order_updated.delivery_date ? `set to ${d.delivery_order_updated.delivery_date}` : "set to TBC — removed from its team"}`);
     }
+    // A date change on an order with an active DO goes to that DO's Delivery
+    // Date Request — say exactly what happened, never imply it already applied.
+    const ddr = d.delivery_date_request;
+    if (ddr?.error) toast.error(`Saved, but the delivery date was not changed: ${ddr.error}`);
+    else if (ddr?.status === "approved") toast.success(`${ddr.do_number}: delivery date moved to ${ddr.requested_date}`);
+    else if (ddr) toast.warning(`Delivery date change submitted for approval — ${ddr.do_number} stays on ${ddr.original_date || "TBC"} until a manager approves ${ddr.requested_date}.`);
     setDrawerOpen(false);
     if (!editId) clearDraft(); // new order saved — drop the autosaved draft
     // Local update instead of full refetch for edits
     if (editId && d.order) {
-      setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length, _effective_delivery: effectiveAfterEdit(o._effective_delivery, d.order, d.delivery_order_updated) } : o));
+      setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length, _effective_delivery: effectiveAfterEdit(o._effective_delivery, d.order, d.delivery_order_updated, d.delivery_date_request) } : o));
     } else {
       loadOrders(page);
     }
@@ -2767,12 +2773,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                   </div>
                   {editId && editingOrder?._effective_delivery?.source === "delivery_order" && (
                     <p className="text-[11px] text-gray-500 mt-1" data-testid="edit-date-do-hint">
-                      Delivery runs on {editingOrder._effective_delivery.do_number}. Setting TBC (or a date when it is TBC) updates that Delivery Order and removes it from its team.
+                      Delivery runs on {editingOrder._effective_delivery.do_number}. A new date is sent as that Delivery Order's date request (manager approval inside 10 days); TBC clears its date and removes it from its team.
                     </p>
                   )}
                   {editId && editingOrder?._effective_delivery?.source === "multiple_delivery_orders" && (
                     <p className="text-[11px] text-amber-700 mt-1" data-testid="edit-date-multi-hint">
-                      This order has {editingOrder._effective_delivery.deliveries?.length || "several"} Delivery Orders — set TBC or a date on each one in Deliveries → Delivery Orders.
+                      This order has multiple active Delivery Orders — change the delivery date from Deliveries → Delivery Orders so the correct one is selected.
                     </p>
                   )}
                 </div>

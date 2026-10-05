@@ -28,8 +28,9 @@ export function effectiveDeliveryDisplay(order) {
 
 // Edit Order form: the delivery date to PRE-FILL is the effective one — with
 // exactly one active DO that DO's date ("TBC" when it has none), so the form
-// shows what is really planned. The backend applies a TBC ↔ date change to
-// that DO (PUT /sales-orders/:id); with no DO it is the SO's own field.
+// shows what is really planned. The backend routes a change of it to that DO
+// (PUT /sales-orders/:id): TBC clears the DO's date; a new date becomes the
+// DO's Delivery Date Request (10-day rule). With no DO it is the SO's own field.
 export function editFormDeliveryDate(order) {
   const e = order?._effective_delivery;
   if (e && e.source === "delivery_order") return e.date || "TBC";
@@ -37,8 +38,14 @@ export function editFormDeliveryDate(order) {
 }
 
 // The list row's effective delivery after an edit (from the PUT response).
-export function effectiveAfterEdit(prev, saved, deliveryOrderUpdated) {
+export function effectiveAfterEdit(prev, saved, deliveryOrderUpdated, dateRequest = null) {
   const iso = v => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  // A date change sent as the DO's Delivery Date Request: applied only when
+  // auto-approved; while pending the DO (and so the effective date) is unchanged.
+  if (dateRequest && !dateRequest.error) {
+    if (dateRequest.status !== "approved") return prev;
+    return { ...(prev || {}), source: "delivery_order", date: iso(dateRequest.requested_date), tbc: !iso(dateRequest.requested_date), do_number: dateRequest.do_number || prev?.do_number || null, deliveries: [] };
+  }
   if (deliveryOrderUpdated) {
     const date = iso(deliveryOrderUpdated.delivery_date);
     return { source: "delivery_order", date, tbc: !date, do_number: deliveryOrderUpdated.do_number || null, delivery_order_id: deliveryOrderUpdated.id || null, deliveries: [] };
