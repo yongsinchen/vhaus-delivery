@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo, memo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo, Fragment } from "react";
 import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
+import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices } from "./DeliveryWorkbench";
 import { printHtml } from "./printDocument";
 import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
@@ -2419,9 +2420,18 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 // Delivery Orders tab — a flat list of every Delivery Order created for the
 // company, so undated (TBC) DOs have a home (they no longer clutter each date's
 // unassigned pool) and their delivery date can be set/changed from one place.
-export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
+// Phase 3A: it is also the Operations workbench — Service jobs (canonical Service
+// records, never fake DOs) are listed and team-assigned here, and one search box
+// finds DOs / SOs / Services / customers across all dates (DeliveryWorkbench.js).
+export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService = false, canAssignService = false, onGoToSchedule = null }) {
   const toast = useToast();
   const [dos, setDos] = useState([]);
+  const [services, setServices] = useState([]);       // Service jobs (GET /delivery-workbench/services)
+  const [showPastService, setShowPastService] = useState(false);
+  const [openService, setOpenService] = useState(() => new Set());
+  const [search, setSearch] = useState("");           // cross-date search text; empty = normal workbench
+  const [searchKey, setSearchKey] = useState(0);
+  const searching = search.trim().length >= 2;
   const [loading, setLoading] = useState(true);
   const [showDone, setShowDone] = useState(false);
   const [edit, setEdit] = useState({});      // do id -> date string being edited
@@ -2463,6 +2473,47 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
   }, [toast, showDone]);
   useEffect(() => { load(); }, [load]);
 
+  // Service jobs: non-terminal by default; terminal ones too when "Show done" is on.
+  const loadServices = useCallback(async () => {
+    if (!canViewService) { setServices([]); return; }
+    try {
+      const reqs = [af(`${API}/delivery-workbench/services`).then(r => (r.ok ? r.json() : { services: [] }))];
+      if (showDone) reqs.push(af(`${API}/delivery-workbench/services?include_done=1`).then(r => (r.ok ? r.json() : { services: [] })));
+      const parts = await Promise.all(reqs);
+      const byId = new Map(); parts.forEach(p => (p.services || []).forEach(sv => byId.set(sv.id, sv)));
+      setServices([...byId.values()]);
+    } catch { setServices([]); }
+  }, [canViewService, showDone]);
+  useEffect(() => { loadServices(); }, [loadServices]);
+
+  // Assignable teams of one date — the board's own rule (Pending/Confirmed
+  // teams only, see deriveTeamStatus), cached per date until something changes.
+  const teamsCache = useRef(new Map());
+  const loadTeams = useCallback(async (d) => {
+    if (!teamsCache.current.has(d)) {
+      teamsCache.current.set(d, (async () => {
+        const [tr, sr] = await Promise.all([af(`${API}/delivery-teams?date=${d}`), af(`${API}/delivery-schedules?date=${d}`)]);
+        const [td, sd] = await Promise.all([tr.json(), sr.json()]);
+        const scheds = sd.schedules || [];
+        return (td.teams || [])
+          .map(t => ({ t, ss: scheds.filter(x => x.team_id === t.id) }))
+          .filter(({ ss }) => ["Pending", "Confirmed"].includes(deriveTeamStatus(ss)))
+          .map(({ t, ss }) => ({ id: t.id, stops: ss.length, label: [t.delivery_vehicles?.vehicle_plate, t.driver?.name].filter(Boolean).join(" · ") || "Team" }));
+      })().catch(() => { teamsCache.current.delete(d); return []; }));
+    }
+    return teamsCache.current.get(d);
+  }, []);
+  const afterServiceChange = useCallback(async () => {
+    teamsCache.current = new Map();
+    await loadServices();
+    setSearchKey(k => k + 1);
+    if (onChanged) onChanged();
+  }, [loadServices, onChanged]);
+  const serviceControl = (svc, extraRefresh) => (
+    <ServiceTeamControl svc={svc} canAssign={canAssignService} loadTeams={loadTeams} af={af} postWithBlockRetry={postWithBlockRetry}
+      onChanged={() => { afterServiceChange(); if (extraRefresh) extraRefresh(); }} />
+  );
+
   const applyDate = async (id, dateVal) => {
     setSavingId(id);
     try {
@@ -2502,6 +2553,7 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
       const label = teamLabel(o);
       if (teamId && label) map.set(teamId, label);
     });
+    services.forEach(sv => { if (sv.schedule?.team_id && sv.schedule.team_label) map.set(sv.schedule.team_id, sv.schedule.team_label); });
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   })();
 
@@ -2520,10 +2572,35 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
       return ad.localeCompare(bd);
     });
 
+  const todayMYNow = getMalaysiaDate();
+  const liveOrDone = services.filter(sv => showDone || !sv.terminal);
+  const serviceRows = filterServices(liveOrDone, { dateFilter, teamFilter, showPast: showPastService, today: todayMYNow });
+  const hiddenPastServices = (dateFilter || showPastService) ? 0
+    : filterServices(liveOrDone, { teamFilter, showPast: true, today: todayMYNow }).length - serviceRows.length;
+  const grouped = serviceRows.length > 0; // DELIVERY / SERVICE section headers once Service rows show
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="px-4 pt-3 pb-2 border-b">
+        <div className="relative">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search DO / SO / Service / Customer"
+            aria-label="Search DO / SO / Service / Customer" data-testid="workbench-search"
+            className="w-full border border-gray-300 rounded-lg pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm" aria-hidden="true">🔍</span>
+          {search && <button type="button" onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 text-lg leading-none px-1">×</button>}
+        </div>
+        {searching && <p className="text-[11px] text-gray-400 mt-1">Searching all dates — active and history. Clear the search to return to the list.</p>}
+      </div>
+      {searching ? (
+        <WorkbenchSearchResults query={search.trim()} af={af} onGoToSchedule={onGoToSchedule} refreshKey={searchKey}
+          renderDoActions={o => (<>
+            <button onClick={() => printDeliveryOrder(o, company)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50" title="Print / Save as PDF">📄 PDF</button>
+            <button onClick={() => exportDeliveryOrderExcel(o, company)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50" title="Download as Excel">📊 Excel</button>
+          </>)}
+          renderServiceControl={(svc, refresh) => serviceControl(svc, refresh)} />
+      ) : (<>
       <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
-        <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span></h3>
+        <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span>{canViewService && <span className="text-purple-600 font-normal"> · Service ({serviceRows.length})</span>}</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <label className="text-xs text-gray-500 flex items-center gap-1">Date
             <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded px-2 py-1 text-xs" />
@@ -2538,11 +2615,14 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
           </label>
           {teamFilter && <button onClick={() => setTeamFilter("")} className="text-xs text-gray-400 hover:text-red-500">clear</button>}
           <label className="text-xs text-gray-500 flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> Show completed/cancelled</label>
-          <button onClick={load} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
+          {canViewService && !dateFilter && (hiddenPastServices > 0 || showPastService) && (
+            <label className="text-xs text-gray-500 flex items-center gap-1" title="Live Service cases whose date has passed"><input type="checkbox" checked={showPastService} onChange={e => setShowPastService(e.target.checked)} /> Show past-dated Service{hiddenPastServices > 0 ? ` (${hiddenPastServices})` : ""}</label>
+          )}
+          <button onClick={() => { load(); loadServices(); }} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
         </div>
       </div>
       {loading ? <div className="p-6 text-center text-gray-400 text-sm">Loading…</div>
-        : rows.length === 0 ? <div className="p-6 text-center text-gray-400 text-sm">No delivery orders.</div>
+        : rows.length === 0 && serviceRows.length === 0 ? <div className="p-6 text-center text-gray-400 text-sm">{canViewService ? "No delivery orders or Service jobs." : "No delivery orders."}</div>
         : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -2556,6 +2636,7 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
                 <th className="sticky right-0 z-10 bg-gray-50 px-3 py-2 border-l border-gray-200 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.08)]">Delivery Date / Actions</th>
               </tr></thead>
               <tbody>
+                {grouped && <tr className="bg-blue-50/60" data-testid="group-delivery"><td colSpan={7} className="px-3 py-1.5 text-[11px] font-bold text-blue-800">DELIVERY ({rows.length})</td></tr>}
                 {rows.map(o => {
                   const so = o.sales_orders || {};
                   const items = (o.delivery_order_items || []).filter(i => i.status !== "cancelled");
@@ -2636,15 +2717,22 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true }) {
                     </Fragment>
                   );
                 })}
+                {grouped && <tr className="bg-purple-100/60" data-testid="group-service"><td colSpan={7} className="px-3 py-1.5 text-[11px] font-bold text-purple-800">SERVICE ({serviceRows.length})</td></tr>}
+                {serviceRows.map(svc => (
+                  <ServiceRow key={`svc-${svc.id}`} svc={svc} open={openService.has(svc.id)}
+                    onToggle={() => setOpenService(prev => { const n = new Set(prev); if (n.has(svc.id)) n.delete(svc.id); else n.add(svc.id); return n; })}
+                    teamControl={serviceControl(svc)} />
+                ))}
               </tbody>
             </table>
           </div>
         )}
+      </>)}
     </div>
   );
 }
 
-function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, companyId = null, currentUser = null, initialDate = null }) {
+function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, canViewService = false, companyId = null, currentUser = null, initialDate = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || getMalaysiaDate());
@@ -3478,7 +3566,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
         </div>
       )}
 
-      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} />}
+      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} canViewService={canViewService} canAssignService={!readOnly} onGoToSchedule={d => { setDate(d); setViewMode("schedule"); }} />}
 
       <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
         {/* Unassigned Panel — also a drop zone: dragging an assigned stop here

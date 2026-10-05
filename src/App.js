@@ -1658,7 +1658,7 @@ export default function App() {
     if (page === "deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Deliveries</h1>
-        <DeliverySchedule readOnly={!can("editSchedule")} canImport={can("editSchedule") && can("editDeliveryOrder")} canEditDo={can("editDeliveryOrder")} companyId={companyId} isMaster={isMaster} currentUser={user} initialDate={scheduleDate} />
+        <DeliverySchedule readOnly={!can("editSchedule")} canImport={can("editSchedule") && can("editDeliveryOrder")} canEditDo={can("editDeliveryOrder")} canViewService={can("viewService")} companyId={companyId} isMaster={isMaster} currentUser={user} initialDate={scheduleDate} />
       </div>
     );
 
@@ -1666,7 +1666,7 @@ export default function App() {
     if (page === "company-deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Company Deliveries</h1>
-        <DeliverySchedule readOnly={true} companyId={companyId} isMaster={false} currentUser={user} initialDate={scheduleDate} />
+        <DeliverySchedule readOnly={true} canViewService={can("viewService")} companyId={companyId} isMaster={false} currentUser={user} initialDate={scheduleDate} />
       </div>
     );
 
