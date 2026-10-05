@@ -608,7 +608,7 @@ export function ArrivalDateInput({ value, disabled, onChange, className }) {
   );
 }
 
-function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled } = {}) {
+function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled, viewRequest, onViewRequestHandled } = {}) {
   const { user, activeCompanyId, activeRoleKey } = useAuth();
   const toast = useToast();
   // Delivery-date approvers (same roles as the server's DATE_APPROVER_ROLES /
@@ -1343,6 +1343,17 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled 
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest]);
+
+  // Global Search 360 → "View Order": open the read-only drawer for that exact
+  // sales order id (the same openView the list uses — nothing re-implemented).
+  useEffect(() => {
+    if (!viewRequest?.salesOrderId) return;
+    (async () => {
+      try { await openView({ id: viewRequest.salesOrderId }); }
+      finally { onViewRequestHandled?.(); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewRequest]);
 
   // Pick a branch and auto-fill its next running number (new orders only;
   // the salesman can still edit the number afterwards).

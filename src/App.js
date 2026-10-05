@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense } from "react";
+import GlobalSearch from "./Customer360";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast, formatMoney } from "./UIComponents";
@@ -1048,9 +1049,8 @@ export default function App() {
   // form here — see openCanonicalEdit below. `nonce` guarantees the effect
   // in OrdersPage re-fires even if the same SO is opened twice in a row.
   const [ordersEditRequest, setOrdersEditRequest] = useState(null);
+  const [ordersViewRequest, setOrdersViewRequest] = useState(null); // Global Search 360 → "View Order"
   const [showSearch, setShowSearch] = useState(false);
-  const [globalSearch, setGlobalSearch] = useState("");
-  const [globalResults, setGlobalResults] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
 
@@ -1546,19 +1546,6 @@ export default function App() {
     paymentSavingRef.current = false;
     setPaymentSaving(false);
   };
-  const handleGlobalSearch = v => {
-    setGlobalSearch(v);
-    if (!v.trim()) { setGlobalResults([]); return; }
-    const q = v.toLowerCase();
-    const matchRow = o => o.soNumber?.toLowerCase().includes(q) || o.svNumber?.toLowerCase().includes(q)
-      || o.customerName?.toLowerCase().includes(q) || o.contact?.includes(q)
-      || o.serviceNote?.toLowerCase().includes(q) || o.items?.some(i => i.itemName?.toLowerCase().includes(q));
-    // Orders first, then services (the dashboard's Service-type rows), each
-    // tagged so the result list can label and route them.
-    const orderHits = orders.filter(matchRow);
-    const serviceHits = services.filter(matchRow).map(s => ({ ...s, _isService: true }));
-    setGlobalResults([...orderHits, ...serviceHits]);
-  };
 
   // ── Auth guards ─────────────────────────────────────────────────
   if (window.location.pathname === "/reset-password") return <ResetPasswordPage />;
@@ -1652,7 +1639,7 @@ export default function App() {
     if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
-    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} editRequest={ordersEditRequest} onEditRequestHandled={() => setOrdersEditRequest(null)} />;
+    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} editRequest={ordersEditRequest} onEditRequestHandled={() => setOrdersEditRequest(null)} viewRequest={ordersViewRequest} onViewRequestHandled={() => setOrdersViewRequest(null)} />;
 
     // DELIVERIES
     if (page === "deliveries") return (
@@ -2108,7 +2095,7 @@ export default function App() {
             <p className="font-bold text-gray-900 text-sm">PulseOS</p>
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={() => { setShowSearch(true); setGlobalSearch(""); setGlobalResults([]); }} className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
+            <button onClick={() => setShowSearch(true)} aria-label="Search" title="Search orders, deliveries, service and customers" className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">🔍</button>
             <button onClick={async () => { if (refreshing) return; setRefreshing(true); try { await loadOrders(); } finally { setRefreshing(false); } }} disabled={refreshing}
               className="w-9 h-9 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm disabled:opacity-60">
               {refreshing ? <span className="w-4 h-4 border-2 border-gray-300 border-t-violet-600 rounded-full animate-spin" /> : "🔄"}
@@ -2151,34 +2138,16 @@ export default function App() {
       {/* Order view */}
       {viewOrder && <OrderViewModal order={viewOrder} onClose={() => setViewOrder(null)} onEdit={() => { setViewOrder(null); openCanonicalEdit(viewOrder); }} onDelete={handleDelete} onViewPhoto={setViewPhoto} orders={orders} handleView={handleView} onRefresh={loadOrders} />}
 
-      {/* Global search */}
+      {/* Global search — server-side search + Customer / Order 360 (Customer360.js) */}
       {showSearch && (
-        <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 pt-16 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center gap-3 p-4 border-b">
-              <span className="text-gray-400">🔍</span>
-              <input autoFocus value={globalSearch} onChange={e=>handleGlobalSearch(e.target.value)} placeholder="Search SO/SV, customer, item, service..." className="flex-1 text-sm focus:outline-none" />
-              <button onClick={()=>setShowSearch(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold text-sm">×</button>
-            </div>
-            <div className="max-h-96 overflow-y-auto">
-              {globalSearch && globalResults.length===0 && <div className="text-center py-8 text-gray-400 text-sm">No results</div>}
-              {globalResults.map((o,i) => (
-                <div key={i} onClick={()=>{ if (o._isService) { setPage("services"); } else { handleView(o); } setShowSearch(false); }} className="px-4 py-3 hover:bg-violet-50 cursor-pointer border-b border-gray-50 last:border-0">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="font-bold text-violet-700 text-sm flex items-center gap-1.5">
-                      {o._isService && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 font-semibold">🔧 Service</span>}
-                      {o.soNumber}
-                    </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(o.status)}`}>{o.status}</span>
-                  </div>
-                  <p className="text-sm text-gray-700">{o.customerName}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{o._isService ? (o.serviceNote || o.items?.map(i=>i.itemName).filter(Boolean).join(", ")) : o.items?.map(i=>i.itemName).filter(Boolean).join(", ")}</p>
-                </div>
-              ))}
-              {!globalSearch && <div className="text-center py-8 text-gray-400 text-sm">Start typing...</div>}
-            </div>
-          </div>
-        </div>
+        <GlobalSearch onClose={() => setShowSearch(false)}
+          can={{ schedule: visibleNav.some(n => n.id === "deliveries" || n.id === "company-deliveries"), service: visibleNav.some(n => n.id === "services"), finance: visibleNav.some(n => n.id === "finance") }}
+          onNavigate={n => {
+            if (n.to === "order") { setPage("orders"); setOrdersViewRequest({ salesOrderId: n.salesOrderId, nonce: Date.now() }); }
+            else if (n.to === "schedule") { setScheduleDate(n.date); setPage(visibleNav.some(x => x.id === "deliveries") ? "deliveries" : "company-deliveries"); }
+            else if (n.to === "service") setPage("services");
+            else if (n.to === "finance") setPage("finance");
+          }} />
       )}
 
       {/* Service Date Modal */}
