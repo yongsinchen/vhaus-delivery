@@ -3,7 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading, formatMoney } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
-import { effectiveDeliveryDisplay } from "./effectiveDelivery";
+import { effectiveDeliveryDisplay, editFormDeliveryDate, effectiveAfterEdit } from "./effectiveDelivery";
 import RecordPaymentModal from "./RecordPaymentModal";
 import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
@@ -1266,7 +1266,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
       notes: f.notes || "",
       order_date: f.order_date || "",
       delivery_type: f.delivery_type || "Delivery",
-      delivery_date: f.delivery_date || "",
+      delivery_date: editFormDeliveryDate(f), // the effective date (active DO's when exactly one)
       delivery_time_slot: f.delivery_time_slot || "",
       delivery_address: f.delivery_address || "",
       remark: f.remark || "", internal_remark: f.internal_remark || "",
@@ -1645,11 +1645,14 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     if (d.pending_amendment) {
       toast.warning(d.message || "This is a critical change — submitted for manager approval. The order's live data has NOT been changed yet.");
     }
+    if (d.delivery_order_updated) {
+      toast.info(`${d.delivery_order_updated.do_number}: delivery date ${d.delivery_order_updated.delivery_date ? `set to ${d.delivery_order_updated.delivery_date}` : "set to TBC — removed from its team"}`);
+    }
     setDrawerOpen(false);
     if (!editId) clearDraft(); // new order saved — drop the autosaved draft
     // Local update instead of full refetch for edits
     if (editId && d.order) {
-      setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length } : o));
+      setOrders(prev => prev.map(o => o.id === editId ? { ...o, ...d.order, _item_count: (d.order.sales_order_items || []).length, _effective_delivery: effectiveAfterEdit(o._effective_delivery, d.order, d.delivery_order_updated) } : o));
     } else {
       loadOrders(page);
     }
@@ -2762,6 +2765,16 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                       TBC
                     </button>
                   </div>
+                  {editId && editingOrder?._effective_delivery?.source === "delivery_order" && (
+                    <p className="text-[11px] text-gray-500 mt-1" data-testid="edit-date-do-hint">
+                      Delivery runs on {editingOrder._effective_delivery.do_number}. Setting TBC (or a date when it is TBC) updates that Delivery Order and removes it from its team.
+                    </p>
+                  )}
+                  {editId && editingOrder?._effective_delivery?.source === "multiple_delivery_orders" && (
+                    <p className="text-[11px] text-amber-700 mt-1" data-testid="edit-date-multi-hint">
+                      This order has {editingOrder._effective_delivery.deliveries?.length || "several"} Delivery Orders — set TBC or a date on each one in Deliveries → Delivery Orders.
+                    </p>
+                  )}
                 </div>
                 <Field label="Time Slot" value={form.delivery_time_slot} onChange={v => setForm(f => ({ ...f, delivery_time_slot: v }))} placeholder="e.g. 2-5pm" />
               </div>

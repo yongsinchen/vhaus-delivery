@@ -298,3 +298,66 @@ export function WorkbenchSearchResults({ query, af, onGoToSchedule, renderDoActi
     </div>
   );
 }
+
+// ── TBC: delivery work that still needs a date ────────────────────
+// Entries come from GET /delivery-workbench/tbc (one backend rule for the list
+// and its count): a live order with no active DO and no date, or an active DO
+// with no date. A dated active DO never appears just because the SO field says
+// TBC. Setting a DO's date uses the tab's own date save (PATCH
+// /delivery-orders/:id); an order without a DO opens in Orders.
+function TbcRow({ e, canEditDo, onSetDoDate, onOpenOrder }) {
+  const [date, setDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <tr className="border-t" data-testid="tbc-row">
+      <td className="px-3 py-2 whitespace-nowrap">
+        {e.kind === "delivery_order" ? <DeliveryBadge /> : <span className="text-[10px] bg-violet-100 text-violet-800 font-bold px-1.5 py-0.5 rounded">ORDER</span>}
+        <div className="font-bold text-violet-700 mt-0.5">SO {e.so_number}</div>
+        {e.do_number && <div className="text-[11px] text-blue-700">{e.do_number}</div>}
+      </td>
+      <td className="px-3 py-2">
+        <div className="font-medium text-gray-800">{e.customer_name || "—"}</div>
+        <div className="text-[11px] text-gray-500">{[e.contact, e.address].filter(Boolean).join(" · ")}</div>
+      </td>
+      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{e.salesperson || "—"}</td>
+      <td className="px-3 py-2 text-gray-500 max-w-[220px] truncate" title={e.items}>{e.items || "—"}</td>
+      <td className="px-3 py-2">
+        <span className="px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-700">{e.order_status}</span>
+        <div className="text-[11px] text-amber-700 mt-0.5">{e.reason}</div>
+      </td>
+      <td className="sticky right-0 z-10 bg-white px-3 py-2 whitespace-nowrap border-l border-gray-200">
+        <div className="flex flex-col gap-1">
+          <span className="text-amber-600 font-semibold">TBC</span>
+          <div className="flex items-center gap-1">
+            {e.kind === "delivery_order" && canEditDo && (
+              <>
+                <input type="date" value={date} onChange={ev => setDate(ev.target.value)} className="border rounded px-2 py-1 text-xs" aria-label={`Delivery date for ${e.do_number}`} />
+                <button type="button" disabled={!date || busy} onClick={async () => { setBusy(true); try { await onSetDoDate(e.delivery_order_id, date); } finally { setBusy(false); } }}
+                  className="bg-blue-600 text-white px-2 py-1 rounded text-xs disabled:opacity-40">Save</button>
+              </>
+            )}
+            {onOpenOrder && <button type="button" onClick={() => onOpenOrder(e.sales_order_id)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50">Open order</button>}
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+export function TbcWorkList({ data, loading, canEditDo, onSetDoDate, onOpenOrder }) {
+  if (loading && !data) return <div className="p-6 text-center text-gray-400 text-sm">Loading…</div>;
+  const entries = data?.entries || [];
+  if (!entries.length) return <div className="p-6 text-center text-gray-400 text-sm" data-testid="tbc-empty">Nothing is waiting for a delivery date.</div>;
+  return (
+    <div className="overflow-x-auto" data-testid="tbc-list">
+      <table className="w-full text-xs">
+        <thead><tr className="bg-gray-50 text-gray-500 text-left">
+          <th className="px-3 py-2">Order / DO</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Salesperson</th>
+          <th className="px-3 py-2">Items</th><th className="px-3 py-2">Status</th>
+          <th className="sticky right-0 z-10 bg-gray-50 px-3 py-2 border-l border-gray-200">Delivery Date / Actions</th>
+        </tr></thead>
+        <tbody>{entries.map(e => <TbcRow key={e.key} e={e} canEditDo={canEditDo} onSetDoDate={onSetDoDate} onOpenOrder={onOpenOrder} />)}</tbody>
+      </table>
+    </div>
+  );
+}

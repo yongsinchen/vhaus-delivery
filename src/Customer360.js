@@ -112,6 +112,13 @@ export function StoryView({ story, onOpenOrder, onNavigate, can = {} }) {
             <span className="text-gray-500">Total <b className="text-gray-800 block">{money(order.total)}</b></span>
             <span className="text-gray-500">Paid <b className="text-gray-800 block">{money(order.paid)}</b></span>
             <span className="text-gray-500">Outstanding <b className={`block ${order.outstanding > 0 ? "text-red-600" : "text-emerald-700"}`}>{money(order.outstanding)}</b></span>
+            {/* Effective delivery date (active DO when exactly one) — never a stale SO field. */}
+            {order.delivery && (
+              <span className="text-gray-500" data-testid="story-delivery-date">Delivery date <b className={`block ${order.delivery.tbc ? "text-amber-600" : "text-gray-800"}`}>
+                {order.delivery.source === "multiple_delivery_orders" ? `${order.delivery.deliveries.length} deliveries` : order.delivery.tbc ? "TBC" : day(order.delivery.date)}
+                {order.delivery.do_number && <span className="font-normal text-gray-400"> · {order.delivery.do_number}</span>}
+              </b></span>
+            )}
           </div>
         </div>
       )}

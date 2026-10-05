@@ -25,3 +25,27 @@ export function effectiveDeliveryDisplay(order) {
   if (!d) return { kind: "none", text: null, doNumber: null, deliveries: [] };
   return { kind: d === "TBC" ? "tbc" : "date", text: d, doNumber: null, deliveries: [] };
 }
+
+// Edit Order form: the delivery date to PRE-FILL is the effective one — with
+// exactly one active DO that DO's date ("TBC" when it has none), so the form
+// shows what is really planned. The backend applies a TBC ↔ date change to
+// that DO (PUT /sales-orders/:id); with no DO it is the SO's own field.
+export function editFormDeliveryDate(order) {
+  const e = order?._effective_delivery;
+  if (e && e.source === "delivery_order") return e.date || "TBC";
+  return order?.delivery_date || "";
+}
+
+// The list row's effective delivery after an edit (from the PUT response).
+export function effectiveAfterEdit(prev, saved, deliveryOrderUpdated) {
+  const iso = v => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  if (deliveryOrderUpdated) {
+    const date = iso(deliveryOrderUpdated.delivery_date);
+    return { source: "delivery_order", date, tbc: !date, do_number: deliveryOrderUpdated.do_number || null, delivery_order_id: deliveryOrderUpdated.id || null, deliveries: [] };
+  }
+  if (!prev || prev.source === "sales_order") {
+    const date = iso(saved?.delivery_date);
+    return { source: "sales_order", date, tbc: !date, do_number: null, delivery_order_id: null, deliveries: [] };
+  }
+  return prev; // an active DO still decides, unchanged by this edit
+}

@@ -3,7 +3,7 @@ import { supabase } from "./AuthContext";
 import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
-import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices } from "./DeliveryWorkbench";
+import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices, TbcWorkList } from "./DeliveryWorkbench";
 import { printHtml } from "./printDocument";
 import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
@@ -2423,7 +2423,7 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 // Phase 3A: it is also the Operations workbench — Service jobs (canonical Service
 // records, never fake DOs) are listed and team-assigned here, and one search box
 // finds DOs / SOs / Services / customers across all dates (DeliveryWorkbench.js).
-export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService = false, canAssignService = false, onGoToSchedule = null }) {
+export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService = false, canAssignService = false, onGoToSchedule = null, onOpenOrder = null }) {
   const toast = useToast();
   const [dos, setDos] = useState([]);
   const [services, setServices] = useState([]);       // Service jobs (GET /delivery-workbench/services)
@@ -2432,6 +2432,18 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
   const [search, setSearch] = useState("");           // cross-date search text; empty = normal workbench
   const [searchKey, setSearchKey] = useState(0);
   const searching = search.trim().length >= 2;
+  // TBC view: every live order / active DO still without a delivery date —
+  // GET /delivery-workbench/tbc (one backend rule for the list and its count).
+  const [tbcMode, setTbcMode] = useState(false);
+  const [tbc, setTbc] = useState({ data: null, loading: false });
+  const loadTbc = useCallback(async () => {
+    setTbc(t => ({ ...t, loading: true }));
+    try {
+      const r = await af(`${API}/delivery-workbench/tbc`);
+      setTbc({ data: r.ok ? await r.json() : { entries: [], count: 0 }, loading: false });
+    } catch { setTbc({ data: { entries: [], count: 0 }, loading: false }); }
+  }, []);
+  useEffect(() => { loadTbc(); }, [loadTbc]);
   const [loading, setLoading] = useState(true);
   const [showDone, setShowDone] = useState(false);
   const [edit, setEdit] = useState({});      // do id -> date string being edited
@@ -2522,6 +2534,7 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
       if (d.error) { toast.error(d.error); return; }
       toast.success(dateVal ? `Scheduled to ${dateVal}` : "Set to TBC");
       await load();
+      loadTbc();
       if (onChanged) onChanged();
     } finally { setSavingId(null); }
   };
@@ -2602,6 +2615,10 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
       <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span>{canViewService && <span className="text-purple-600 font-normal"> · Service ({serviceRows.length})</span>}</h3>
         <div className="flex items-center gap-3 flex-wrap">
+          <button type="button" onClick={() => setTbcMode(v => !v)} aria-pressed={tbcMode} data-testid="tbc-toggle"
+            className={`px-3 py-1 rounded-lg text-xs font-semibold border ${tbcMode ? "bg-amber-500 text-white border-amber-500" : "bg-white text-amber-700 border-amber-300 hover:bg-amber-50"}`}
+            title="Orders and Delivery Orders that still have no delivery date">TBC{tbc.data ? ` (${tbc.data.count})` : ""}</button>
+          {!tbcMode && <>
           <label className="text-xs text-gray-500 flex items-center gap-1">Date
             <input type="date" value={dateFilter} onChange={e => setDateFilter(e.target.value)} className="border rounded px-2 py-1 text-xs" />
           </label>
@@ -2618,9 +2635,13 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
           {canViewService && !dateFilter && (hiddenPastServices > 0 || showPastService) && (
             <label className="text-xs text-gray-500 flex items-center gap-1" title="Live Service cases whose date has passed"><input type="checkbox" checked={showPastService} onChange={e => setShowPastService(e.target.checked)} /> Show past-dated Service{hiddenPastServices > 0 ? ` (${hiddenPastServices})` : ""}</label>
           )}
-          <button onClick={() => { load(); loadServices(); }} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
+          </>}
+          <button onClick={() => { load(); loadServices(); loadTbc(); }} className="bg-white border border-gray-300 rounded-lg px-3 py-1 text-xs hover:bg-gray-50">Refresh</button>
         </div>
       </div>
+      {tbcMode ? (
+        <TbcWorkList data={tbc.data} loading={tbc.loading} canEditDo={canEditDo} onSetDoDate={applyDate} onOpenOrder={onOpenOrder} />
+      ) : <>
       {loading ? <div className="p-6 text-center text-gray-400 text-sm">Loading…</div>
         : rows.length === 0 && serviceRows.length === 0 ? <div className="p-6 text-center text-gray-400 text-sm">{canViewService ? "No delivery orders or Service jobs." : "No delivery orders."}</div>
         : (
@@ -2727,12 +2748,13 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
             </table>
           </div>
         )}
+      </>}
       </>)}
     </div>
   );
 }
 
-function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, canViewService = false, companyId = null, currentUser = null, initialDate = null }) {
+function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, canViewService = false, companyId = null, currentUser = null, initialDate = null, onOpenOrder = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || getMalaysiaDate());
@@ -3566,7 +3588,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
         </div>
       )}
 
-      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} canViewService={canViewService} canAssignService={!readOnly} onGoToSchedule={d => { setDate(d); setViewMode("schedule"); }} />}
+      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} canViewService={canViewService} canAssignService={!readOnly} onGoToSchedule={d => { setDate(d); setViewMode("schedule"); }} onOpenOrder={onOpenOrder} />}
 
       <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
         {/* Unassigned Panel — also a drop zone: dragging an assigned stop here
