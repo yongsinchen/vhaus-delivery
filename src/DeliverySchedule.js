@@ -1521,15 +1521,22 @@ function DeliveryOrdersTab({ onChanged }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await af(`${API}/delivery-orders`);
-      const d = await res.json();
-      const list = d.delivery_orders || [];
+      // Active (non-terminal) DOs must ALWAYS appear — fetched via active=1 so an
+      // older-created but still-active DO (e.g. one scheduled for a future date)
+      // is never dropped by the newest-500-by-created_at window. Completed/
+      // cancelled DOs are added only when "Show done" is on. Merge + dedupe by id.
+      const reqs = [af(`${API}/delivery-orders?active=1`).then(r => r.json())];
+      if (showDone) reqs.push(af(`${API}/delivery-orders?status=completed,cancelled`).then(r => r.json()));
+      const parts = await Promise.all(reqs);
+      const byId = new Map();
+      parts.forEach(p => (p.delivery_orders || []).forEach(o => byId.set(o.id, o)));
+      const list = [...byId.values()];
       setDos(list);
       const e = {}; list.forEach(o => { e[o.id] = o.delivery_date || ""; });
       setEdit(e);
     } catch { toast.error("Failed to load delivery orders"); }
     setLoading(false);
-  }, [toast]);
+  }, [toast, showDone]);
   useEffect(() => { load(); }, [load]);
 
   const applyDate = async (id, dateVal) => {
