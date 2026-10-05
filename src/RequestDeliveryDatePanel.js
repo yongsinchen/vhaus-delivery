@@ -26,6 +26,7 @@ const STATUS = {
   needs_reschedule: { label: "Needs another date", cls: "bg-orange-100 text-orange-700" },
   approved:         { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
   rejected:         { label: "Rejected", cls: "bg-gray-100 text-gray-500" },
+  no_longer_applicable: { label: "No longer applicable", cls: "bg-gray-200 text-gray-600" },
 };
 const doItemSummary = (dord) => (dord.delivery_order_items || [])
   .filter(i => i.status !== "cancelled")
@@ -96,7 +97,7 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
   };
 
   const openReqs = (requests || []).filter(r => r.status === "pending" || r.status === "needs_reschedule");
-  const latestDone = (requests || []).find(r => r.status === "approved" || r.status === "rejected");
+  const latestDone = (requests || []).find(r => r.status === "approved" || r.status === "rejected" || r.status === "no_longer_applicable");
 
   return (
     <div>
@@ -139,7 +140,7 @@ export default function RequestDeliveryDatePanel({ order, onChanged }) {
         {requests && openReqs.length === 0 && latestDone && !formOpen && (
           <p className="text-xs text-gray-500">
             Last request: <span className={`px-1.5 py-0.5 rounded-full font-medium ${STATUS[latestDone.status]?.cls}`}>{STATUS[latestDone.status]?.label}</span>{" "}
-            {fmt(latestDone.requested_date)}{latestDone.status === "rejected" && latestDone.decision_note ? ` — ${latestDone.decision_note}` : ""}
+            {fmt(latestDone.requested_date)}{latestDone.status === "rejected" && latestDone.decision_note ? ` — ${latestDone.decision_note}` : ""}{latestDone.stale_reason ? ` — ${latestDone.stale_reason}` : ""}
           </p>
         )}
         {requests && requests.length === 0 && !formOpen && (

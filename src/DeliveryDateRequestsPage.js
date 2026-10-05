@@ -27,6 +27,10 @@ const STATUS = {
   needs_reschedule: { label: "Needs another date", cls: "bg-orange-100 text-orange-700" },
   approved:         { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
   rejected:         { label: "Rejected", cls: "bg-gray-100 text-gray-500" },
+  // Backend display status: an open request whose own DO / Service can no
+  // longer change date (cancelled, delivered, superseded, resolved…). Not
+  // actionable, not counted; stale_reason says why. The stored row is unchanged.
+  no_longer_applicable: { label: "No longer applicable", cls: "bg-gray-200 text-gray-600" },
 };
 
 // A Service order never goes through the sales_order_id -> delivery_orders
@@ -187,7 +191,7 @@ function DeliveryDateRequestsPage() {
   };
 
   const open = rows.filter(r => r.status === "pending" || r.status === "needs_reschedule");
-  const done = rows.filter(r => r.status === "approved" || r.status === "rejected");
+  const done = rows.filter(r => r.status === "approved" || r.status === "rejected" || r.status === "no_longer_applicable");
 
   // "Awaiting DO" = approved (date agreed) but no Delivery Order created yet.
   // Never applies to a Service request — it has no Delivery Order lifecycle
@@ -204,7 +208,7 @@ function DeliveryDateRequestsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const curPage = Math.min(page, totalPages - 1);
   const pageRows = filtered.slice(curPage * PER_PAGE, curPage * PER_PAGE + PER_PAGE);
-  const FILTERS = [["all", "All"], ["pending", "Pending"], ["needs_reschedule", "Needs reschedule"], ["awaiting_do", "Awaiting DO"], ["approved", "Approved"], ["rejected", "Rejected"]];
+  const FILTERS = [["all", "All"], ["pending", "Pending"], ["needs_reschedule", "Needs reschedule"], ["awaiting_do", "Awaiting DO"], ["approved", "Approved"], ["rejected", "Rejected"], ["no_longer_applicable", "No longer applicable"]];
 
   const Badge = ({ s }) => <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS[s]?.cls || "bg-gray-100 text-gray-500"}`}>{STATUS[s]?.label || s}</span>;
 
@@ -283,6 +287,7 @@ function DeliveryDateRequestsPage() {
           {r.delivery_order_id && r.delivery_orders?.superseded_at && (
             <p className="text-xs text-red-600 mt-1">⚠️ This Delivery Order was superseded since this request was made — it can no longer be applied as-is.</p>
           )}
+          {r.stale_reason && <p className="text-xs text-gray-600 mt-1 bg-gray-100 rounded-lg px-2 py-1" data-testid="stale-reason">{r.stale_reason}</p>}
           <DateChange original={r.original_date} requested={r.requested_date} />
           {r.original_team_name && <p className="text-xs text-gray-400 mt-0.5">Original team: {r.original_team_name}</p>}
           <Availability load={r.requested_date_load} />
