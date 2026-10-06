@@ -5,6 +5,8 @@ import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices, TbcWorkList } from "./DeliveryWorkbench";
 import { printHtml } from "./printDocument";
+import { SERVICE_TYPES, ITEM_ACTIONS } from "./ServiceCaseFormModal";
+import { serviceItemQty } from "./serviceItemQty";
 import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
 
@@ -416,6 +418,179 @@ async function exportDeliveryOrderExcel(o, company = {}) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = `DO-${(o.do_number || "export").replace(/[^\w.-]/g, "_")}.xlsx`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── Service job sheet (PDF + Excel) — one Service Case from the Delivery
+// Orders workbench (a GET /delivery-workbench/services row). Same layout and
+// conventions as the Delivery Order PDF/Excel above. The date is the row's own
+// operational_date (exactly what the workbench row shows); the team is its
+// live schedule stop, else "Unassigned". A Service needs no Sales Order and no
+// Delivery Order. Read-only — nothing is written anywhere.
+const dmyOf = iso => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : "");
+export function serviceJobFields(svc) {
+  const note = svc.description || "";
+  const issue = svc.issue_description && svc.issue_description !== svc.description ? svc.issue_description : "";
+  return {
+    svNo: svc.sv_number || "Service",
+    soNo: svc.so_number || "—",
+    customer: svc.customer_name || "",
+    contact: svc.customer_contact || "",
+    address: svc.customer_address || "",
+    type: SERVICE_TYPES[svc.service_type] || (svc.service_type != null ? `Type ${svc.service_type}` : ""),
+    date: svc.operational_date ? dmyOf(svc.operational_date) : "TBC",
+    team: svc.schedule?.team_label || "Unassigned",
+    note, issue,
+    items: (svc.items || []).map(it => ({ action: ITEM_ACTIONS[it.action_type] || "", description: it.description || "", qty: serviceItemQty(it.quantity) })),
+  };
+}
+
+export function serviceJobHtml(svc, company = {}) {
+  const f = serviceJobFields(svc);
+  const itemRows = f.items.map((it, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${esc(it.action)}</td>
+      <td>${esc(it.description)}</td>
+      <td class="c">${it.qty}</td>
+    </tr>`).join("") || `<tr><td colspan="4" class="c" style="color:#777">No items listed</td></tr>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Service ${esc(f.svNo)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    @page { size: A4; margin: 10mm; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
+    .sheet { border: 1px solid #111; }
+    .pad { padding: 8px 12px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #111; }
+    .logo { height: 42px; max-width: 180px; object-fit: contain; }
+    .title { font-size: 18px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; letter-spacing: 2px; }
+    .info td { padding: 3px 12px; font-size: 11px; vertical-align: top; }
+    .info .lbl { font-weight: 700; width: 90px; }
+    .note { border-bottom: 1px solid #111; padding: 8px 12px; }
+    .note .txt { white-space: pre-wrap; overflow-wrap: break-word; font-size: 12px; margin-top: 3px; }
+    table.items { width: 100%; border-collapse: collapse; }
+    table.items th { border: 1px solid #111; background: #f5f5f5; padding: 5px; font-size: 10px; }
+    table.items td { border: 1px solid #ddd; padding: 5px 8px; }
+    .c { text-align: center; }
+    .foot { display: flex; border-top: 1px solid #111; }
+    .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
+    .foot .col + .col { border-left: 1px solid #111; }
+    .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+  </style></head><body>
+  <div class="sheet">
+    <div class="head pad">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
+        <div><b>${esc(company.name || "")}</b>${company.reg ? ` (${esc(company.reg)})` : ""}<br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
+      </div>
+      <div style="text-align:right"><b>Service#: ${esc(f.svNo)}</b></div>
+    </div>
+    <div class="title">SERVICE JOB</div>
+    <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
+      <tr><td class="lbl">Customer</td><td>${esc(f.customer)}</td><td class="lbl">SO#</td><td>${esc(f.soNo)}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(f.address)}</td><td class="lbl">Date</td><td>${esc(f.date)}</td></tr>
+      <tr><td class="lbl">Contact</td><td>${esc(f.contact)}</td><td class="lbl">Team</td><td>${esc(f.team)}</td></tr>
+      <tr><td class="lbl">Service type</td><td colspan="3">${esc(f.type)}</td></tr>
+    </table>
+    <div class="note"><b>SERVICE NOTE</b><div class="txt" data-field="service-note">${esc(f.note || "—")}</div>
+      ${f.issue ? `<div style="margin-top:6px"><b>Issue</b><div class="txt">${esc(f.issue)}</div></div>` : ""}</div>
+    <table class="items">
+      <thead><tr><th style="width:30px">NO</th><th style="width:80px">ACTION</th><th>ITEM</th><th style="width:50px">QTY</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div class="foot">
+      <div class="col"><div class="sigline">Customer Acknowledgement</div></div>
+      <div class="col"><div class="sigline">Serviced By</div></div>
+    </div>
+  </div>
+  </body></html>`;
+}
+export function printServiceJob(svc, company = {}) { printHtml(serviceJobHtml(svc, company)); }
+
+export async function exportServiceJobExcel(svc, company = {}) {
+  const ExcelJS = (await import("exceljs")).default;
+  const f = serviceJobFields(svc);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Service", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } } });
+  ws.columns = [{ width: 14 }, { width: 30 }, { width: 46 }, { width: 14 }];
+  const thin = { style: "thin", color: { argb: "FF000000" } };
+  const boxAll = { top: thin, left: thin, bottom: thin, right: thin };
+  const grayFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
+
+  ws.mergeCells("A1:B3");
+  const logoUrl = company.logo ? await toDataUrl(company.logo) : null;
+  if (logoUrl) {
+    const m = /^data:image\/(png|jpe?g|gif)/i.exec(logoUrl);
+    const ext = m ? (m[1].toLowerCase() === "jpg" ? "jpeg" : m[1].toLowerCase()) : "png";
+    ws.addImage(wb.addImage({ base64: logoUrl, extension: ext }), { tl: { col: 0, row: 0 }, ext: { width: 150, height: 54 } });
+  }
+  ws.mergeCells("C1:D1"); ws.getCell("C1").value = company.reg ? `${company.name || ""} (${company.reg})` : (company.name || "");
+  ws.getCell("C1").font = { bold: true, size: 13 };
+  ws.mergeCells("C2:D2"); ws.getCell("C2").value = company.address || "";
+  ws.getCell("C2").font = { size: 9 }; ws.getCell("C2").alignment = { wrapText: true };
+  ws.getCell("C3").value = company.hotline ? `Tel: ${company.hotline}` : "";
+  ws.getCell("C3").font = { size: 9 };
+  ws.getCell("D3").value = `Service#: ${f.svNo}`;
+  ws.getCell("D3").font = { bold: true }; ws.getCell("D3").alignment = { horizontal: "right" };
+
+  ws.mergeCells("A4:D4");
+  const title = ws.getCell("A4");
+  title.value = "SERVICE JOB"; title.font = { bold: true, size: 15 };
+  title.alignment = { horizontal: "center" }; title.fill = grayFill;
+
+  const info = (row, l1, v1, l2, v2) => {
+    ws.getCell(`A${row}`).value = l1; ws.getCell(`A${row}`).font = { bold: true };
+    ws.getCell(`B${row}`).value = v1; ws.getCell(`B${row}`).alignment = { wrapText: true, vertical: "top" };
+    ws.getCell(`C${row}`).value = l2; ws.getCell(`C${row}`).font = { bold: true };
+    ws.getCell(`D${row}`).value = v2;
+  };
+  info(5, "Customer", f.customer, "SO#", f.soNo);
+  info(6, "Address", f.address, "Date", f.date);
+  info(7, "Contact", f.contact, "Team", f.team);
+  info(8, "Service type", f.type, "", "");
+
+  // Service Note — the work instruction, wrapped in full.
+  let r = 10;
+  ws.getCell(`A${r}`).value = "Service Note"; ws.getCell(`A${r}`).font = { bold: true };
+  ws.getCell(`A${r}`).alignment = { vertical: "top" };
+  ws.mergeCells(`B${r}:D${r}`);
+  const noteText = f.note || "—";
+  ws.getCell(`B${r}`).value = noteText;
+  ws.getCell(`B${r}`).alignment = { wrapText: true, vertical: "top" };
+  const CHARS = 80;
+  ws.getRow(r).height = Math.max(15, noteText.split("\n").reduce((n, l) => n + Math.max(1, Math.ceil(l.length / CHARS)), 0) * 15);
+  if (f.issue) {
+    r += 1;
+    ws.getCell(`A${r}`).value = "Issue"; ws.getCell(`A${r}`).font = { bold: true };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = f.issue; ws.getCell(`B${r}`).alignment = { wrapText: true, vertical: "top" };
+  }
+
+  // Items — one row each.
+  const headRow = r + 2;
+  ["NO", "ACTION", "ITEM", "QTY"].forEach((h, i) => {
+    const c = ws.getCell(headRow, i + 1);
+    c.value = h; c.font = { bold: true }; c.fill = grayFill; c.border = boxAll;
+    c.alignment = { horizontal: i === 0 || i === 3 ? "center" : "left" };
+  });
+  f.items.forEach((it, i) => {
+    [i + 1, it.action, it.description, it.qty].forEach((v, ci) => {
+      const c = ws.getCell(headRow + 1 + i, ci + 1);
+      c.value = v; c.border = boxAll;
+      if (ci === 0 || ci === 3) c.alignment = { horizontal: "center" };
+      if (ci === 2) c.alignment = { wrapText: true };
+    });
+  });
+  const fr = headRow + 2 + f.items.length;
+  ws.mergeCells(`A${fr}:B${fr}`); ws.getCell(`A${fr}`).value = "Customer Acknowledgement";
+  ws.mergeCells(`C${fr}:D${fr}`); ws.getCell(`C${fr}`).value = "Serviced By";
+  ws.getRow(fr).height = 44;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `Service-${String(f.svNo).replace(/[^\w.-]/g, "_")}.xlsx`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -2522,8 +2697,13 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
     if (onChanged) onChanged();
   }, [loadServices, onChanged]);
   const serviceControl = (svc, extraRefresh) => (
-    <ServiceTeamControl svc={svc} canAssign={canAssignService} loadTeams={loadTeams} af={af} postWithBlockRetry={postWithBlockRetry}
-      onChanged={() => { afterServiceChange(); if (extraRefresh) extraRefresh(); }} />
+    <div className="flex items-center gap-1 flex-wrap">
+      <ServiceTeamControl svc={svc} canAssign={canAssignService} loadTeams={loadTeams} af={af} postWithBlockRetry={postWithBlockRetry}
+        onChanged={() => { afterServiceChange(); if (extraRefresh) extraRefresh(); }} />
+      {/* Print / export this one Service job — read-only, any viewer of the row. */}
+      <button type="button" onClick={() => printServiceJob(svc, company)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50" title="Print / Save as PDF" data-testid="service-pdf">📄 PDF</button>
+      <button type="button" onClick={() => exportServiceJobExcel(svc, company)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50" title="Download as Excel" data-testid="service-excel">📊 Excel</button>
+    </div>
   );
 
   const applyDate = async (id, dateVal) => {
