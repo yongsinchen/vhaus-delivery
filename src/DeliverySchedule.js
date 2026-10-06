@@ -4,6 +4,7 @@ import { useLoading, useToast } from "./UIComponents";
 import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices, TbcWorkList } from "./DeliveryWorkbench";
+import { ActionCategoryList, FOCUS_CATEGORIES } from "./ActionRequired";
 import { printHtml } from "./printDocument";
 import { SERVICE_TYPES, ITEM_ACTIONS } from "./ServiceCaseFormModal";
 import { serviceItemQty } from "./serviceItemQty";
@@ -2598,7 +2599,7 @@ function BlockedDatesModal({ blockedDates, onClose, onRefresh }) {
 // Phase 3A: it is also the Operations workbench — Service jobs (canonical Service
 // records, never fake DOs) are listed and team-assigned here, and one search box
 // finds DOs / SOs / Services / customers across all dates (DeliveryWorkbench.js).
-export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService = false, canAssignService = false, onGoToSchedule = null, onOpenOrder = null }) {
+export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService = false, canAssignService = false, onGoToSchedule = null, onOpenOrder = null, focus = null }) {
   const toast = useToast();
   const [dos, setDos] = useState([]);
   const [services, setServices] = useState([]);       // Service jobs (GET /delivery-workbench/services)
@@ -2619,6 +2620,15 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
     } catch { setTbc({ data: { entries: [], count: 0 }, loading: false }); }
   }, []);
   useEffect(() => { loadTbc(); }, [loadTbc]);
+  // Action Required drill-down (Overview card): TBC opens the TBC view; the
+  // unscheduled / past-dated cards open that card's own list (same backend
+  // function as the card's count).
+  const [actionFocus, setActionFocus] = useState(null);
+  useEffect(() => {
+    if (!focus?.category) return;
+    if (focus.category === "tbc") { setTbcMode(true); setActionFocus(null); }
+    else if (FOCUS_CATEGORIES.includes(focus.category)) { setActionFocus(focus.category); setTbcMode(false); }
+  }, [focus]);
   const [loading, setLoading] = useState(true);
   const [showDone, setShowDone] = useState(false);
   const [edit, setEdit] = useState({});      // do id -> date string being edited
@@ -2791,6 +2801,8 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
             <button onClick={() => exportDeliveryOrderExcel(o, company)} className="border border-gray-300 px-2 py-1 rounded text-xs hover:bg-gray-50" title="Download as Excel">📊 Excel</button>
           </>)}
           renderServiceControl={(svc, refresh) => serviceControl(svc, refresh)} />
+      ) : actionFocus ? (
+        <ActionCategoryList category={actionFocus} onClose={() => setActionFocus(null)} onOpenOrder={onOpenOrder} onGoToSchedule={onGoToSchedule} />
       ) : (<>
       <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-bold text-gray-700">All Delivery Orders <span className="text-gray-400 font-normal">({rows.length})</span>{canViewService && <span className="text-purple-600 font-normal"> · Service ({serviceRows.length})</span>}</h3>
@@ -2934,7 +2946,7 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
   );
 }
 
-function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, canViewService = false, companyId = null, currentUser = null, initialDate = null, onOpenOrder = null }) {
+function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true, canViewService = false, companyId = null, currentUser = null, initialDate = null, onOpenOrder = null, focus = null }) {
   const { withLoading } = useLoading();
   const toast = useToast();
   const [date, setDate] = useState(initialDate || getMalaysiaDate());
@@ -2946,7 +2958,8 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
       if (d.settings) setCompany({ name: d.settings.company_name || "", reg: d.settings.registration_no || "", address: d.settings.address || "", hotline: d.settings.hotline || "", logo: d.settings.logo_url || "" });
     }).catch(() => {});
   }, []);
-  const [viewMode, setViewMode] = useState("schedule"); // "schedule" board | "orders" Delivery Orders tab
+  const [viewMode, setViewMode] = useState(focus?.category ? "orders" : "schedule"); // "schedule" board | "orders" Delivery Orders tab
+  useEffect(() => { if (focus?.category) setViewMode("orders"); }, [focus]); // Action Required drill-down
   const [teams, setTeams] = useState([]);         // delivery_teams with schedules grouped in
   const [unassigned, setUnassigned] = useState([]);
   const [trips, setTrips] = useState([]);
@@ -3768,7 +3781,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
         </div>
       )}
 
-      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} canViewService={canViewService} canAssignService={!readOnly} onGoToSchedule={d => { setDate(d); setViewMode("schedule"); }} onOpenOrder={onOpenOrder} />}
+      {viewMode === "orders" && <DeliveryOrdersTab onChanged={loadData} canEditDo={!readOnly && canEditDo} canViewService={canViewService} canAssignService={!readOnly} onGoToSchedule={d => { setDate(d); setViewMode("schedule"); }} onOpenOrder={onOpenOrder} focus={focus} />}
 
       <div className={`flex flex-col xl:flex-row gap-4 ${viewMode === "orders" ? "hidden" : ""}`}>
         {/* Unassigned Panel — also a drop zone: dragging an assigned stop here

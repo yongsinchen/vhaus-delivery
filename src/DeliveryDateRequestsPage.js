@@ -44,7 +44,7 @@ const SERVICE_STATUS_STYLE = {
   resolved: "bg-emerald-100 text-emerald-700", closed: "bg-gray-100 text-gray-400",
 };
 
-function DeliveryDateRequestsPage() {
+function DeliveryDateRequestsPage({ initialFilter = null }) {
   const { user } = useAuth();
   const toast = useToast();
   const [amendFor, setAmendFor] = useState(null); // own open request being amended — dialog hosted here (Card remounts each render)
@@ -55,7 +55,8 @@ function DeliveryDateRequestsPage() {
   const [detailReq, setDetailReq] = useState(null); // request whose order is being reviewed
   const [detail, setDetail] = useState(null);       // fetched { order, legacy_order }
   const [detailLoading, setDetailLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | needs_reschedule | approved | rejected
+  const [statusFilter, setStatusFilter] = useState(initialFilter?.status || "all"); // all | pending | needs_reschedule | approved | rejected
+  useEffect(() => { if (initialFilter?.status) setStatusFilter(initialFilter.status); }, [initialFilter]); // Action Required card → Pending
   const [filterText, setFilterText] = useState("");        // match SO number / customer
   const [page, setPage] = useState(0);
   const PER_PAGE = 10;

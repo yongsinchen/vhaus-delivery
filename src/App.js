@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, memo, lazy, Suspense } from "react";
 import GlobalSearch from "./Customer360";
+import { ActionRequiredPanel } from "./ActionRequired";
 import LoginPage from "./LoginPage";
 import { supabase, useAuth, roleLabel } from "./AuthContext";
 import { FullPageLoader, useLoading, useToast, formatMoney } from "./UIComponents";
@@ -214,7 +215,7 @@ const NAV = [
 // state values, and every one of them used to re-render this (heaviest)
 // JSX tree. As a memo child with stable props it only re-renders when the
 // dashboard data itself changes.
-const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity }) {
+const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, orders, allCompanyOrders, todayOrders, readyOrders, balanceOrders, flaggedOrders, services, estCommission, setPage, setScheduleDate, handleView, calMonthStr, setCalMonthStr, calSalesman, setCalSalesman, blockedDates, canViewDeliveryActivity, companyId, onActionOpen }) {
   const BAL_PER_PAGE = 30;
   const [balPage, setBalPage] = useState(0);
   const balPageCount = Math.max(1, Math.ceil(balanceOrders.length / BAL_PER_PAGE));
@@ -249,6 +250,9 @@ const OverviewPage = memo(function OverviewPage({ user, isSalesman, isMaster, or
             <StatCard label="Est. Commission This Month" value={estCommission === null ? "…" : `RM ${estCommission.toLocaleString()}`} sub="eligible + pending" onClick={() => setPage("commission")} />
           )}
         </div>
+
+        {/* Phase 4A: Action Required — only the categories this user may open (backend-gated). */}
+        {!isSalesman && <ActionRequiredPanel companyId={companyId} onOpen={onActionOpen} />}
 
         {/* Today's orders */}
         {todayOrders.length > 0 && (
@@ -1050,6 +1054,8 @@ export default function App() {
   // in OrdersPage re-fires even if the same SO is opened twice in a row.
   const [ordersEditRequest, setOrdersEditRequest] = useState(null);
   const [ordersViewRequest, setOrdersViewRequest] = useState(null); // Global Search 360 → "View Order"
+  const [deliveriesFocus, setDeliveriesFocus] = useState(null);       // Action Required card → Delivery Orders view { category, nonce }
+  const [dateRequestsFilter, setDateRequestsFilter] = useState(null); // Action Required card → Delivery Date Approvals "pending"
   const [showSearch, setShowSearch] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -1599,7 +1605,7 @@ export default function App() {
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {visibleNav.map(n => (
-          <button key={n.id} onClick={() => { setScheduleDate(null); setPage(n.id); if(mobile) setSidebarOpen(false); }}
+          <button key={n.id} onClick={() => { setScheduleDate(null); setDeliveriesFocus(null); setDateRequestsFilter(null); setPage(n.id); if(mobile) setSidebarOpen(false); }}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${page===n.id ? "bg-violet-600 text-white shadow-lg shadow-violet-900/50" : "text-purple-300 hover:bg-white/5 hover:text-white"}`}>
             <span className="text-base w-5 text-center">{n.icon}</span>
             <span>{n.id === "orders" && isSalesman ? "My Orders" : n.label}</span>
@@ -1636,7 +1642,14 @@ export default function App() {
 
   const renderPage = () => {
     // OVERVIEW
-    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
+    if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} companyId={companyId}
+      onActionOpen={card => {
+        if (card.target === "delivery-approvals") { setDateRequestsFilter({ status: "pending", nonce: Date.now() }); setPage("delivery-approvals"); return; }
+        if (card.target === "order-amendments") { setPage("order-amendments"); return; }
+        const dest = visibleNav.some(x => x.id === "deliveries") ? "deliveries" : visibleNav.some(x => x.id === "company-deliveries") ? "company-deliveries" : null;
+        if (!dest) { if (card.key.endsWith("_service")) setPage("services"); return; }
+        setScheduleDate(null); setDeliveriesFocus({ category: card.key, nonce: Date.now() }); setPage(dest);
+      }} />;
 
     // ORDERS (unified — reads from sales_orders)
     if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} editRequest={ordersEditRequest} onEditRequestHandled={() => setOrdersEditRequest(null)} viewRequest={ordersViewRequest} onViewRequestHandled={() => setOrdersViewRequest(null)} />;
@@ -1645,7 +1658,7 @@ export default function App() {
     if (page === "deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Deliveries</h1>
-        <DeliverySchedule readOnly={!can("editSchedule")} canImport={can("editSchedule") && can("editDeliveryOrder")} canEditDo={can("editDeliveryOrder")} canViewService={can("viewService")} companyId={companyId} isMaster={isMaster} currentUser={user} initialDate={scheduleDate}
+        <DeliverySchedule readOnly={!can("editSchedule")} canImport={can("editSchedule") && can("editDeliveryOrder")} canEditDo={can("editDeliveryOrder")} canViewService={can("viewService")} companyId={companyId} isMaster={isMaster} currentUser={user} initialDate={scheduleDate} focus={deliveriesFocus}
           onOpenOrder={salesOrderId => { setPage("orders"); setOrdersViewRequest({ salesOrderId, nonce: Date.now() }); }} />
       </div>
     );
@@ -1654,7 +1667,7 @@ export default function App() {
     if (page === "company-deliveries") return (
       <div>
         <h1 className="text-xl font-bold text-gray-900 mb-4">Company Deliveries</h1>
-        <DeliverySchedule readOnly={true} canViewService={can("viewService")} companyId={companyId} isMaster={false} currentUser={user} initialDate={scheduleDate} />
+        <DeliverySchedule readOnly={true} canViewService={can("viewService")} companyId={companyId} isMaster={false} currentUser={user} initialDate={scheduleDate} focus={deliveriesFocus} />
       </div>
     );
 
@@ -2059,7 +2072,7 @@ export default function App() {
     if (page === "organization") return <OrganizationPage />;
 
     // SETTINGS
-    if (page === "delivery-approvals") return <DeliveryDateRequestsPage />;
+    if (page === "delivery-approvals") return <DeliveryDateRequestsPage initialFilter={dateRequestsFilter} />;
     if (page === "order-amendments") return <OrderAmendmentsPage onDecided={loadBootstrap} />;
     if (page === "settings") return <CompanySettingsPage />;
 
@@ -2120,7 +2133,7 @@ export default function App() {
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 shadow-lg z-40 safe-area-bottom">
           <div className="flex">
             {visibleNav.slice(0,5).map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 px-1 relative transition-colors ${page===n.id?"text-violet-700":"text-gray-400 hover:text-gray-600"}`}>
+              <button key={n.id} onClick={() => { setDeliveriesFocus(null); setDateRequestsFilter(null); setPage(n.id); }} className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 px-1 relative transition-colors ${page===n.id?"text-violet-700":"text-gray-400 hover:text-gray-600"}`}>
                 <span className="text-xl leading-none">{n.icon}</span>
                 <span className="text-xs font-medium leading-none">{n.label.split(" ")[0]}</span>
                 {page===n.id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-violet-600 rounded-full" />}
