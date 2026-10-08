@@ -129,7 +129,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
             // Reload current orders/balances and rebuild the allocation
             // preview before Finance tries again. Without a reloader, clear
             // the suggested amounts so the stale figures can't be resubmitted.
-            if (amending) throw new Error(`${d.error} Please close and reopen Amend to load the current balance.`);
+            if (amending) throw new Error(`${d.error} Please close and reopen Edit Payment to load the current balance.`);
             if (reloadOrders) {
               const fresh = tagOutstanding(await reloadOrders());
               const kind = defaultKind(fresh);
@@ -143,8 +143,8 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
         }
         // Payment is PENDING Finance approval, but the OR is assigned at
         // collection so the salesman can print it now for the customer.
-        toast.success(amending ? `Payment amended to ${money(total)} — still pending Finance verification` : `${money(total)} recorded — pending Finance verification`);
-        if (d.proof_cleanup_warning) toast.warning(d.proof_cleanup_warning);
+        toast.success(amending ? `Payment updated to ${money(total)} — still pending Finance verification` : `${money(total)} recorded — pending Finance verification`);
+        if (d.audit_warning) toast.warning(d.audit_warning);
         const rows = payAllocations.filter(a => Number(a.amount) > 0).map(a => {
           const ord = withBalance.find(o => o.id === a.order_id) || {};
           const oldBal = Number(a.balance) || 0, paid = Number(a.amount) || 0;
@@ -172,7 +172,7 @@ export default function RecordPaymentModal({ customer, orders, initiatingOrderId
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-gray-900">{amending ? "Amend Payment" : "Record Payment"}</h3>
+            <h3 className="font-bold text-gray-900">{amending ? "Edit Payment" : "Record Payment"}</h3>
             <p className="text-xs text-gray-500">{customer?.name} · {amending ? `OR #${amendPayment.or_number ?? "—"} · pending approval` : `${withBalance.length} order(s) with balance`}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500">×</button>

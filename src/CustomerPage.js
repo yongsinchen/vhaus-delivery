@@ -402,8 +402,8 @@ function CustomerPage() {
                               if (pol.mode === "locked") return <span className="text-[10px] text-gray-400" title={pol.reason} data-testid="proof-locked">Proof locked</span>;
                               return null; })()}
                             {canChangePending(p) && (
-                              <button onClick={() => openAmend(p)} title="Amend this payment (before Finance approves it)"
-                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">✏️ Amend</button>
+                              <button onClick={() => openAmend(p)} title="Edit this payment — amount, date, method, reference, proof, allocation (while it is pending Finance approval)" data-testid="edit-payment-btn"
+                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">✏️ Edit Payment</button>
                             )}
                             {p.id ? ((isPaymentManager || canChangePending(p)) && (
                               <button onClick={() => deletePayment(p)} title={p.approval_status === "pending" ? "Delete this payment (before Finance approves it)" : "Remove payment"}
