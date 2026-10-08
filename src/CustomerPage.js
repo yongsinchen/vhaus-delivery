@@ -4,6 +4,8 @@ import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import RecordPaymentModal, { allocatedByOrder } from "./RecordPaymentModal";
+import PaymentProofModal from "./PaymentProofModal";
+import { proofEditPolicy, proofList } from "./paymentProofPolicy";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -47,6 +49,7 @@ function CustomerPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [proofView, setProofView] = useState(null); // proof URL shown in the in-app viewer
+  const [proofEdit, setProofEdit] = useState(null);   // { payment, mode } — proof-only edit (PaymentProofModal)
 
   // Create/Edit
   const [showForm, setShowForm] = useState(false);
@@ -380,8 +383,8 @@ function CustomerPage() {
                             <p className="text-xs text-gray-400">{fmtYmd(paymentDateOf(p))}{p._deposit ? " · deposit" : ""}</p>
                             {p.proof_url && (
                               <div className="mt-1 flex flex-wrap gap-2">
-                                {p.proof_url.split(",").map(u => u.trim()).filter(Boolean).map((u, i) => (
-                                  <button type="button" key={i} onClick={() => setProofView(u)} className="text-xs text-violet-600 underline hover:text-violet-800">📎 Proof {i + 1}</button>
+                                {proofList(p).map((u, i, all) => (
+                                  <button type="button" key={i} onClick={() => setProofView(u)} className="text-xs text-violet-600 underline hover:text-violet-800">📎 Proof {i + 1}{all.length > 1 && i === all.length - 1 ? " · latest" : ""}</button>
                                 ))}
                               </div>
                             )}
@@ -392,6 +395,12 @@ function CustomerPage() {
                             {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
                             <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Payment Acknowledgement"}
                               className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 {p.approval_status === "rejected" ? "Void copy" : "Receipt"}</button>
+                            {(() => { const pol = proofEditPolicy(p, user);
+                              if (pol.mode === "replace" || pol.mode === "append") return (
+                                <button onClick={() => setProofEdit({ payment: p, mode: pol.mode })} data-testid="edit-proof-btn" title={pol.mode === "append" ? "Approved payment — add a supplementary proof (existing evidence is kept)" : "Replace or add the payment proof — only the proof changes; the payment stays pending approval"}
+                                  className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">📎 {pol.label}</button>);
+                              if (pol.mode === "locked") return <span className="text-[10px] text-gray-400" title={pol.reason} data-testid="proof-locked">Proof locked</span>;
+                              return null; })()}
                             {canChangePending(p) && (
                               <button onClick={() => openAmend(p)} title="Amend this payment (before Finance approves it)"
                                 className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">✏️ Amend</button>
@@ -421,6 +430,12 @@ function CustomerPage() {
           onClose={() => setPayModal(null)}
           reloadOrders={payModal.amend ? undefined : async () => { const r = await af(`${API}/customers/${payModal.customer.id}`); return (await r.json()).orders || []; }}
           onRecorded={() => { setPayModal(null); if (detail) openDetail(detail.customer); }} />
+      )}
+
+      {/* Proof-only edit (Edit proof / Add proof) */}
+      {proofEdit && (
+        <PaymentProofModal payment={proofEdit.payment} mode={proofEdit.mode} onClose={() => setProofEdit(null)}
+          onSaved={() => { setProofEdit(null); if (detail) openDetail(detail.customer); }} />
       )}
 
       {/* In-app proof viewer — shows the receipt over the current page
