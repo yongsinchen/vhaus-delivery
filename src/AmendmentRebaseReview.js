@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./AuthContext";
 import { useToast, formatMoney } from "./UIComponents";
 
@@ -173,23 +173,32 @@ export default function AmendmentRebaseReview({ amendment, onClose, onApplied })
   const choose = (path, choice) => setResolutions(prev => ({ ...prev, [path]: { choice } }));
 
   const conflicts = preview?.conflicts || [];
-  const allResolved = conflicts.length > 0 && conflicts.every(c => resolutions[c.path]);
+  // Every conflict needs an explicit choice — and with ZERO conflicts there is nothing to choose, so this is (correctly) true.
+  // (It used to require conflicts.length > 0, which left Resolve & Apply permanently disabled for "No conflicting fields".)
+  const unresolvedCount = conflicts.filter(c => !resolutions[c.path]).length;
+  const allResolved = unresolvedCount === 0;
   const conflictPaths = new Set(conflicts.map(c => c.path));
   const mergedLines = preview ? autoMergedSummary(preview.original_before, preview.rebased_proposed_snapshot, preview.current_live, preview.original_proposed, conflictPaths) : [];
 
+  const submittingRef = useRef(false);   // synchronous guard: two fast clicks in the same tick must send ONE request
   const submit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const res = await af(`${API}/order-amendments/${amendment.id}/rebase-resolve`, { method: "POST", body: JSON.stringify({ field_resolutions: resolutions }) });
       const d = await res.json();
       if (!res.ok) {
         if (d.reason === "rebase_stale") { setStale(true); return; }
+        // A repeated click / another manager got there first: it IS applied — refresh instead of showing a failure.
+        if (d.reason === "already_applied") { toast.success("Amendment already applied"); onApplied?.(); return; }
+        if (d.code === "active_do_rebase_unsupported") { setUnsupported(true); return; }
         throw new Error(d.error || "Failed to apply");
       }
       toast.success("Amendment Applied");
       onApplied?.();
     } catch (e) { toast.error(e.message); }
-    finally { setSubmitting(false); }
+    finally { submittingRef.current = false; setSubmitting(false); }
   };
 
   return (
@@ -230,7 +239,7 @@ export default function AmendmentRebaseReview({ amendment, onClose, onApplied })
           {!loading && !loadError && !unsupported && !stale && preview && (
             <>
               {conflicts.length === 0 && (
-                <p className="text-sm text-gray-500">No conflicting fields — every change can be merged automatically.</p>
+                <p className="text-sm text-gray-500" data-testid="no-conflicts-note">No conflicting fields — every change can be merged automatically, so nothing needs choosing — you can apply them directly.</p>
               )}
               {conflicts.map((c, i) => (
                 <ConflictRow key={c.path || i} conflict={c} before={preview.original_before} proposed={preview.original_proposed} live={preview.current_live}
@@ -262,6 +271,12 @@ export default function AmendmentRebaseReview({ amendment, onClose, onApplied })
               {submitting ? "Applying…" : "Resolve & Apply"}
             </button>
           </div>
+        )}
+        {/* If the button is disabled, say exactly why — never a silent disabled state */}
+        {!loading && !loadError && !unsupported && !stale && preview && !allResolved && (
+          <p className="px-5 sm:px-6 pb-3 -mt-2 text-xs text-amber-700" data-testid="resolve-blocked-reason">
+            Choose a resolution for {unresolvedCount} conflicting field{unresolvedCount === 1 ? "" : "s"} above to enable Resolve &amp; Apply.
+          </p>
         )}
       </div>
       <style>{`

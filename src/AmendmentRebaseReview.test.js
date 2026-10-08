@@ -165,3 +165,112 @@ describe("AmendmentRebaseReview — full component with a stubbed fetch", () => 
     expect(screen.queryByText("Resolve & Apply")).not.toBeInTheDocument();
   });
 });
+
+// ── Resolve & Apply with ZERO conflicts (bug: the button was permanently disabled) ──────────────────────────
+describe("AmendmentRebaseReview — Resolve & Apply gating", () => {
+  const AMENDMENT = { id: "amend-9", order_number: "SO-03038" };
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  const ZERO = { original_before: { delivery_date: "2026-11-28", subtotal: 1000 }, original_proposed: { delivery_date: "2026-11-28", subtotal: 12186.2, items: [] }, current_live: { delivery_date: "2026-12-15", subtotal: 1000, sales_order_items: [] }, rebased_proposed_snapshot: { delivery_date: "2026-12-15", subtotal: 12186.2, items: [] }, conflicts: [], has_conflicts: false };
+  const ONE = { ...ZERO, conflicts: [HEADER_CONFLICT], has_conflicts: true };
+  function stubFetch(responses) {
+    let i = 0;
+    global.fetch = jest.fn(() => { const r = responses[Math.min(i, responses.length - 1)]; i++; return Promise.resolve({ ok: r.ok !== false, json: async () => r.body }); });
+  }
+  const open = async (props = {}) => {
+    const onApplied = props.onApplied || jest.fn();
+    render(withProviders(<AmendmentRebaseReview amendment={AMENDMENT} onClose={() => {}} onApplied={onApplied} />));
+    await waitFor(() => expect(screen.getByText("Resolve & Apply")).toBeInTheDocument());
+    return onApplied;
+  };
+
+  test("ZERO conflicts: 'No conflicting fields' is shown and Resolve & Apply is ENABLED without choosing anything", async () => {
+    stubFetch([{ body: ZERO }]);
+    await open();
+    expect(screen.getByTestId("no-conflicts-note")).toBeInTheDocument();
+    expect(screen.getByText("Resolve & Apply")).not.toBeDisabled();
+    expect(screen.queryByTestId("resolve-blocked-reason")).not.toBeInTheDocument();
+  });
+
+  test("ZERO conflicts: clicking sends an EMPTY resolution map, then reports success and refreshes the caller", async () => {
+    stubFetch([{ body: ZERO }, { body: { amendment_status: "approved", order: {} } }]);
+    const onApplied = await open();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    const call = global.fetch.mock.calls[1];
+    expect(call[0]).toContain("/rebase-resolve");
+    expect(JSON.parse(call[1].body)).toEqual({ field_resolutions: {} });
+  });
+
+  test("automatically merged changes are listed but need no choice; they apply with one click", async () => {
+    stubFetch([{ body: { ...ZERO, original_before: { delivery_date: "2026-11-28", subtotal: 1000, remark: "a" }, rebased_proposed_snapshot: { delivery_date: "2026-12-15", subtotal: 12186.2, remark: "b", items: [] }, original_proposed: { delivery_date: "2026-11-28", subtotal: 12186.2, remark: "b", items: [] } } }, { body: { amendment_status: "approved" } }]);
+    const onApplied = await open();
+    expect(screen.getByText(/Automatically Merged Changes/)).toBeInTheDocument();
+    expect(screen.getByText("Resolve & Apply")).not.toBeDisabled();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(onApplied).toHaveBeenCalled());
+  });
+
+  test("an ACTUAL conflict: the button is disabled and the exact reason is shown until it is resolved", async () => {
+    stubFetch([{ body: ONE }]);
+    await open();
+    expect(screen.getByText("Resolve & Apply")).toBeDisabled();
+    expect(screen.getByTestId("resolve-blocked-reason")).toHaveTextContent(/Choose a resolution for 1 conflicting field/);
+    fireEvent.click(screen.getByText("Keep Current Live"));
+    expect(screen.getByText("Resolve & Apply")).not.toBeDisabled();
+    expect(screen.queryByTestId("resolve-blocked-reason")).not.toBeInTheDocument();
+  });
+
+  test("DOUBLE CLICK sends exactly one resolve request", async () => {
+    let release;
+    let i = 0;
+    global.fetch = jest.fn(() => {
+      i++;
+      if (i === 1) return Promise.resolve({ ok: true, json: async () => ZERO });
+      return new Promise(res => { release = () => res({ ok: true, json: async () => ({ amendment_status: "approved" }) }); });
+    });
+    const onApplied = await open();
+    const btn = screen.getByText("Resolve & Apply");
+    fireEvent.click(btn); fireEvent.click(btn); fireEvent.click(btn);
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));   // 1 preview + the resolve request
+    await new Promise(r => setTimeout(r, 60));                              // let any (wrongly) queued extra clicks reach fetch
+    expect(global.fetch).toHaveBeenCalledTimes(2);                          // still exactly ONE resolve
+    release();
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("a repeated apply answered 'already_applied' is treated as DONE (refresh), not as an error", async () => {
+    stubFetch([{ body: ZERO }, { ok: false, body: { error: "This amendment has already been applied.", reason: "already_applied" } }]);
+    const onApplied = await open();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("This amendment has already been applied.")).not.toBeInTheDocument();
+  });
+
+  test("STALE amendment: a clear 'Order changed again' panel with a way to review the latest state", async () => {
+    stubFetch([{ body: ZERO }, { ok: false, body: { error: "stale", reason: "rebase_stale" } }]);
+    await open();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(screen.getByText("Order changed again after this review started.")).toBeInTheDocument());
+    expect(screen.getByText("Review Latest Changes")).toBeInTheDocument();
+  });
+
+  test("PERMISSION denied: the server's exact reason is shown, the modal stays open, nothing is reported as applied", async () => {
+    stubFetch([{ body: ZERO }, { ok: false, body: { error: "Only a manager can resolve a conflict" } }]);
+    const onApplied = await open();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(screen.getByText("Only a manager can resolve a conflict")).toBeInTheDocument());
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(screen.getByText("Resolve & Apply")).not.toBeDisabled();   // can retry
+  });
+
+  test("an Active DO appearing after the preview: the explanatory panel replaces the button (the backend guard is not bypassed)", async () => {
+    stubFetch([{ body: ZERO }, { ok: false, body: { error: "unsupported", code: "active_do_rebase_unsupported" } }]);
+    await open();
+    fireEvent.click(screen.getByText("Resolve & Apply"));
+    await waitFor(() => expect(screen.getByText(/isn't supported yet/)).toBeInTheDocument());
+  });
+});
