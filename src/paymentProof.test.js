@@ -134,22 +134,22 @@ describe("PaymentProofModal", () => {
 });
 
 describe("Customer Profile wiring", () => {
-  const src = require("fs").readFileSync(require("path").join(__dirname, "CustomerPage.js"), "utf8");
-  test("the payments list offers Edit / Add proof next to Amend, from the policy; Amend is unchanged", () => {
-    expect(src).toMatch(/proofEditPolicy\(p, user\)/);
-    expect(src).toMatch(/data-testid="edit-proof-btn"/);
-    expect(src).toMatch(/openAmend\(p\)/);                                  // the existing Amend workflow is still there
+  const read = (n) => require("fs").readFileSync(require("path").join(__dirname, n), "utf8");
+  const src = read("CustomerPage.js"), row = read("PaymentLedgerRow.js"), modal = read("RecordPaymentModal.js");
+  test("the payments list renders each line through PaymentLedgerRow; proof actions come from the policy; the latest proof is marked", () => {
+    expect(src).toMatch(/<PaymentLedgerRow /);
+    expect(src).toMatch(/onEditProof=\{\(pay, mode\) => setProofEdit\(\{ payment: pay, mode \}\)\}/);
+    expect(src).toMatch(/onEdit=\{\(pay\) => openAmend\(pay\)\}/);                     // the existing Edit/Amend workflow is still the pending path
     expect(src).toMatch(/PaymentProofModal payment=\{proofEdit\.payment\} mode=\{proofEdit\.mode\}/);
-    expect(src).toMatch(/\{all\.length > 1 && i === all\.length - 1 \? " · latest" : ""\}/);
+    expect(row).toMatch(/ledgerActions\(p, user\)/);
+    expect(row).toMatch(/data-testid="edit-proof-btn"/);
+    expect(row).toMatch(/\{all\.length > 1 && i === all\.length - 1 \? " · latest" : ""\}/);
   });
-  test("Edit Payment reuses the Record Payment form (no second form) and is offered only where the owner may change a pending payment", () => {
-    expect(src).toMatch(/data-testid="edit-payment-btn"/);
-    expect(src).toMatch(/✏️ Edit Payment/);
-    expect(src).toMatch(/canChangePending\(p\) && \(\s*<button onClick=\{\(\) => openAmend\(p\)\}/);
+  test("Edit Payment reuses the Record Payment form (no second form) and the backend-enforced edit route", () => {
+    expect(row).toMatch(/data-testid="edit-payment-btn"/);
     expect(src).toMatch(/<RecordPaymentModal[\s\S]{0,400}amendPayment=\{payModal\.amend \|\| null\}/);   // same modal as Record Payment
-    const modal = require("fs").readFileSync(require("path").join(__dirname, "RecordPaymentModal.js"), "utf8");
     expect(modal).toMatch(/amending \? "Edit Payment" : "Record Payment"/);
-    expect(modal).toMatch(/`\$\{API\}\/payments\/\$\{amendPayment\.id\}`, \{ method: "PATCH"/);          // the backend-enforced edit route
+    expect(modal).toMatch(/`\$\{API\}\/payments\/\$\{amendPayment\.id\}`, \{ method: "PATCH"/);
     expect(modal).not.toMatch(/proof_cleanup_warning/);                                                    // the server no longer deletes proofs
   });
 });

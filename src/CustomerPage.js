@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback , memo } from "react";
-import { paymentDateOf, fmtYmd } from "./paymentDate";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import RecordPaymentModal, { allocatedByOrder } from "./RecordPaymentModal";
 import PaymentProofModal from "./PaymentProofModal";
-import { proofEditPolicy, proofList } from "./paymentProofPolicy";
+import PaymentLedgerRow from "./PaymentLedgerRow";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -119,10 +118,6 @@ function CustomerPage() {
   // whoever recorded it, or any pending one for Finance and managers. Managers
   // can still remove any payment (approved too). The server re-checks all of
   // this under a row lock (migration 107).
-  const myRole = (user?.base_role || user?.role || "").toLowerCase();
-  const isPaymentManager = ["master", "manager", "company_admin", "operation_manager"].includes(myRole);
-  const canChangePending = (p) => !!p?.id && p.approval_status === "pending"
-    && (isPaymentManager || myRole === "finance" || (user?.id && p.recorded_by === user.id));
   const openAmend = (p) => {
     // Balances already include this payment, so add its own allocation back —
     // amending releases it before the corrected split is applied.
@@ -374,45 +369,9 @@ function CustomerPage() {
                     {(detail.payments || []).length === 0 && <p className="text-xs text-gray-400">No payments recorded</p>}
                     <div className="space-y-2">
                       {(detail.payments || []).map((p, idx) => (
-                        <div key={p.id || `dep-${idx}`} className={`border rounded-xl p-3 flex items-center justify-between ${p._deposit ? "bg-violet-50 border-violet-100" : "bg-emerald-50 border-emerald-100"}`}>
-                          <div>
-                            <span className={`text-sm font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</span>
-                            <span className="text-xs text-gray-500 ml-2">{p.payment_method}</span>
-                            {p._deposit && p.so_number && <span className="text-xs text-gray-400 ml-2">SO {p.so_number}</span>}
-                            {p.reference_no && <span className="text-xs text-gray-400 ml-2">Ref: {p.reference_no}</span>}
-                            <p className="text-xs text-gray-400">{fmtYmd(paymentDateOf(p))}{p._deposit ? " · deposit" : ""}</p>
-                            {p.proof_url && (
-                              <div className="mt-1 flex flex-wrap gap-2">
-                                {proofList(p).map((u, i, all) => (
-                                  <button type="button" key={i} onClick={() => setProofView(u)} className="text-xs text-violet-600 underline hover:text-violet-800">📎 Proof {i + 1}{all.length > 1 && i === all.length - 1 ? " · latest" : ""}</button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {p.approval_status === "pending" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Pending approval</span>}
-                            {p.approval_status === "rejected" && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">Rejected</span>}
-                            {p.or_number != null && <span className="text-[10px] text-gray-400">OR #{p.or_number}</span>}
-                            <button onClick={() => reprintReceipt(p)} title={p.approval_status === "rejected" ? "Reprint (VOID)" : "Print Payment Acknowledgement"}
-                              className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">🧾 {p.approval_status === "rejected" ? "Void copy" : "Receipt"}</button>
-                            {(() => { const pol = proofEditPolicy(p, user);
-                              if (pol.mode === "replace" || pol.mode === "append") return (
-                                <button onClick={() => setProofEdit({ payment: p, mode: pol.mode })} data-testid="edit-proof-btn" title={pol.mode === "append" ? "Approved payment — add a supplementary proof (existing evidence is kept)" : "Replace or add the payment proof — only the proof changes; the payment stays pending approval"}
-                                  className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">📎 {pol.label}</button>);
-                              if (pol.mode === "locked") return <span className="text-[10px] text-gray-400" title={pol.reason} data-testid="proof-locked">Proof locked</span>;
-                              return null; })()}
-                            {canChangePending(p) && (
-                              <button onClick={() => openAmend(p)} title="Edit this payment — amount, date, method, reference, proof, allocation (while it is pending Finance approval)" data-testid="edit-payment-btn"
-                                className="text-xs text-violet-600 hover:text-violet-800 border border-violet-200 hover:border-violet-300 rounded-lg px-2 py-1">✏️ Edit Payment</button>
-                            )}
-                            {p.id ? ((isPaymentManager || canChangePending(p)) && (
-                              <button onClick={() => deletePayment(p)} title={p.approval_status === "pending" ? "Delete this payment (before Finance approves it)" : "Remove payment"}
-                                className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">{p.approval_status === "pending" ? "🗑 Delete" : "Remove"}</button>
-                            )) : (
-                              <span className="text-[10px] text-gray-400" title="Edit the deposit on the order">on order</span>
-                            )}
-                          </div>
-                        </div>
+                        <PaymentLedgerRow key={p.id || p.sales_order_id || `dep-${idx}`} p={p} user={user}
+                          onReceipt={reprintReceipt} onViewProof={setProofView} onEditProof={(pay, mode) => setProofEdit({ payment: pay, mode })}
+                          onEdit={(pay) => openAmend(pay)} onRemove={deletePayment} />
                       ))}
                     </div>
                   </div>
