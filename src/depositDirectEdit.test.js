@@ -103,3 +103,13 @@ describe("Customer Profile → Payment History", () => {
     expect(parseProofs("https://x/a.jpg,https://x/b.jpg")).toEqual(["https://x/a.jpg", "https://x/b.jpg"]);
   });
 });
+
+describe("Edit Order always loads the order fresh", () => {
+  test("openEdit always fetches (falling back to the row data if the fetch fails), so a row that already has its items (View → Edit, or saved before) still gets the payment summary + Collect Payment", () => {
+    const src = fs.readFileSync(path.join(__dirname, "OrdersPage.js"), "utf8");
+    expect(src).toMatch(/await withLoading\("Loading order…", \(\) => getFullOrder\(\{ \.\.\.o, sales_order_items: undefined \}\)\);/);
+    // after Collect Payment / Edit Original Deposit: only a successful reload replaces the form's order
+    expect(src).toMatch(/getFullOrder\(\{ \.\.\.editingOrder, sales_order_items: undefined \}\)/);
+    expect(src).toMatch(/if \(!fresh\?\.sales_order_items\) \{ toast\.error/);
+  });
+});

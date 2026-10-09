@@ -1251,12 +1251,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   // After Collect Payment / Edit Original Deposit: reload the order's money (the form's other fields are left as typed).
   const refreshEditMoney = async () => {
     if (!editingOrder) return;
-    const { order: fresh, legacy_order, payment_summary } = await getFullOrder({ id: editingOrder.id });
-    if (fresh) {
-      setEditingOrder(fresh);
-      setForm(f => ({ ...f, payment_method: fresh.payment_method || "", payment_proofs: parseProofs(fresh.payment_proofs) }));
-      setOrders(prev => prev.map(o => o.id === fresh.id ? { ...o, deposit: fresh.deposit, initial_deposit: fresh.initial_deposit, payment_method: fresh.payment_method, status: fresh.status } : o));
-    }
+    const { order: fresh, legacy_order, payment_summary } = await getFullOrder({ ...editingOrder, sales_order_items: undefined });
+    // Only a successful reload (it carries the items) replaces what the form holds.
+    if (!fresh?.sales_order_items) { toast.error("Saved, but the order could not be reloaded — close and reopen it to see the new totals."); return; }
+    setEditingOrder(fresh);
+    setForm(f => ({ ...f, payment_method: fresh.payment_method || "", payment_proofs: parseProofs(fresh.payment_proofs) }));
+    setOrders(prev => prev.map(o => o.id === fresh.id ? { ...o, deposit: fresh.deposit, initial_deposit: fresh.initial_deposit, payment_method: fresh.payment_method, status: fresh.status } : o));
     setPaymentSummary(payment_summary || null);
     setEditLegacy(legacy_order || null);
   };
@@ -1264,7 +1264,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   const openEdit = async (o) => {
     // Load the full order behind the overlay so the drawer opens ready,
     // instead of flashing stale/empty form fields.
-    const { order: fullOrder, legacy_order, pending_amendment, payment_summary } = await withLoading("Loading order…", () => getFullOrder(o));
+    // Always load the order fresh: a row that already carries its items (opened from View, or saved earlier)
+    // would otherwise skip the fetch and Edit Order would have no payment summary / Collect Payment.
+    const { order: fullOrder, legacy_order, pending_amendment, payment_summary } = await withLoading("Loading order…", () => getFullOrder({ ...o, sales_order_items: undefined }));
     setPaymentSummary(payment_summary || null);
     setEditLegacy(legacy_order || null);
     setEditId(o.id);
