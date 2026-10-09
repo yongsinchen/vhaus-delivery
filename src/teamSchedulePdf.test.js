@@ -78,12 +78,13 @@ describe("Delivery Schedule PDF — same content as Print", () => {
     const g = groupsOf(serviceTeam);
     const remark = i => teamScheduleStopCells(g[i].o, g[i].sc, g[i].rows, serviceTeam).remark.map(p => p.text);
     expect(remark(0)).toEqual(["Call before delivery.\nUse back gate."]);                                            // A
-    expect(remark(1)).toEqual(["Linked SO: 56190", "Replace sofa leg (front left)"]);                               // B
-    expect(remark(2)).toEqual(["Linked SO: 56001"]);                                                                // C
+    // UAT Fix 4: the linked SO prints under the Service number, never in Remark; the genuine note stays intact.
+    expect(remark(1)).toEqual(["Replace sofa leg (front left)"]);                                                    // B
+    expect(remark(2)).toEqual([]);                                                                                  // C
     expect(g[2].rows.map(r => r.item.itemName)).toEqual(["Adjust wardrobe door alignment"]);                        // C — note is the Item
-    expect(remark(3)).toEqual(["Linked SO: 55732 55733", "Call 30 min before.\nBring replacement leg.\nQC before leaving."]); // D + E
-    expect(remark(4)).toEqual(["Linked SO: 55908 55909"]);                                                          // F
-    expect(remark(5)[1]).toBe(SVC_NOTE_LONG);                                                                      // G
+    expect(remark(3)).toEqual(["Call 30 min before.\nBring replacement leg.\nQC before leaving."]);               // D + E
+    expect(remark(4)).toEqual([]);                                                                                  // F
+    expect(remark(5)[0]).toBe(SVC_NOTE_LONG);                                                                      // G
   });
 });
 

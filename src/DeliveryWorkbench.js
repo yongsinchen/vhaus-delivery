@@ -15,6 +15,7 @@ import { useToast } from "./UIComponents";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { SERVICE_TYPES, ITEM_ACTIONS } from "./ServiceCaseFormModal";
 import { serviceItemQty } from "./serviceItemQty";
+import { serviceNumberOf } from "./serviceNumber";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -86,15 +87,15 @@ export function ServiceTeamControl({ svc, canAssign, loadTeams, af, postWithBloc
   const assign = () => run(async () => {
     const team = (teams || []).find(t => t.id === pick);
     return postWithBlockRetry(`${API}/delivery-schedules`, { order_id: svc.legacy_order_id, team_id: pick, scheduled_date: svc.operational_date, sort_order: (team?.stops || 0) + 1 });
-  }, `${svc.sv_number || "Service"} assigned`);
+  }, `${serviceNumberOf(svc) || "Service"} assigned`);
   const reassign = () => run(async () => {
     const res = await af(`${API}/delivery-schedules/${svc.schedule.id}`, { method: "PATCH", body: JSON.stringify({ team_id: pick }) });
     return res.json();
-  }, `${svc.sv_number || "Service"} reassigned`);
+  }, `${serviceNumberOf(svc) || "Service"} reassigned`);
   const unassign = () => run(async () => {
     const res = await af(`${API}/delivery-schedules/${svc.schedule.id}`, { method: "DELETE" });
     return res.json();
-  }, `${svc.sv_number || "Service"} moved to Unassigned — date kept`);
+  }, `${serviceNumberOf(svc) || "Service"} moved to Unassigned — date kept`);
 
   return (
     <div className="flex items-center gap-1 flex-wrap" data-testid="service-team-control">
@@ -152,7 +153,7 @@ export function ServiceRow({ svc, open, onToggle, teamControl }) {
         <td className="px-3 py-2 whitespace-nowrap">
           <button type="button" onClick={onToggle} aria-expanded={open} className="inline-flex items-center gap-1 hover:underline font-bold text-purple-700" title="Show Service note and items">
             <span aria-hidden="true" className="text-gray-400 text-[10px]">{open ? "▾" : "▸"}</span>
-            <ServiceBadge /> {svc.sv_number || "Service"}
+            <ServiceBadge /> {serviceNumberOf(svc) || "Service"}
           </button>
         </td>
         <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{svc.so_number || "—"}</td>
@@ -239,7 +240,7 @@ function ServiceResult({ svc, teamControl }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <ServiceBadge />
-            <span className="font-bold text-purple-700 text-sm">{svc.sv_number || "Service"}</span>
+            <span className="font-bold text-purple-700 text-sm">{serviceNumberOf(svc) || "Service"}</span>
             {svc.so_number && <span className="text-xs text-gray-500">SO {svc.so_number}</span>}
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${SERVICE_STATUS_CLS[svc.status] || "bg-gray-100 text-gray-600"}`}>{SERVICE_STATUS_LABEL[svc.status] || svc.status}</span>
           </div>

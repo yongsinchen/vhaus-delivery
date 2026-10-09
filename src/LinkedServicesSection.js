@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./AuthContext";
 import { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS } from "./ServiceCaseFormModal";
 import { serviceItemQty } from "./serviceItemQty";
+import { serviceNumberOf } from "./serviceNumber";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const af = async (url) => {
@@ -38,7 +39,7 @@ const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 
 function ServiceCard({ s, muted }) {
   const items = Array.isArray(s._items) ? s._items : [];
   const scheduled = s.schedule_tbc ? "TBC" : (s.due_date ? dmy(s.due_date) : "");
-  const label = s._sv_number || `Service #${s.id}`;
+  const label = serviceNumberOf(s) || `Service #${s.id}`; // SV-<SO> for a linked case
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${muted ? "border-gray-200 bg-gray-50 opacity-80" : "border-violet-200 bg-violet-50"}`}
       data-testid="linked-service-card">

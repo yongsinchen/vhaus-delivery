@@ -47,14 +47,15 @@ describe("Delivery Schedule print — Service Note remark", () => {
     expect(area).toContain("Line 12: level 23");
   });
 
-  test("multi-SO prefix is stripped, Linked SO line still shown", () => {
-    expect(area).toContain("Linked SO: 55732 55733");
+  test("multi-SO prefix is stripped; the linked SOs print under the Service number (each labelled)", () => {
+    expect(area).toMatch(/<div style="font-weight:bold">SV-MULTI<\/div><div style="font-weight:bold" data-field="linked-so">Linked SO: SO55732 \/ SO55733<\/div>/);
     expect(area).not.toContain("55733 | ");
     expect(area).not.toContain("Linked to SO:");
   });
 
-  test("a case without a note prints only Linked SO (no stray text)", () => {
-    expect(area).toContain("<div>Linked SO: 55908 55909</div></td>");
+  test("a case without a note prints no Remark text at all — the linked SO is in the header, not Remark", () => {
+    expect(area).toContain("Linked SO: SO55908 / SO55909");
+    expect(area).not.toContain("<div>Linked SO:"); // the old Remark line is gone everywhere
   });
 
   test("a case without items shows its note once (as the Item), not duplicated", () => {

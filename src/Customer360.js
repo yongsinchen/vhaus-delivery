@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./AuthContext";
 import { SERVICE_TYPES } from "./ServiceCaseFormModal";
 import { serviceItemQty } from "./serviceItemQty";
+import { serviceNumberOf } from "./serviceNumber";
 import { fmtYmd } from "./paymentDate";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -48,7 +49,7 @@ function ResultRow({ r, onPick }) {
         <span className="flex items-center gap-1.5 min-w-0">
           <TypeTag t={r.type} />
           <span className="font-bold text-sm text-gray-900 truncate">
-            {r.type === "sales_order" ? `SO ${r.order_number}` : r.type === "delivery_order" ? r.do_number : r.type === "service" ? (r.sv_number || "Service") : r.name}
+            {r.type === "sales_order" ? `SO ${r.order_number}` : r.type === "delivery_order" ? r.do_number : r.type === "service" ? (serviceNumberOf(r) || "Service") : r.name}
           </span>
           {r.exact && <span className="text-[10px] text-emerald-700 font-semibold">exact match</span>}
         </span>
@@ -167,7 +168,7 @@ export function StoryView({ story, onOpenOrder, onNavigate, can = {} }) {
           {services.map(s => (
             <Card key={s.id} highlight={highlight.service_id === s.id} testid="story-service">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="flex items-center gap-1.5"><TypeTag t="service" /><b>{s.sv_number || "Service"}</b><Badge s={s.status} /><span className="text-gray-500">{SERVICE_TYPES[s.service_type]}</span></span>
+                <span className="flex items-center gap-1.5"><TypeTag t="service" /><b>{serviceNumberOf(s) || "Service"}</b><Badge s={s.status} /><span className="text-gray-500">{SERVICE_TYPES[s.service_type]}</span></span>
                 {onNavigate && can.service && <button type="button" onClick={() => onNavigate({ to: "service" })} className="text-xs border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">View Service</button>}
               </div>
               <p className="text-gray-600 mt-0.5">Service date: <b>{s.operational_date ? day(s.operational_date) : "TBC"}</b> · Team: <b>{s.schedule?.team_label || "Unassigned"}</b></p>

@@ -6,6 +6,7 @@ import RecordPhotos from "./RecordPhotos";
 import { parseServiceItemQty, serviceItemQty } from "./serviceItemQty";
 import { serviceDateUpdateNotice } from "./serviceDateUpdate";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, ITEM_ACTIONS, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
+import { serviceNumberOf } from "./serviceNumber";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -550,7 +551,7 @@ function ServicePage() {
     svc._order?.so_number, svc.orders?.so_number,
     svc._order?.customer_name, svc.orders?.customer_name, svc.customer_name,
     svc.description, svc.customer_phone, svc._order?.contact,
-    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type], svc._sv_number,
+    svc._assigned?.name, svc.assigned?.name, SERVICE_TYPES[svc.service_type], svc._sv_number, svc._display_number,
   ].filter(Boolean).join(" ").toLowerCase().includes(q);
   // Plain "Delivery" (service_type 5) is split into its own Delivery tab —
   // distinct from "Delivery (Missing Item)" (type 4), which stays a service
@@ -738,7 +739,7 @@ function ServicePage() {
                 <span className="text-2xl">{TYPE_ICON[svc.service_type] || "🔧"}</span>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {svc._sv_number && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700">{svc._sv_number}</span>}
+                    {serviceNumberOf(svc) && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700" data-testid="service-number">{serviceNumberOf(svc)}</span>}
                     <span className="font-bold text-gray-900 text-sm">{SERVICE_TYPES[svc.service_type] || `Type ${svc.service_type}`}</span>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[svc.status] || "bg-gray-100"}`}>{svc.status}</span>
                     {svc.source === "legacy_order" && <span className="px-1.5 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">Legacy</span>}
@@ -852,7 +853,7 @@ function ServicePage() {
                     <div className="flex items-center gap-3">
                       <span className="text-2xl">{TYPE_ICON[detail.service?.service_type]}</span>
                       <div>
-                        <h2 className="font-bold text-gray-900">{SERVICE_TYPES[detail.service?.service_type]}</h2>
+                        <h2 className="font-bold text-gray-900">{serviceNumberOf(detail.service) && <span className="text-violet-700 mr-2" data-testid="service-detail-number">{serviceNumberOf(detail.service)}</span>}{SERVICE_TYPES[detail.service?.service_type]}</h2>
                         <p className="text-xs text-gray-500">{[detail.order?.so_number, detail.order?.customer_name].filter(Boolean).join(" · ")}</p>
                         {detail.service?.amount != null && detail.service?.amount !== "" && (
                           <p className="text-sm font-bold text-gray-800 mt-0.5">RM {Number(detail.service.amount).toLocaleString("en-MY", { minimumFractionDigits: 2 })}</p>

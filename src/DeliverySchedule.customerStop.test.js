@@ -142,8 +142,9 @@ describe("Service per child", () => {
     const [unit] = unitsOf(t);
     expect(unit.grouped).toBe(true);
     const remark = c => teamScheduleStopCells(c.o, c.sc, c.rows, t).remark.map(p => p.text);
-    expect(remark(unit.children[0])).toEqual(["Linked SO: SO5001", "Service A — fix drawer\n第二行"]);
-    expect(remark(unit.children[1])).toEqual(["Linked SO: SO5002"]);                     // note is its Item, not repeated
+    expect(remark(unit.children[0])).toEqual(["Service A — fix drawer\n第二行"]);          // linked SO is under the Service number now
+    expect(remark(unit.children[1])).toEqual([]);                                         // note is its Item, not repeated
+    expect(teamScheduleStopCells(unit.children[0].o, unit.children[0].sc, unit.children[0].rows, t).info.map(p => p.text).slice(0, 2)).toEqual(["SV-A", "Linked SO: SO5001"]);
     expect(unit.children[1].rows.map(r => r.item.itemName)).toEqual(["Service B — tighten bed"]);
     expect(remark(unit.children[2])).toEqual([]);                                         // no Service on the plain DO
     const all = JSON.stringify(unit.children.map(remark));

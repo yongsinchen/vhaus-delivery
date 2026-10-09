@@ -5,6 +5,7 @@ import CreateDeliveryOrderModal from "./CreateDeliveryOrderModal";
 import LinkedServicesSection from "./LinkedServicesSection";
 import { ServiceRow, ServiceTeamControl, WorkbenchSearchResults, filterServices, TbcWorkList } from "./DeliveryWorkbench";
 import { ActionCategoryList, FOCUS_CATEGORIES } from "./ActionRequired";
+import { serviceNumberOf, linkedSoLabelOf, salespersonOf, soLabel } from "./serviceNumber";
 import { printHtml } from "./printDocument";
 import { SERVICE_TYPES, ITEM_ACTIONS } from "./ServiceCaseFormModal";
 import { serviceItemQty } from "./serviceItemQty";
@@ -434,8 +435,9 @@ export function serviceJobFields(svc) {
   const note = svc.description || "";
   const issue = svc.issue_description && svc.issue_description !== svc.description ? svc.issue_description : "";
   return {
-    svNo: svc.sv_number || "Service",
+    svNo: serviceNumberOf(svc) || "Service",
     soNo: svc.so_number || "—",
+    linkedSo: svc.so_number ? soLabel(svc.so_number) : null,
     customer: svc.customer_name || "",
     contact: svc.customer_contact || "",
     address: svc.customer_address || "",
@@ -484,7 +486,7 @@ export function serviceJobHtml(svc, company = {}) {
         ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
         <div><b>${esc(company.name || "")}</b>${company.reg ? ` (${esc(company.reg)})` : ""}<br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
       </div>
-      <div style="text-align:right"><b>Service#: ${esc(f.svNo)}</b></div>
+      <div style="text-align:right"><b>Service#: ${esc(f.svNo)}</b>${f.linkedSo ? `<br><span data-field="linked-so">Linked SO: ${esc(f.linkedSo)}</span>` : ""}</div>
     </div>
     <div class="title">SERVICE JOB</div>
     <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
@@ -531,8 +533,8 @@ export async function exportServiceJobExcel(svc, company = {}) {
   ws.getCell("C2").font = { size: 9 }; ws.getCell("C2").alignment = { wrapText: true };
   ws.getCell("C3").value = company.hotline ? `Tel: ${company.hotline}` : "";
   ws.getCell("C3").font = { size: 9 };
-  ws.getCell("D3").value = `Service#: ${f.svNo}`;
-  ws.getCell("D3").font = { bold: true }; ws.getCell("D3").alignment = { horizontal: "right" };
+  ws.getCell("D3").value = f.linkedSo ? `Service#: ${f.svNo}\nLinked SO: ${f.linkedSo}` : `Service#: ${f.svNo}`; // linked SO right below the Service number
+  ws.getCell("D3").font = { bold: true }; ws.getCell("D3").alignment = { horizontal: "right", wrapText: true };
 
   ws.mergeCells("A4:D4");
   const title = ws.getCell("A4");
@@ -857,7 +859,10 @@ const fmtBalance = (v) => `Bal: RM ${Number(v).toLocaleString("en-MY", { minimum
 // is only repeated when it differs from the banner's.
 export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {}) {
   const grouped = !!rows[0]?.grouped;
-  const info = [{ text: String(o.so_number || ""), bold: true }];
+  const isService = o.type === "Service";
+  const info = [{ text: String((isService ? serviceNumberOf(o) : null) || o.so_number || ""), bold: true }];
+  const linkedSo = isService ? linkedSoLabelOf(o) : null;
+  if (linkedSo) info.push({ text: `Linked SO: ${linkedSo}`, bold: true });
   if (o.customer_name && !grouped) info.push({ text: o.customer_name });
   if (o.contact && !grouped) info.push({ text: o.contact, color: "#555555" });
   if (o.address && (!grouped || o.address !== bannerAddress)) info.push({ text: o.address, color: "#555555", small: true });
@@ -866,8 +871,8 @@ export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {})
 
   const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
   const remark = [];
-  if (o.type === "Service") {
-    if (o.linked_so) remark.push({ text: `Linked SO: ${o.linked_so}` });
+  if (isService) {
+    // The linked SO prints under the Service number (info), not in Remark.
     if (rows[0]?.serviceRemark) remark.push({ text: rows[0].serviceRemark });
   } else if (rowRemark) {
     remark.push({ text: rowRemark });
@@ -876,7 +881,7 @@ export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {})
 
   return {
     info, remark,
-    salesman: o.salesman || "-",
+    salesman: salespersonOf(o) || "-",
     trip: { text: sc.trip_no ? `Trip ${sc.trip_no}/${sc.total_trips}` : "-", color: sc.trip_no > 1 ? "#6b7280" : "#059669" },
     plate: team?.vehicle_plate || "-",
   };
@@ -1463,7 +1468,8 @@ export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked
           <div className="flex items-center gap-1 flex-wrap">
             {!isLocked && <span className="text-gray-300 text-xs select-none cursor-grab leading-none">&#8942;&#8942;</span>}
             <span className="text-[11px] text-gray-400 font-medium">#{displayNo ?? index + 1}</span>
-            <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{o.so_number}</span>
+            <span className={`font-bold text-xs ${isTrip ? "text-purple-700" : "text-blue-700"}`}>{(o.type === "Service" ? serviceNumberOf(o) : null) || o.so_number}</span>
+            {o.type === "Service" && linkedSoLabelOf(o) && <span className="text-[10px] text-gray-500 font-medium" data-testid="stop-linked-so">{linkedSoLabelOf(o)}</span>}
             {dord && <span className="text-[10px] bg-violet-200 text-violet-800 font-bold px-1 py-0.5 rounded" title={`Delivery Order ${dord.do_number}`}>{dord.do_number}</span>}
             <LinkedBadge others={linkedWith} />
             {isSuperseded && (
@@ -1548,6 +1554,7 @@ export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked
               : <p className="text-[11px] text-gray-500 leading-tight">{o.contact}</p>
           )}
           {(!inCustomerStop || o.address !== groupAddress) && <p className="text-[11px] text-gray-400 leading-tight break-words">{o.address}</p>}
+          {salespersonOf(o) && <p className="text-[11px] text-gray-600 leading-tight truncate" data-testid="stop-salesperson" title="Salesperson">👤 {salespersonOf(o)}</p>}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[11px]">
             <span className="text-gray-400">Ord: {o.order_date || "-"}</span>
             {preferredTime && <span className="font-medium text-purple-600 bg-purple-50 rounded px-1">{preferredTime}</span>}
@@ -1609,10 +1616,9 @@ export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked
           the service RPC writes into remark/service_note. */}
       {o.type === "Service" ? (() => {
         const detail = serviceDetailOf(o);
-        if (!o.linked_so && !detail) return null;
+        if (!detail) return null; // the linked SO shows under the Service number
         return (
           <div className="bg-violet-50 border border-violet-200 text-violet-800 rounded px-2 py-1 text-[11px] mt-1 space-y-0.5">
-            {o.linked_so && <div><span className="font-semibold">Linked SO: </span>{o.linked_so}</div>}
             {detail && <div><span className="font-semibold">Service: </span>{detail}</div>}
           </div>
         );
@@ -1738,13 +1744,15 @@ export function TeamPrintView({ team, onClose, company }) {
                     rows.map(({ item, idx, rowspan, isFirst }) => (
                       <tr key={`${gi}-${idx}`} style={{verticalAlign:"top"}}>
                         {isFirst && <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden"}}>
-                          <div style={{fontWeight:"bold"}}>{o.so_number}</div>{showCustomer&&<div>{o.customer_name}</div>}
+                          <div style={{fontWeight:"bold"}}>{(o.type==="Service" ? serviceNumberOf(o) : null) || o.so_number}</div>
+                          {o.type==="Service"&&linkedSoLabelOf(o)&&<div style={{fontWeight:"bold"}} data-field="linked-so">Linked SO: {linkedSoLabelOf(o)}</div>}
+                          {showCustomer&&<div>{o.customer_name}</div>}
                           {showCustomer&&o.contact&&<div style={{color:"#555"}}>{o.contact}</div>}
                           {showAddress&&<div style={{color:"#555",fontSize:"9px",wordBreak:"break-word"}}>{o.address}</div>}
                           {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
                           {sc.slot&&<div style={{color:"#1e40af",fontWeight:"bold"}}>Slot: {sc.slot}</div>}
                         </td>}
-                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",fontSize:"9px"}}>{o.salesman||"-"}</td>}
+                        {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",fontSize:"9px"}}>{salespersonOf(o)||"-"}</td>}
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,textAlign:"center",verticalAlign:"top",fontSize:"9px",color:sc.trip_no>1?"#6b7280":"#059669"}}>{tripLabel}</td>}
                         <td style={{...BD,textAlign:"center"}}></td>
                         <td style={{...BD,textAlign:"center"}}></td>
@@ -1775,7 +1783,6 @@ export function TeamPrintView({ team, onClose, company }) {
                           return (
                             <td rowSpan={rowspan} style={{...BD,verticalAlign:"top",overflow:"hidden",wordBreak:"break-word"}}>
                               {o.type==="Service" ? (<>
-                                {o.linked_so&&<div>Linked SO: {o.linked_so}</div>}
                                 {rows[0].serviceRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rows[0].serviceRemark}</div>}
                               </>) : (rowRemark&&<div style={{whiteSpace:"pre-wrap"}}>{rowRemark}</div>)}
                               {sc.notes&&<div style={{color:"#555",fontStyle:"italic"}}>{sc.notes}</div>}
@@ -3509,6 +3516,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
           </div>
           <p className="text-xs font-medium text-gray-700">{so.customer_name}</p>
           <p className="text-xs text-gray-400 leading-tight">{item.delivery_address || so.customer_address || ""}</p>
+          {so.salesman_name && <p className="text-xs text-gray-600 leading-tight truncate" data-testid="card-salesperson" title="Salesperson">👤 {so.salesman_name}</p>}
           {item.delivery_date && <p className="text-xs text-indigo-600 font-medium">target {item.delivery_date}</p>}
           <p className="text-xs text-gray-400 mt-1 truncate">{doItems.map(i => `${i.product_name} ×${Number(i.quantity)}`).join(", ")}</p>
           {/* DO Remark hotfix: this card's OWN delivery_orders.remark — never
@@ -3546,8 +3554,8 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1">
               <span className="text-xs bg-purple-200 text-purple-800 font-bold px-1.5 py-0.5 rounded">SVC</span>
-              <span className="font-bold text-purple-700 text-xs">{item.so_number}</span>
-              {item.sv_number && <span className="text-xs text-purple-400">{item.sv_number}</span>}
+              <span className="font-bold text-purple-700 text-xs">{serviceNumberOf(item) || item.so_number}</span>
+              {linkedSoLabelOf(item) && <span className="text-xs text-gray-500">{linkedSoLabelOf(item)}</span>}
             </div>
             <span className="flex items-center gap-1.5">
               {item.order_amount != null && Number(item.order_amount) > 0 && <span className="text-gray-600 text-xs font-semibold">RM {Number(item.order_amount).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
@@ -3557,11 +3565,13 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
           </div>
           <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
           <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
+          {salespersonOf(item) && <p className="text-xs text-gray-600 leading-tight truncate" data-testid="card-salesperson" title="Salesperson">👤 {salespersonOf(item)}</p>}
           {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
           <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
           {/* Service operational instruction — orders.service_note, a field
-              distinct from any audit-trail note. Never labeled "Remark". */}
-          <RemarkNote label="Service Note" text={item.service_note || ""} className="bg-violet-50 border-violet-200 text-violet-800" />
+              distinct from any audit-trail note. Never labeled "Remark". The
+              auto "Linked to SO: … |" prefix is dropped (the SO shows above). */}
+          <RemarkNote label="Service Note" text={serviceDetailOf(item)} className="bg-violet-50 border-violet-200 text-violet-800" />
           {!readOnly && teams.length > 0 && (
             <select onChange={e => { if (e.target.value) assignItem(e.target.value, item.id, "order"); }}
               className="mt-2 w-full text-xs border rounded px-1 py-1 text-gray-600">
@@ -3593,6 +3603,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
         </div>
         <p className="text-xs font-medium text-gray-700">{item.customer_name}</p>
         <p className="text-xs text-gray-400 leading-tight">{item.address}</p>
+        {salespersonOf(item) && <p className="text-xs text-gray-600 leading-tight truncate" data-testid="card-salesperson" title="Salesperson">👤 {salespersonOf(item)}</p>}
         {item.time_slot && <p className="text-xs text-indigo-600 font-medium">{item.time_slot}</p>}
         <p className="text-xs text-gray-400 mt-1 truncate">{items.map(i => i.itemName).filter(Boolean).join(", ")}</p>
         {/* sales_orders.remark, projected one-way onto this legacy orders row

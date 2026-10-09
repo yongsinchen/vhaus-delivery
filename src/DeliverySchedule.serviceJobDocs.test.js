@@ -64,7 +64,7 @@ describe("Service Excel", () => {
   test("same information, every item on its own row with its quantity", async () => {
     const { cells, filename } = await runExcel(SVC);
     expect(filename).toBe("Service-SV-588.xlsx");
-    for (const t of ["Service#: SV-588", "55670", "Xavier Yeo", "012-345 6789", "12 Jalan Mawar, Penang", "Assembly / Installation", "09/10/2026", "PKP 7328 · Ali", "Headboard panel", "Touch-up kit"]) expect(cells).toContain(t);
+    for (const t of ["Service#: SV-588\nLinked SO: SO55670", "55670", "Xavier Yeo", "012-345 6789", "12 Jalan Mawar, Penang", "Assembly / Installation", "09/10/2026", "PKP 7328 · Ali", "Headboard panel", "Touch-up kit"]) expect(cells).toContain(t);
     expect(cells).toContain("Touch up headboard scratch.\nBring matching paint.");
     expect(cells).toContain("2"); expect(cells).toContain("Service Note");
     expect(cells.join("|")).not.toContain("SV-600");
@@ -72,6 +72,7 @@ describe("Service Excel", () => {
   test("without SO / unassigned / TBC still exports", async () => {
     const { cells, filename } = await runExcel(STANDALONE);
     expect(filename).toBe("Service-SV-600.xlsx");
+    expect(cells).toContain("Service#: SV-600"); // standalone: no linked SO invented
     expect(cells).toContain("—"); expect(cells).toContain("TBC"); expect(cells).toContain("Unassigned"); expect(cells).toContain("Wardrobe");
   });
 });
