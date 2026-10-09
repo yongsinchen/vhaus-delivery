@@ -5,6 +5,7 @@ import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
 import { printHtml } from "./printDocument";
 import { malaysiaToday, malaysiaMonthStart } from "./malaysiaDate";
+import { LinkedOrdersCell } from "./paymentSoLinks";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -35,6 +36,22 @@ function FinancePage() {
   const [typeFilter, setTypeFilter] = useState("");     // Payments tab: filter by type (Deposit / Balance)
   const [refFilter, setRefFilter] = useState("");       // Payments tab: filter by approval code (reference_no)
   const [apprFilter, setApprFilter] = useState("");     // Payments tab: filter by approval state
+  // Payments tab: SO # search — server-side (GET /payments?so=), so it finds every payment
+  // ALLOCATED to that Sales Order (split / 2C2P too), not just the 500 loaded rows.
+  const [soInput, setSoInput] = useState("");
+  const [soSearch, setSoSearch] = useState(null); // { query, payments, salesOrders, loading, error }
+  const runSoSearch = useCallback(async (raw) => {
+    const query = String(raw || "").trim();
+    if (!query) { setSoSearch(null); return; }
+    setSoSearch({ query, payments: [], salesOrders: [], loading: true, error: null });
+    try {
+      const r = await af(`${API}/payments?include_deposits=1&so=${encodeURIComponent(query)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Search failed");
+      setSoSearch({ query, payments: d.payments || [], salesOrders: d.so_search?.sales_orders || [], loading: false, error: null });
+    } catch (e) { setSoSearch({ query, payments: [], salesOrders: [], loading: false, error: e.message }); }
+  }, []);
+  useEffect(() => { setSoSearch(null); setSoInput(""); }, [companyId]); // never carry one company's search into another
 
   // Reconciliation
   const [uploads, setUploads] = useState([]);
@@ -219,10 +236,14 @@ function FinancePage() {
 
   useEffect(() => { if (tab === 4) loadUploads(); }, [tab, loadUploads]);
 
-  const filteredPayments = payments.filter(p => {
+  // SO search replaces the loaded list with that SO's payments; the date / type / method /
+  // status filters below still apply on top of it.
+  const basePayments = soSearch ? soSearch.payments : payments;
+  const filteredPayments = basePayments.filter(p => {
     const d = (p.paid_at || "").slice(0, 10);
     return d >= dateFrom && d <= dateTo;
   });
+  const soOutsideRange = soSearch ? soSearch.payments.length - filteredPayments.length : 0;
 
   // Money counts as soon as it's recorded ("count now, verify later"); only a
   // REJECTED payment is excluded. The table still badges Pending so Finance can
@@ -388,14 +409,32 @@ function FinancePage() {
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
             </select>
+            <form onSubmit={e => { e.preventDefault(); runSoSearch(soInput); }} className="flex items-center gap-1">
+              <input value={soInput} onChange={e => { setSoInput(e.target.value); if (!e.target.value.trim()) setSoSearch(null); }} placeholder="SO # e.g. 30228" aria-label="Search by SO number"
+                data-testid="so-search" className="px-3 py-2 rounded-xl border border-gray-200 text-sm w-40" />
+              <button type="submit" className="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white hover:bg-gray-50">Search</button>
+              {soSearch && <button type="button" onClick={() => { setSoSearch(null); setSoInput(""); }} className="text-xs text-violet-600 hover:underline">Clear SO</button>}
+            </form>
             {(methodFilter || typeFilter || refFilter || apprFilter) && <button onClick={() => { setMethodFilter(""); setTypeFilter(""); setRefFilter(""); setApprFilter(""); }} className="text-xs text-violet-600 hover:underline">Clear</button>}
             <span className="text-xs text-gray-500">{methodRows.length} transaction{methodRows.length !== 1 ? "s" : ""} · {money(methodTotal)}</span>
           </div>
+          {soSearch && (
+            <div className="text-xs rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-violet-800" data-testid="so-search-status">
+              {soSearch.loading ? `Searching SO ${soSearch.query}…`
+                : soSearch.error ? <span className="text-red-600">{soSearch.error}</span>
+                : soSearch.salesOrders.length === 0 && soSearch.payments.length === 0 ? `No Sales Order ${soSearch.query} in this company.`
+                : <>Payments for {soSearch.salesOrders.map(s => `SO${String(s.order_number).replace(/^SO/i, "")}`).join(", ") || soSearch.query} — {soSearch.payments.length} found
+                    {soOutsideRange > 0 && <> · <b>{soOutsideRange}</b> outside the date range <button type="button" className="underline" onClick={() => {
+                      const ds = soSearch.payments.map(p => (p.paid_at || "").slice(0, 10)).filter(Boolean).sort();
+                      if (ds.length) { setDateFrom(ds[0] < dateFrom ? ds[0] : dateFrom); setDateTo(ds[ds.length - 1] > dateTo ? ds[ds.length - 1] : dateTo); }
+                    }}>show all dates</button></>}</>}
+            </div>
+          )}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Payment Date</th><th className="px-4 py-2 text-left">Type</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
+              <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="px-4 py-2 text-left">OR #</th><th className="px-4 py-2 text-left">Payment Date</th><th className="px-4 py-2 text-left">Type</th><th className="px-4 py-2 text-left">Method</th><th className="px-4 py-2 text-left">Reference</th><th className="px-4 py-2 text-left">SO · Delivery Date</th><th className="px-4 py-2 text-right">Amount</th>{isMaster && <th className="px-4 py-2 text-right">Actions</th>}</tr></thead>
               <tbody>
-                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 7 : 6} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter || typeFilter ? " matching the filter" : ""} in this period</td></tr>}
+                {methodRows.length === 0 && <tr><td colSpan={isMaster ? 8 : 7} className="px-4 py-8 text-center text-gray-400">No transactions{methodFilter || typeFilter ? " matching the filter" : ""} in this period</td></tr>}
                 {methodRows.map((p, idx) => (
                   <tr key={p.id || `dep-${p.so_number}-${idx}`} onClick={() => setDetailTxn(p)}
                     className={`border-t border-gray-50 cursor-pointer hover:bg-gray-50 ${p._deposit ? "bg-violet-50/40" : ""}`}>
@@ -410,6 +449,7 @@ function FinancePage() {
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method && p.payment_method !== "Deposit" ? p.payment_method : "—"}</span>
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{p._deposit ? (p.so_number ? `SO ${p.so_number}` : "-") : (p.reference_no || "-")}</td>
+                    <td className="px-4 py-2 text-xs"><LinkedOrdersCell links={p.linked_orders} /></td>
                     <td className={`px-4 py-2 text-right font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</td>
                     {isMaster && (
                       <td className="px-4 py-2 text-right" onClick={e => e.stopPropagation()}>
@@ -605,7 +645,9 @@ function FinancePage() {
               <div className="flex justify-between"><span className="text-gray-500">Payment Date</span><span className="text-gray-800 font-medium">{fmtYmd(paymentDateOf(detailTxn)) || "-"}{!detailTxn.payment_date && detailTxn.paid_at && !detailTxn._deposit ? <span className="ml-1 text-[11px] text-gray-400">(recorded date)</span> : null}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">{detailTxn._deposit ? "Order created" : "Recorded"}</span><span className="text-gray-600 text-xs">{fmtMyDateTime(detailTxn.paid_at) || "-"}</span></div>
               {detailTxn.approved_at && <div className="flex justify-between"><span className="text-gray-500">{detailTxn.approval_status === "rejected" ? "Rejected" : "Approved"}</span><span className="text-gray-600 text-xs">{fmtMyDateTime(detailTxn.approved_at)}</span></div>}
-              {detailTxn.so_number && <div className="flex justify-between"><span className="text-gray-500">Sales Order</span><span className="text-gray-800">SO {detailTxn.so_number}</span></div>}
+              {(detailTxn.linked_orders || []).length > 0
+                ? <div className="flex justify-between gap-3"><span className="text-gray-500">Sales Order · Delivery</span><span className="text-gray-800 text-right text-xs"><LinkedOrdersCell links={detailTxn.linked_orders} /></span></div>
+                : detailTxn.so_number && <div className="flex justify-between"><span className="text-gray-500">Sales Order</span><span className="text-gray-800">SO {detailTxn.so_number}</span></div>}
               {detailTxn.customer_name && <div className="flex justify-between"><span className="text-gray-500">Customer</span><span className="text-gray-800">{detailTxn.customer_name}</span></div>}
               {detailTxn.reference_no && <div className="flex justify-between"><span className="text-gray-500">Reference</span><span className="text-gray-800">{detailTxn.reference_no}</span></div>}
               {detailTxn.proof_url ? (
