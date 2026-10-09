@@ -8,7 +8,7 @@ import RecordPaymentModal from "./RecordPaymentModal";
 import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 import { addDaysISO } from "./malaysiaDate";
-import { parseProofs, depositChangeOf, PendingDepositNotice, DepositChangeReason } from "./depositChange";
+import { parseProofs, PaymentSummaryPanel, DepositEditModal, PaymentHistoryModal } from "./depositChange";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -695,7 +695,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   // drawer (null when there's none). `order`/`legacy_order` from
   // GET /sales-orders/:id are ALWAYS canonical — this is presentation-only.
   const [pendingAmendment, setPendingAmendment] = useState(null);
-  const [pendingDepositRequest, setPendingDepositRequest] = useState(null); // migration 117: deposit change waiting for approval
+  // Edit Order money (2026-10-09): read-only summary + Collect Payment / Payment History / Edit Original Deposit.
+  const [paymentSummary, setPaymentSummary] = useState(null);
+  const [editLegacy, setEditLegacy] = useState(null);       // legacy orders row of the order being edited (payments record against it)
+  const [editPayOpen, setEditPayOpen] = useState(false);
+  const [editPayHistory, setEditPayHistory] = useState(false);
+  const [editDeposit, setEditDeposit] = useState(false);
   // View drawer only: when a "pending" amendment is shown, this toggles the
   // primary display between the proposed snapshot (default) and the current
   // approved order. Also doubles as an expand toggle for rejected/conflict.
@@ -994,7 +999,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
       const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
       if (!res.ok) { toast.error("Failed to load order detail"); return { order, legacy_order: null, pending_amendment: null }; }
       const d = await res.json();
-      return { order: d.order || order, legacy_order: d.legacy_order || null, pending_amendment: d.pending_amendment || null, pending_deposit_request: d.pending_deposit_request || null };
+      return { order: d.order || order, legacy_order: d.legacy_order || null, pending_amendment: d.pending_amendment || null, payment_summary: d.payment_summary || null };
     } catch { toast.error("Network error loading order"); return { order, legacy_order: null, pending_amendment: null }; }
   };
 
@@ -1243,11 +1248,25 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     setDrawerOpen(true);
   };
 
+  // After Collect Payment / Edit Original Deposit: reload the order's money (the form's other fields are left as typed).
+  const refreshEditMoney = async () => {
+    if (!editingOrder) return;
+    const { order: fresh, legacy_order, payment_summary } = await getFullOrder({ id: editingOrder.id });
+    if (fresh) {
+      setEditingOrder(fresh);
+      setForm(f => ({ ...f, payment_method: fresh.payment_method || "", payment_proofs: parseProofs(fresh.payment_proofs) }));
+      setOrders(prev => prev.map(o => o.id === fresh.id ? { ...o, deposit: fresh.deposit, initial_deposit: fresh.initial_deposit, payment_method: fresh.payment_method, status: fresh.status } : o));
+    }
+    setPaymentSummary(payment_summary || null);
+    setEditLegacy(legacy_order || null);
+  };
+
   const openEdit = async (o) => {
     // Load the full order behind the overlay so the drawer opens ready,
     // instead of flashing stale/empty form fields.
-    const { order: fullOrder, legacy_order, pending_amendment, pending_deposit_request } = await withLoading("Loading order…", () => getFullOrder(o));
-    setPendingDepositRequest(pending_deposit_request || null);
+    const { order: fullOrder, legacy_order, pending_amendment, payment_summary } = await withLoading("Loading order…", () => getFullOrder(o));
+    setPaymentSummary(payment_summary || null);
+    setEditLegacy(legacy_order || null);
     setEditId(o.id);
     setArrivalItems(parseLegacyArrival(legacy_order));
     setEditingOrder(fullOrder);
@@ -1273,7 +1292,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
       delivery_time_slot: f.delivery_time_slot || "",
       delivery_address: f.delivery_address || "",
       remark: f.remark || "", internal_remark: f.internal_remark || "",
-      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: parseProofs(f.payment_proofs), deposit_change_reason: "",
+      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: parseProofs(f.payment_proofs),
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
       country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
       items: (f.sales_order_items || []).map(it => ({
@@ -1499,15 +1518,11 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
 
   const subtotal = form.items.reduce((s, it) => s + (Number(it.unit_price) || 0) * (Number(it.quantity) || 1), 0);
   const discountVal = Number(form.discount) || 0;
-  const depositVal = Number(form.deposit) || 0;
   const gstRate = form.gst_waived ? 0 : (Number(form.gst_rate) || 0);
   // GST is charged on the full subtotal; the discount comes off AFTER tax
   // (business rule since Jul 2026 — previously GST was on subtotal − discount).
   const gstAmount = Math.round(subtotal * gstRate) / 100;
   const totalAfterDiscount = subtotal + gstAmount - discountVal;
-  // Instalment admin charges add to what the customer owes (not to order_amount).
-  const adminChargeVal = form.payment_method === "Instalment" ? (Number(form.admin_charges) || 0) : 0;
-  const balanceVal = totalAfterDiscount + adminChargeVal - depositVal;
   // E-invoice details required when over RM10,000 OR the customer requested one.
   const einvNeeded = totalAfterDiscount > 10000 || form.einvoice_requested;
 
@@ -1633,34 +1648,25 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
         };
       }),
     };
-    // Edits also send the Deposit value this form LOADED (sales_orders.deposit
-    // when the drawer opened). The backend uses it to tell an untouched Deposit
-    // field from a real change, so a payment recorded by someone else while
-    // this form was open can never rewrite the upfront deposit; a real Deposit
-    // change on a stale form is refused (409 stale_deposit) instead of guessed.
-    if (editId) body.deposit_loaded = editingOrder?.deposit != null ? Number(editingOrder.deposit) : null;
-    // 117: a change to an EXISTING deposit is submitted for Manager / Finance approval (never applied here).
-    if (editId) {
-      const dep = depositChangeOf(editingOrder, form);
-      if (dep.changed) {
-        if (!String(form.deposit_change_reason || "").trim()) { setSaving(false); setFormError("Enter a reason for the deposit change — it needs Manager / Finance approval."); return; }
-        body.deposit_change_reason = form.deposit_change_reason.trim();
-      }
-    }
+    // Edit Order never changes money: the original deposit has its own editor
+    // and new money is Collect Payment — so an edit sends no money fields.
+    if (editId) { delete body.deposit; delete body.payment_method; delete body.payment_proofs; }
     const url = editId ? `${API}/sales-orders/${editId}` : `${API}/sales-orders`;
     const method = editId ? "PUT" : "POST";
     const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
     const d = await res.json();
     setSaving(false);
-    if (!res.ok) { setFormError(d.error || "Failed to save"); return; }
-    if (d.deposit_change_request) {
-      toast.warning("Deposit change submitted for Manager / Finance approval — the order keeps its current deposit until it is approved.");
-    } else if (d.deposit_change_error) {
-      toast.error(`Order saved, but the deposit change was NOT submitted: ${d.deposit_change_error.error}`);
-    }
+    // Save outcome, said plainly: Not saved / Submitted for Approval / Saved.
+    if (!res.ok) { setFormError(`Not saved${res.status === 409 ? " — conflict" : ""}: ${d.error || "failed"}`); return; }
     if (d.pending_amendment) {
-      toast.warning(d.message || "This is a critical change — submitted for manager approval. The order's live data has NOT been changed yet.");
+      toast.warning(d.message || "Submitted for approval — the critical change is NOT applied yet.");
+    } else if (editId) {
+      toast.success("Saved successfully");
     }
+    if (d.pending_amendment_kept?.conflicts?.length) {
+      toast.warning(`Saved. The pending amendment also changes ${d.pending_amendment_kept.conflicts.join(", ")} — the manager will resolve it at approval.`);
+    }
+    if (d.projection_sync_warning) toast.warning(d.projection_sync_warning);
     if (d.delivery_order_updated) {
       toast.info(`${d.delivery_order_updated.do_number}: delivery date ${d.delivery_order_updated.delivery_date ? `set to ${d.delivery_order_updated.delivery_date}` : "set to TBC — removed from its team"}`);
     }
@@ -2407,6 +2413,26 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
           }} />
       )}
 
+      {/* Edit Order money actions (2026-10-09) */}
+      {editPayOpen && editingOrder && editLegacy?.id && (
+        <RecordPaymentModal
+          customer={{ id: editLegacy.customer_id || null, name: editingOrder.customer_name, phone: editingOrder.customer_contact }}
+          orders={[{ id: editLegacy.id, so_number: editingOrder.order_number, order_date: editingOrder.order_date,
+            balance: paymentSummary?.balance ?? (editLegacy.balance != null ? Number(editLegacy.balance) : orderBalance(editingOrder)), order_amount: orderTotal(editingOrder) }]}
+          initiatingOrderId={editLegacy.id}
+          company={companyInfo}
+          onClose={() => setEditPayOpen(false)}
+          onRecorded={async () => { setEditPayOpen(false); await refreshEditMoney(); }} />
+      )}
+      {editPayHistory && editingOrder && (
+        <PaymentHistoryModal salesOrderId={editingOrder.id} title={`Payment history — SO ${editingOrder.order_number || ""}`} onClose={() => setEditPayHistory(false)} />
+      )}
+      {editDeposit && editingOrder && (
+        <DepositEditModal salesOrderId={editingOrder.id} orderNumber={editingOrder.order_number}
+          current={{ initial_deposit: paymentSummary?.original_deposit ?? 0, payment_method: editingOrder.payment_method || null, payment_proofs: editingOrder.payment_proofs }}
+          onClose={() => setEditDeposit(false)} onSaved={async () => { setEditDeposit(false); await refreshEditMoney(); }} />
+      )}
+
       {/* Record Payment for the viewed SO — same modal as the Customers page,
           allocated to this SO's legacy orders row plus (when this order
           resolves to a real customer_id) any of that customer's other
@@ -2977,69 +3003,17 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                     deposit; payment is collected later on the customer payment
                     screen ("Collect Deposit" / "Collect Balance"). ── */}
               {editId && (<>
-              {/* Total recap + deposit / payment collected + balance */}
-              <div className="border-t border-gray-100 pt-3 space-y-2">
-                {!editId && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Total{gstRate > 0 ? " (incl. GST)" : ""}</span>
-                    <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                {/* 117: an existing deposit is changed only through an approval request. */}
-                <PendingDepositNotice request={pendingDepositRequest} order={editingOrder} />
-                <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} disabled={!!pendingDepositRequest} />
-                {!pendingDepositRequest && depositChangeOf(editingOrder, form).changed && (
-                  <DepositChangeReason value={form.deposit_change_reason} onChange={v => setForm(f => ({ ...f, deposit_change_reason: v }))} />
-                )}
-                <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-                  <span className="text-sm font-medium text-gray-500">Balance</span>
-                  <span className="text-lg font-bold text-violet-700">RM {balanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
-                <select value={form.payment_method} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))} disabled={!!pendingDepositRequest}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400 disabled:bg-gray-50 disabled:text-gray-400">
-                  <option value="">—</option>
-                  {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-
+              {/* Money is read-only here (2026-10-09): Collect Payment adds a separate
+                  payment; Edit Original Deposit corrects the deposit (audited, no approval). */}
+              <PaymentSummaryPanel summary={paymentSummary}
+                onCollect={editLegacy?.id ? () => setEditPayOpen(true) : null}
+                onHistory={() => setEditPayHistory(true)}
+                onEditDeposit={() => setEditDeposit(true)} />
+              {form.payment_method && <p className="text-xs text-gray-500">Deposit payment method: <b>{form.payment_method}</b></p>}
               {form.payment_method === "Instalment" && (
                 <NumField label="Admin Charges (RM)" value={form.admin_charges} onChange={v => setForm(f => ({ ...f, admin_charges: v }))}
                   disabled={editId && pendingAmendment?.status === "pending"} />
               )}
-
-              {/* Payment Proofs */}
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Proof {form.status === "confirmed" && <span className="text-red-500">*</span>}</label>
-                <div className="space-y-1">
-                  {(form.payment_proofs || []).map((url, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2 py-1">
-                      <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-violet-600 underline truncate">{url.split("/").pop()}</a>
-                      {!pendingDepositRequest && <button type="button" onClick={() => setForm(f => ({ ...f, payment_proofs: f.payment_proofs.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600">✕</button>}
-                    </div>
-                  ))}
-                </div>
-                {!pendingDepositRequest && <label className="mt-1 flex items-center gap-2 text-xs text-violet-600 cursor-pointer hover:text-violet-800">
-                  <span>+ Upload receipt</span>
-                  <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async e => {
-                    const file = e.target.files?.[0]; if (!file) return;
-                    try {
-                      await withLoading("Uploading receipt…", async () => {
-                        const token = await getToken();
-                        const fd = new FormData(); fd.append("file", file);
-                        const res = await fetch(`${API}/sales-orders/upload-attachment`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
-                        const d = await res.json();
-                        if (!d.url) throw new Error(d.error || "Upload failed");
-                        setForm(f => ({ ...f, payment_proofs: [...(f.payment_proofs || []), d.url] }));
-                      });
-                    } catch (err) { toast.error(err.message); }
-                    e.target.value = "";
-                  }} />
-                </label>}
-              </div>
               </>)}
 
               {/* ── Order details shown on the Items step for new orders, and in

@@ -5,7 +5,8 @@ import { printOfficialReceipt } from "./officialReceipt";
 import RecordPaymentModal, { allocatedByOrder } from "./RecordPaymentModal";
 import PaymentProofModal from "./PaymentProofModal";
 import PaymentLedgerRow from "./PaymentLedgerRow";
-import { DepositRequestModal, PaymentAmendmentModal, RequestHistoryModal } from "./AmendmentRequests";
+import { PaymentAmendmentModal, RequestHistoryModal } from "./AmendmentRequests";
+import { DepositEditModal, PaymentHistoryModal } from "./depositChange";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -400,10 +401,12 @@ function CustomerPage() {
           onRecorded={() => { setPayModal(null); if (detail) openDetail(detail.customer); }} />
       )}
 
-      {depositReq && <DepositRequestModal line={depositReq.line} mode={depositReq.mode} onClose={() => setDepositReq(null)} onDone={() => { setDepositReq(null); reloadDetail(); }} />}
+      {depositReq && <DepositEditModal salesOrderId={depositReq.line.sales_order_id} orderNumber={depositReq.line.so_number} mode={depositReq.mode}
+        current={{ initial_deposit: depositReq.line.amount, payment_method: depositReq.line.payment_method || null, payment_proofs: depositReq.line.proof_url ? String(depositReq.line.proof_url).split(",") : [] }}
+        onClose={() => setDepositReq(null)} onSaved={() => { setDepositReq(null); reloadDetail(); }} />}
       {paymentReq && <PaymentAmendmentModal payment={paymentReq.payment} mode={paymentReq.mode} onClose={() => setPaymentReq(null)} onDone={() => { setPaymentReq(null); reloadDetail(); }} />}
-      {historyFor && <RequestHistoryModal kind={historyFor.source_type === "SO_DEPOSIT" ? "deposit" : "payment"} salesOrderId={historyFor.sales_order_id} paymentId={historyFor.id}
-        title={historyFor.source_type === "SO_DEPOSIT" ? `Deposit history — SO ${historyFor.so_number || ""}` : "Payment change history"} onClose={() => setHistoryFor(null)} />}
+      {historyFor && historyFor.source_type === "SO_DEPOSIT" && <PaymentHistoryModal salesOrderId={historyFor.sales_order_id} title={`Payment history — SO ${historyFor.so_number || ""}`} onClose={() => setHistoryFor(null)} />}
+      {historyFor && historyFor.source_type !== "SO_DEPOSIT" && <RequestHistoryModal kind="payment" paymentId={historyFor.id} title="Payment change history" onClose={() => setHistoryFor(null)} />}
 
       {/* Proof-only edit (Edit proof / Add proof) */}
       {proofEdit && (

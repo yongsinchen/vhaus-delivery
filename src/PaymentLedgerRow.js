@@ -51,12 +51,12 @@ export default function PaymentLedgerRow({ p, user, onReceipt, onViewProof, onEd
           <button onClick={() => onRemove?.(p)} title={p.approval_status === "pending" ? "Delete this payment (before Finance approves it)" : "Remove payment"}
             className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 rounded-lg px-2 py-1">{p.approval_status === "pending" ? "🗑 Delete" : "Remove"}</button>
         )}
-        {a.deposit?.canEdit && <button onClick={() => onDepositRequest?.(p, "edit")} className={btn} data-testid="edit-deposit-btn" title="Request a change to this deposit (Manager / Finance approval)">✏️ Edit Deposit</button>}
-        {a.deposit?.canReverse && <button onClick={() => onDepositRequest?.(p, "reverse")} className={btn} data-testid="reverse-deposit-btn" title="Request a reversal to RM0 (Manager / Finance approval)">↩ Reverse Deposit</button>}
-        {a.deposit?.blockedReason && <span className="text-[10px] text-gray-400" title={a.deposit.blockedReason}>Ask Finance</span>}
+        {a.deposit?.canEdit && <button onClick={() => onDepositRequest?.(p, "edit")} className={btn} data-testid="edit-deposit-btn" title="Edit this deposit — saved immediately and recorded in the history">✏️ Edit Deposit</button>}
+        {a.deposit?.canReverse && <button onClick={() => onDepositRequest?.(p, "reverse")} className={btn} data-testid="reverse-deposit-btn" title="Reverse this deposit to RM0 — saved immediately and recorded in the history">↩ Reverse Deposit</button>}
+        {a.deposit?.blockedReason && <span className="text-[10px] text-gray-400" title={a.deposit.blockedReason}>Edit in order</span>}
         {a.requestChange && <button onClick={() => onPaymentRequest?.(p, "edit")} className={btn} data-testid="request-change-btn" title="This payment is approved — request a change (Manager / Finance approval)">✏️ Request change</button>}
         {a.requestChange && <button onClick={() => onPaymentRequest?.(p, "reverse")} className={btn} data-testid="request-reversal-btn" title="Request a reversal (Manager / Finance approval)">↩ Request reversal</button>}
-        {(dep ? p.deposit_request : p.amendment_request) && <button onClick={() => onHistory?.(p)} className={btn} data-testid="history-btn" title="Amendment history and approval status">🕘 History</button>}
+        {(dep ? !!p.sales_order_id : !!p.amendment_request) && <button onClick={() => onHistory?.(p)} className={btn} data-testid="history-btn" title={dep ? "Payments and deposit change history of this order" : "Change requests of this payment"}>🕘 History</button>}
       </div>
     </div>
   );

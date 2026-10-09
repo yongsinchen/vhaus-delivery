@@ -33,12 +33,13 @@ export function ledgerActions(p, user) {
     edit: pendingEdit ? { mode: "pending", label: "Edit Payment", title: "Edit this payment — amount, date, method, reference, proof, allocation (while it is pending Finance approval)" } : { mode: "none" },
     // An APPROVED payment is never removed directly — it gets a reversal request instead (requestChange below).
     canRemove: source === SOURCE_PAYMENT && !!p?.id && p.approval_status !== "approved" && (isPaymentManager(user) || pendingEdit),
-    // SO deposit: Edit / Reverse are approval requests; one pending request at a time.
+    // SO deposit: Edit / Reverse are DIRECT, audited edits (no approval — owner decision 2026-10-09).
+    // An older order without a separately recorded deposit shows its paid-to-date here, so it is edited
+    // from Edit Order, where the deposit is shown exactly as the ledger counts it.
     deposit: source === SOURCE_DEPOSIT ? (() => {
-      const pending = p?.deposit_request?.status === "pending";
       const allowed = canRequestChange(user) && !!p?.sales_order_id && !p?.legacy_baseline;
-      return { canEdit: allowed && !pending, canReverse: allowed && !pending && Number(p?.amount) > 0, pending,
-        blockedReason: p?.legacy_baseline ? "Older order without a separately recorded deposit — ask Finance" : null };
+      return { canEdit: allowed, canReverse: allowed && Number(p?.amount) > 0,
+        blockedReason: p?.legacy_baseline ? "Older order — edit its deposit from Edit Order" : null };
     })() : null,
     // APPROVED payment: change / reversal requests.
     requestChange: source === SOURCE_PAYMENT && !!p?.id && p.approval_status === "approved" && canRequestChange(user)

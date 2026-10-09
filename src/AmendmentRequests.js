@@ -1,6 +1,6 @@
 // Deposit-change + approved-payment amendment requests (migration 117) — UI.
 //
-//   DepositRequestModal     Customer Profile → Payment History → Edit / Reverse Deposit
+//   (deposit edits are direct since 2026-10-09 — see depositChange.js; older deposit requests still show here)
 //   PaymentAmendmentModal   … → an APPROVED payment → Request change / Request reversal
 //   RequestHistoryModal     every request of one deposit / payment (before → after, decision)
 //   AmendmentApprovalQueue  Finance → Amendments: Manager / Finance / Master approve or reject
@@ -58,53 +58,6 @@ const Shell = ({ title, children, onClose, footer }) => (
 );
 const Field = ({ label, children }) => <label className="block"><span className="block text-xs font-medium text-gray-500 mb-1">{label}</span>{children}</label>;
 const inputCls = "w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-violet-400";
-
-/** Edit or reverse an SO deposit. Uses only the fields a deposit actually has: amount, method, proofs (no reference / date of its own). */
-export function DepositRequestModal({ line, mode, onClose, onDone }) {
-  const toast = useToast();
-  const reverse = mode === "reverse";
-  const [amount, setAmount] = useState(String(line.amount ?? ""));
-  const [method, setMethod] = useState(line.payment_method || "");
-  const [proofs, setProofs] = useState(parseProofs(line.proof_url ? String(line.proof_url).split(",") : []));
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (!reason.trim()) { toast.error("Enter a reason"); return; }
-    setBusy(true);
-    try {
-      await send(`${API}/sales-orders/${line.sales_order_id}/deposit-requests`, reverse
-        ? { request_type: "reverse", reason }
-        : { request_type: "edit", initial_deposit: Number(amount), payment_method: method || null, payment_proofs: JSON.stringify(proofs), reason });
-      toast.success(reverse ? "Deposit reversal submitted for approval" : "Deposit change submitted for approval");
-      onDone?.();
-    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
-  };
-  return (
-    <Shell title={`${reverse ? "Reverse" : "Edit"} deposit — SO ${line.so_number || ""}`} onClose={onClose}
-      footer={<><button onClick={onClose} className="px-3 py-1.5 rounded-lg border text-xs">Cancel</button>
-        <button onClick={submit} disabled={busy} data-testid="submit-deposit-request" className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs disabled:opacity-50">{busy ? "Submitting…" : "Submit for approval"}</button></>}>
-      <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">Needs Manager / Finance approval. The current deposit ({money(line.amount)}) stays until it is approved.</div>
-      {reverse ? (
-        <p className="text-xs text-gray-600">Proposed: reverse the deposit to <b>RM 0.00</b>. The original record, receipt number and proof are kept.</p>
-      ) : (<>
-        <Field label="Deposit amount (RM)"><input type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className={inputCls} aria-label="Deposit amount" /></Field>
-        <Field label="Payment method"><select value={method} onChange={e => setMethod(e.target.value)} className={inputCls + " bg-white"} aria-label="Payment method">
-          <option value="">—</option>{[...new Set([method, ...PAYMENT_METHODS].filter(Boolean))].map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
-        <Field label="Payment proof">
-          <div className="space-y-1">{proofs.map((u, i) => (
-            <div key={u + i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2 py-1"><a href={u} target="_blank" rel="noreferrer" className="flex-1 text-violet-600 underline truncate">{u.split("/").pop()}</a>
-              <button type="button" onClick={() => setProofs(p => p.filter((_, j) => j !== i))} className="text-red-400" aria-label="Remove proof">✕</button></div>))}</div>
-          <input type="file" accept="image/*,application/pdf" className="mt-1 text-xs" aria-label="Upload proof" onChange={async e => {
-            const f = e.target.files?.[0]; if (!f) return;
-            try { const url = await uploadProof(f); setProofs(p => [...p, url]); } catch (err) { toast.error(err.message); } e.target.value = "";
-          }} />
-          <p className="text-[11px] text-gray-400 mt-1">Removing a proof here only proposes it; the original files are never deleted.</p>
-        </Field>
-      </>)}
-      <Field label="Reason (required)"><textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} className={inputCls} aria-label="Reason" /></Field>
-    </Shell>
-  );
-}
 
 /** Change or reverse an APPROVED payment (pending payments keep the direct Edit Payment flow). */
 export function PaymentAmendmentModal({ payment, mode, onClose, onDone }) {

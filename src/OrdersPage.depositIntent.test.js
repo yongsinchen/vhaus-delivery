@@ -1,22 +1,24 @@
-// Stale SO edit form guard: editing a Sales Order must send the Deposit value
-// the form LOADED (deposit_loaded) so the backend can tell an untouched
-// Deposit field from a real change. Without it, a payment recorded by someone
-// else while the form was open would rewrite initial_deposit on save.
+// Stale SO edit form guard: a payment recorded by someone else while the edit
+// form is open must never rewrite the original deposit on save. Since
+// 2026-10-09 this holds structurally — Edit Order sends NO money fields at all
+// (the deposit has its own audited editor with its own stale-form check, and
+// new money is Collect Payment), and the backend refuses an old client that
+// still sends a changed deposit (409 deposit_edit_separately).
 const fs = require("fs");
 const path = require("path");
 
 const src = fs.readFileSync(path.join(__dirname, "OrdersPage.js"), "utf8").replace(/\r\n/g, "\n");
 
-describe("Sales Order edit — Deposit intent token", () => {
-  test("edits send deposit_loaded from the order the form loaded", () => {
-    expect(src).toMatch(/if \(editId\) body\.deposit_loaded = editingOrder\?\.deposit != null \? Number\(editingOrder\.deposit\) : null;/);
+describe("Sales Order edit — money is never part of an order edit", () => {
+  test("edits strip deposit, payment method and proofs from the request", () => {
+    expect(src).toMatch(/if \(editId\) \{ delete body\.deposit; delete body\.payment_method; delete body\.payment_proofs; \}/);
   });
 
-  test("the token is set before the PUT request is sent", () => {
-    const token = src.indexOf("body.deposit_loaded =");
+  test("…before the PUT request is sent", () => {
+    const strip = src.indexOf("if (editId) { delete body.deposit;");
     const send = src.indexOf("const res = await fetch(url, { method, headers, body: JSON.stringify(body) });");
-    expect(token).toBeGreaterThan(-1);
-    expect(send).toBeGreaterThan(token);
+    expect(strip).toBeGreaterThan(-1);
+    expect(send).toBeGreaterThan(strip);
   });
 
   test("editingOrder is the order loaded when the drawer opened", () => {
