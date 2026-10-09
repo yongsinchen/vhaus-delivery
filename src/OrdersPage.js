@@ -8,6 +8,7 @@ import RecordPaymentModal from "./RecordPaymentModal";
 import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 import { addDaysISO } from "./malaysiaDate";
+import { parseProofs, depositChangeOf, PendingDepositNotice, DepositChangeReason } from "./depositChange";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -694,6 +695,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   // drawer (null when there's none). `order`/`legacy_order` from
   // GET /sales-orders/:id are ALWAYS canonical — this is presentation-only.
   const [pendingAmendment, setPendingAmendment] = useState(null);
+  const [pendingDepositRequest, setPendingDepositRequest] = useState(null); // migration 117: deposit change waiting for approval
   // View drawer only: when a "pending" amendment is shown, this toggles the
   // primary display between the proposed snapshot (default) and the current
   // approved order. Also doubles as an expand toggle for rejected/conflict.
@@ -992,7 +994,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
       const res = await fetch(`${API}/sales-orders/${order.id}`, { headers });
       if (!res.ok) { toast.error("Failed to load order detail"); return { order, legacy_order: null, pending_amendment: null }; }
       const d = await res.json();
-      return { order: d.order || order, legacy_order: d.legacy_order || null, pending_amendment: d.pending_amendment || null };
+      return { order: d.order || order, legacy_order: d.legacy_order || null, pending_amendment: d.pending_amendment || null, pending_deposit_request: d.pending_deposit_request || null };
     } catch { toast.error("Network error loading order"); return { order, legacy_order: null, pending_amendment: null }; }
   };
 
@@ -1244,7 +1246,8 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   const openEdit = async (o) => {
     // Load the full order behind the overlay so the drawer opens ready,
     // instead of flashing stale/empty form fields.
-    const { order: fullOrder, legacy_order, pending_amendment } = await withLoading("Loading order…", () => getFullOrder(o));
+    const { order: fullOrder, legacy_order, pending_amendment, pending_deposit_request } = await withLoading("Loading order…", () => getFullOrder(o));
+    setPendingDepositRequest(pending_deposit_request || null);
     setEditId(o.id);
     setArrivalItems(parseLegacyArrival(legacy_order));
     setEditingOrder(fullOrder);
@@ -1270,7 +1273,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
       delivery_time_slot: f.delivery_time_slot || "",
       delivery_address: f.delivery_address || "",
       remark: f.remark || "", internal_remark: f.internal_remark || "",
-      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: (() => { try { return JSON.parse(f.payment_proofs || "[]"); } catch { return []; } })(),
+      discount: f.discount ?? "", deposit: f.deposit ?? "", payment_method: f.payment_method || "", admin_charges: f.admin_charges ?? "", payment_proofs: parseProofs(f.payment_proofs), deposit_change_reason: "",
       branch_id: f.branch_id || "", salesman_names: f.salesman_name || "",
       country: f.country || "", gst_rate: f.gst_rate ?? 0, gst_waived: f.gst_waived || false,
       items: (f.sales_order_items || []).map(it => ({
@@ -1636,12 +1639,25 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     // this form was open can never rewrite the upfront deposit; a real Deposit
     // change on a stale form is refused (409 stale_deposit) instead of guessed.
     if (editId) body.deposit_loaded = editingOrder?.deposit != null ? Number(editingOrder.deposit) : null;
+    // 117: a change to an EXISTING deposit is submitted for Manager / Finance approval (never applied here).
+    if (editId) {
+      const dep = depositChangeOf(editingOrder, form);
+      if (dep.changed) {
+        if (!String(form.deposit_change_reason || "").trim()) { setSaving(false); setFormError("Enter a reason for the deposit change — it needs Manager / Finance approval."); return; }
+        body.deposit_change_reason = form.deposit_change_reason.trim();
+      }
+    }
     const url = editId ? `${API}/sales-orders/${editId}` : `${API}/sales-orders`;
     const method = editId ? "PUT" : "POST";
     const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
     const d = await res.json();
     setSaving(false);
     if (!res.ok) { setFormError(d.error || "Failed to save"); return; }
+    if (d.deposit_change_request) {
+      toast.warning("Deposit change submitted for Manager / Finance approval — the order keeps its current deposit until it is approved.");
+    } else if (d.deposit_change_error) {
+      toast.error(`Order saved, but the deposit change was NOT submitted: ${d.deposit_change_error.error}`);
+    }
     if (d.pending_amendment) {
       toast.warning(d.message || "This is a critical change — submitted for manager approval. The order's live data has NOT been changed yet.");
     }
@@ -2969,7 +2985,12 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                     <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
+                {/* 117: an existing deposit is changed only through an approval request. */}
+                <PendingDepositNotice request={pendingDepositRequest} order={editingOrder} />
+                <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} disabled={!!pendingDepositRequest} />
+                {!pendingDepositRequest && depositChangeOf(editingOrder, form).changed && (
+                  <DepositChangeReason value={form.deposit_change_reason} onChange={v => setForm(f => ({ ...f, deposit_change_reason: v }))} />
+                )}
                 <div className="flex items-center justify-between border-t border-gray-100 pt-2">
                   <span className="text-sm font-medium text-gray-500">Balance</span>
                   <span className="text-lg font-bold text-violet-700">RM {balanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -2978,8 +2999,8 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
 
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
-                <select value={form.payment_method} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
+                <select value={form.payment_method} onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))} disabled={!!pendingDepositRequest}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400 disabled:bg-gray-50 disabled:text-gray-400">
                   <option value="">—</option>
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
@@ -2997,11 +3018,11 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                   {(form.payment_proofs || []).map((url, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2 py-1">
                       <a href={url} target="_blank" rel="noreferrer" className="flex-1 text-violet-600 underline truncate">{url.split("/").pop()}</a>
-                      <button type="button" onClick={() => setForm(f => ({ ...f, payment_proofs: f.payment_proofs.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600">✕</button>
+                      {!pendingDepositRequest && <button type="button" onClick={() => setForm(f => ({ ...f, payment_proofs: f.payment_proofs.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600">✕</button>}
                     </div>
                   ))}
                 </div>
-                <label className="mt-1 flex items-center gap-2 text-xs text-violet-600 cursor-pointer hover:text-violet-800">
+                {!pendingDepositRequest && <label className="mt-1 flex items-center gap-2 text-xs text-violet-600 cursor-pointer hover:text-violet-800">
                   <span>+ Upload receipt</span>
                   <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async e => {
                     const file = e.target.files?.[0]; if (!file) return;
@@ -3017,7 +3038,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                     } catch (err) { toast.error(err.message); }
                     e.target.value = "";
                   }} />
-                </label>
+                </label>}
               </div>
               </>)}
 

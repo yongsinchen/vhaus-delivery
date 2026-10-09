@@ -5,6 +5,7 @@ import { printOfficialReceipt } from "./officialReceipt";
 import RecordPaymentModal, { allocatedByOrder } from "./RecordPaymentModal";
 import PaymentProofModal from "./PaymentProofModal";
 import PaymentLedgerRow from "./PaymentLedgerRow";
+import { DepositRequestModal, PaymentAmendmentModal, RequestHistoryModal } from "./AmendmentRequests";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -152,6 +153,12 @@ function CustomerPage() {
       voided: p.approval_status === "rejected",
     });
   };
+
+  // Migration 117: deposit / approved-payment changes are approval requests.
+  const [depositReq, setDepositReq] = useState(null);   // { line, mode }
+  const [paymentReq, setPaymentReq] = useState(null);   // { payment, mode }
+  const [historyFor, setHistoryFor] = useState(null);   // ledger line
+  const reloadDetail = () => { if (detail) openDetail(detail.customer); };
 
   const deletePayment = async (p) => {
     if (!p?.id) return; // deposit lines have no payment row to delete
@@ -371,7 +378,9 @@ function CustomerPage() {
                       {(detail.payments || []).map((p, idx) => (
                         <PaymentLedgerRow key={p.id || p.sales_order_id || `dep-${idx}`} p={p} user={user}
                           onReceipt={reprintReceipt} onViewProof={setProofView} onEditProof={(pay, mode) => setProofEdit({ payment: pay, mode })}
-                          onEdit={(pay) => openAmend(pay)} onRemove={deletePayment} />
+                          onEdit={(pay) => openAmend(pay)} onRemove={deletePayment}
+                          onDepositRequest={(line, mode) => setDepositReq({ line, mode })} onPaymentRequest={(pay, mode) => setPaymentReq({ payment: pay, mode })}
+                          onHistory={setHistoryFor} />
                       ))}
                     </div>
                   </div>
@@ -390,6 +399,11 @@ function CustomerPage() {
           reloadOrders={payModal.amend ? undefined : async () => { const r = await af(`${API}/customers/${payModal.customer.id}`); return (await r.json()).orders || []; }}
           onRecorded={() => { setPayModal(null); if (detail) openDetail(detail.customer); }} />
       )}
+
+      {depositReq && <DepositRequestModal line={depositReq.line} mode={depositReq.mode} onClose={() => setDepositReq(null)} onDone={() => { setDepositReq(null); reloadDetail(); }} />}
+      {paymentReq && <PaymentAmendmentModal payment={paymentReq.payment} mode={paymentReq.mode} onClose={() => setPaymentReq(null)} onDone={() => { setPaymentReq(null); reloadDetail(); }} />}
+      {historyFor && <RequestHistoryModal kind={historyFor.source_type === "SO_DEPOSIT" ? "deposit" : "payment"} salesOrderId={historyFor.sales_order_id} paymentId={historyFor.id}
+        title={historyFor.source_type === "SO_DEPOSIT" ? `Deposit history — SO ${historyFor.so_number || ""}` : "Payment change history"} onClose={() => setHistoryFor(null)} />}
 
       {/* Proof-only edit (Edit proof / Add proof) */}
       {proofEdit && (

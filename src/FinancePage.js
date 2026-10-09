@@ -6,6 +6,7 @@ import { printOfficialReceipt } from "./officialReceipt";
 import { printHtml } from "./printDocument";
 import { malaysiaToday, malaysiaMonthStart } from "./malaysiaDate";
 import { LinkedOrdersCell } from "./paymentSoLinks";
+import { AmendmentApprovalQueue, RequestBadge } from "./AmendmentRequests";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -18,7 +19,7 @@ const AGING_STYLE = {
   "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "Warning", sub: "60-90 days" },
   "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "Critical", sub: "90+ days" },
 };
-const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile"];
+const TABS = ["Overview", "Aging Detail", "Payments", "Collections", "Reconcile", "Amendments"];
 
 function FinancePage() {
   const { user, activeCompanyId } = useAuth();
@@ -449,17 +450,19 @@ function FinancePage() {
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">{p.payment_method && p.payment_method !== "Deposit" ? p.payment_method : "—"}</span>
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{p._deposit ? (p.so_number ? `SO ${p.so_number}` : "-") : (p.reference_no || "-")}</td>
-                    <td className="px-4 py-2 text-xs"><LinkedOrdersCell links={p.linked_orders} /></td>
+                    <td className="px-4 py-2 text-xs"><LinkedOrdersCell links={p.linked_orders} /><RequestBadge request={p._deposit ? p.deposit_request : p.amendment_request} prefix={p._deposit ? "Deposit change" : "Change"} /></td>
                     <td className={`px-4 py-2 text-right font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</td>
                     {isMaster && (
                       <td className="px-4 py-2 text-right" onClick={e => e.stopPropagation()}>
-                        {p.id ? (
+                        {p.id && p.approval_status === "approved" ? (
+                          <span className="text-[10px] text-gray-400" title="An approved payment is reversed through a request (Customer Profile → Payment History) that another Manager / Finance approves">reverse via request</span>
+                        ) : p.id ? (
                           <button onClick={() => deletePayment(p)} disabled={deletingId === p.id}
                             className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed">
                             {deletingId === p.id ? "Deleting…" : "Delete"}
                           </button>
                         ) : (
-                          <span className="text-[10px] text-gray-400" title="Deposit is edited on the order">on order</span>
+                          <span className="text-[10px] text-gray-400" title="Deposit changes are requested from Edit Order or Customer Profile and approved by Manager / Finance">deposit</span>
                         )}
                       </td>
                     )}
@@ -496,6 +499,9 @@ function FinancePage() {
       )}
 
       {/* TAB 4: Reconcile */}
+      {/* Migration 117: deposit + approved-payment change requests — one approval queue */}
+      {tab === 5 && <AmendmentApprovalQueue user={user} />}
+
       {tab === 4 && (
         <div className="space-y-4">
           {/* Upload buttons */}

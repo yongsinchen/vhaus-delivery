@@ -25,12 +25,12 @@ describe("source types are explicit", () => {
     expect(sourceOf({ _deposit: true })).toBe("SO_DEPOSIT");
     expect(sourceOf({ id: "x" })).toBe("PAYMENT_TRANSACTION");
   });
-  test("a deposit line shows 'Order deposit', its SO, the ORDER date, who recorded it and that it has no separate approval", () => {
+  test("a deposit line shows 'Order deposit', its SO, the ORDER date, who recorded it and its Deposit label", () => {
     renderRow(dep47, mgr);
     expect(screen.getByTestId("source-badge")).toHaveTextContent("Order deposit");
     expect(screen.getByText("SO 56347")).toBeInTheDocument();
     expect(screen.getByTestId("payment-meta")).toHaveTextContent(/Order date .*Recorded by Jimmy/);
-    expect(screen.getByTestId("approval-label")).toHaveTextContent("No separate approval");
+    expect(screen.getByTestId("approval-label")).toHaveTextContent("Deposit");
     expect(screen.getByText("OR #1200")).toBeInTheDocument();
     expect(screen.getByTestId("ledger-row")).toHaveAttribute("data-source", "SO_DEPOSIT");
   });
@@ -63,20 +63,22 @@ describe("which action is offered (the server re-checks every one)", () => {
     expect(ledgerActions(pay1265, { id: "f", role: "finance" }).edit.mode).toBe("pending");
     expect(ledgerActions(pay1265, other).edit.mode).toBe("none");
   });
-  test("a deposit line offers NO payment edit and no Remove (it has no payment row) — it points to the order", () => {
+  test("a deposit line offers NO payment edit and no Remove (it has no payment row) — changes are approval requests (migration 117)", () => {
     const a = ledgerActions(dep47, mgr);
     expect(a.edit.mode).toBe("none");
     expect(a.canRemove).toBe(false);
-    expect(a.onOrder).toBe(true);
+    expect(a.deposit.canEdit).toBe(true);
+    expect(a.deposit.canReverse).toBe(true);
     expect(a.proof.mode).toBe("none");
   });
-  test("rendered: the pending payment has Edit Payment; the deposit shows 'on order' and no Edit button", () => {
+  test("rendered: the pending payment has Edit Payment; the deposit offers Edit / Reverse Deposit requests, never Edit Payment", () => {
     const { unmount } = renderRow(pay1265, jimmy);
     expect(screen.getByTestId("edit-payment-btn")).toHaveTextContent("Edit Payment");
     unmount();
     renderRow(dep47, mgr);
     expect(screen.queryByTestId("edit-payment-btn")).not.toBeInTheDocument();
-    expect(screen.getByTestId("on-order")).toBeInTheDocument();
+    expect(screen.getByTestId("edit-deposit-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("reverse-deposit-btn")).toBeInTheDocument();
   });
   test("a rejected payment is locked: no edit, proof locked", () => {
     const a = ledgerActions({ ...pay1265, approval_status: "rejected" }, mgr);
