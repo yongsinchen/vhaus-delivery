@@ -494,7 +494,7 @@ function ArrivalDateInput({ value, disabled, onChange, className }) {
   );
 }
 
-function OrdersPage({ onNavigateToAmendments, openOrderId, onOrderOpened } = {}) {
+function OrdersPage({ onNavigateToAmendments, openOrderId, onOrderOpened, onViewPaymentHistory } = {}) {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -1360,6 +1360,18 @@ function OrdersPage({ onNavigateToAmendments, openOrderId, onOrderOpened } = {})
   const printSO = (order) => {
     if (!order) return;
     printSalesOrder(order, null, companyInfo, branches.find(b => b.id === order.branch_id)?.name);
+  };
+
+  // Read-only deep link from Edit Order → the customer's Payment History,
+  // filtered to this SO. Navigation only — never records or edits a payment.
+  const handleViewPaymentHistory = () => {
+    if (!editingOrder) return;
+    if (!editingOrder.customer_id) {
+      toast.error("This order has no linked customer profile — open payment history from the customer's record instead.");
+      return;
+    }
+    if (!window.confirm("Leave Edit Order to view this customer's payment history? Any unsaved changes on this form won't be saved.")) return;
+    onViewPaymentHistory?.({ customerId: editingOrder.customer_id, soId: editingOrder.id, soNumber: editingOrder.order_number });
   };
 
   const openSubmitPO = async (order) => await withLoading("Preparing purchase orders…", async () => {
@@ -2384,11 +2396,29 @@ function OrdersPage({ onNavigateToAmendments, openOrderId, onOrderOpened } = {})
                     <span className="font-bold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <NumField label="Deposit / Payment collected (RM)" value={form.deposit} onChange={v => setForm(f => ({ ...f, deposit: v }))} />
+                {/* Read-only payment summary — collection/editing moved to the
+                    customer payment screen (business decision). Save never
+                    modifies payment records. */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Order Total</span>
+                  <span className="font-semibold text-gray-900">RM {totalAfterDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Original Deposit</span>
+                  <span className="font-semibold text-gray-900">RM {(editingOrder?.initial_deposit != null ? Number(editingOrder.initial_deposit) : (Number(form.deposit) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Total Paid</span>
+                  <span className="font-semibold text-gray-900">RM {Math.max(0, totalAfterDiscount - balanceVal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
                 <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-                  <span className="text-sm font-medium text-gray-500">Balance</span>
+                  <span className="text-sm font-medium text-gray-500">Outstanding Balance</span>
                   <span className="text-lg font-bold text-violet-700">RM {balanceVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 </div>
+                <button type="button" onClick={handleViewPaymentHistory}
+                  className="w-full mt-1 text-sm font-medium text-violet-700 border border-violet-200 rounded-xl py-2 hover:bg-violet-50">
+                  View Payment History →
+                </button>
               </div>
 
               <div>

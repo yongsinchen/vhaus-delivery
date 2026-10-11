@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useDebounce, useLoading } from "./UIComponents";
 import { printOfficialReceipt } from "./officialReceipt";
+import { filterPaymentsForSo } from "./soPaymentFilter";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -12,7 +13,7 @@ const dmy = v => { if (!v) return ""; const d = new Date(String(v).length <= 10 
 const AGING_STYLE = { current: { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-700", label: "Current (0-30d)" }, "30_60": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-700", label: "30-60 days" }, "60_90": { bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700", label: "60-90 days" }, "90_plus": { bg: "bg-red-50", border: "border-red-200", text: "text-red-700", label: "90+ days" } };
 const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Credit Card / Debit Card", "Touch n Go", "Instalment", "Cash Rebate", "2C2P", "eZbeli"];
 
-function CustomerPage() {
+function CustomerPage({ openRequest = null, onConsumed = () => {}, onBackToOrder = null } = {}) {
   const { user, activeCompanyId } = useAuth();
   const toast = useToast();
   const { withLoading } = useLoading();
@@ -99,6 +100,39 @@ function CustomerPage() {
     setDetail(d);
     setDetailLoading(false);
   };
+
+  // Deep link from Edit Order → "View Payment History": open the SO's customer
+  // profile and filter the payment history to that SO. Company isolation is
+  // enforced by the backend (customer detail is company-scoped); we never match
+  // customers by name/phone — only the canonical customer_id passed in.
+  const [soFilter, setSoFilter] = useState(null); // { soNumber, soId, backOrderId }
+  useEffect(() => {
+    if (!openRequest) return;
+    const { customerId, soNumber, soId, orderId } = openRequest;
+    if (!customerId) {
+      toast.error("This order has no linked customer profile — open it from the customer's record instead.");
+      onConsumed();
+      return;
+    }
+    setSoFilter(soNumber ? { soNumber, soId, orderId: orderId ?? null, backOrderId: openRequest.backOrderId ?? null } : null);
+    openDetail({ id: customerId }).catch(() => toast.error("Failed to open customer profile"));
+    onConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
+  // Clearing the detail modal also clears any SO filter.
+  useEffect(() => { if (!detail) setSoFilter(null); }, [detail]);
+
+  // Payment rows to display: the whole history, or narrowed to one SO when a
+  // deep-link filter is active. The SO's legacy order id is resolved from the
+  // (company-scoped) detail by so_number; split/2C2P rows show only this SO's
+  // allocated share (see soPaymentFilter).
+  const soLegacyOrderId = soFilter && detail
+    ? (soFilter.orderId ?? (detail.orders || []).find(o => o.so_number === soFilter.soNumber)?.id ?? null)
+    : null;
+  const soFiltered = soFilter && detail
+    ? filterPaymentsForSo(detail.payments, { orderId: soLegacyOrderId, soNumber: soFilter.soNumber })
+    : null;
+  const paymentRows = soFiltered ? soFiltered.rows : (detail?.payments || []);
 
   const saveCustomer = async () => {
     try {
@@ -431,13 +465,23 @@ function CustomerPage() {
 
                   {/* Payments */}
                   <div>
-                    <h3 className="text-sm font-bold text-gray-700 mb-2">Payments ({(detail.payments || []).length})</h3>
-                    {(detail.payments || []).length === 0 && <p className="text-xs text-gray-400">No payments recorded</p>}
+                    {soFilter && (
+                      <div className="mb-2 flex items-center justify-between gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2 flex-wrap">
+                        <span className="text-xs font-semibold text-violet-700">Showing payments for SO{soFilter.soNumber} · {money(soFiltered?.total || 0)}</span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setSoFilter(null)} className="text-xs text-violet-700 underline hover:text-violet-900">Clear SO Filter</button>
+                          {onBackToOrder && <button onClick={() => onBackToOrder(soFilter.backOrderId)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700">← Back to Order</button>}
+                        </div>
+                      </div>
+                    )}
+                    <h3 className="text-sm font-bold text-gray-700 mb-2">Payments ({paymentRows.length})</h3>
+                    {paymentRows.length === 0 && <p className="text-xs text-gray-400">{soFilter ? "No payments recorded for this Sales Order" : "No payments recorded"}</p>}
                     <div className="space-y-2">
-                      {(detail.payments || []).map((p, idx) => (
+                      {paymentRows.map((p, idx) => (
                         <div key={p.id || `dep-${idx}`} className={`border rounded-xl p-3 flex items-center justify-between ${p._deposit ? "bg-violet-50 border-violet-100" : "bg-emerald-50 border-emerald-100"}`}>
                           <div>
-                            <span className={`text-sm font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(p.amount)}</span>
+                            <span className={`text-sm font-bold ${p._deposit ? "text-violet-700" : "text-emerald-700"}`}>{money(soFiltered ? p.so_amount : p.amount)}</span>
+                            {soFiltered && p.so_amount != null && Number(p.so_amount) !== Number(p.amount) && <span className="text-[10px] text-gray-400 ml-1">(of {money(p.amount)} split)</span>}
                             <span className="text-xs text-gray-500 ml-2">{p.payment_method}</span>
                             {p._deposit && p.so_number && <span className="text-xs text-gray-400 ml-2">SO {p.so_number}</span>}
                             {p.reference_no && <span className="text-xs text-gray-400 ml-2">Ref: {p.reference_no}</span>}

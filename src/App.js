@@ -1069,6 +1069,7 @@ export default function App() {
   const [globalSearching, setGlobalSearching] = useState(false);   // backend search in flight
   const globalSearchSeq = useRef(0);                               // ignore stale/out-of-order responses
   const [pendingOpenOrderId, setPendingOpenOrderId] = useState(null); // Sales Order to open on the Orders page
+  const [pendingOpenCustomer, setPendingOpenCustomer] = useState(null); // deep link: open a customer's payment history filtered to an SO
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
 
@@ -1601,7 +1602,7 @@ export default function App() {
     if (page === "overview") return <OverviewPage user={user} isSalesman={isSalesman} isMaster={isMaster} orders={calendarOrders} allCompanyOrders={calendarAllCompanyOrders} todayOrders={todayOrders} readyOrders={readyOrders} balanceOrders={balanceOrders} flaggedOrders={flaggedOrders} services={services} estCommission={estCommission} setPage={setPage} setScheduleDate={setScheduleDate} handleView={handleView} calMonthStr={calMonthStr} setCalMonthStr={setCalMonthStr} calSalesman={calSalesman} setCalSalesman={setCalSalesman} blockedDates={blockedDates} canViewDeliveryActivity={canViewDeliveryActivity} />;
 
     // ORDERS (unified — reads from sales_orders)
-    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} openOrderId={pendingOpenOrderId} onOrderOpened={() => setPendingOpenOrderId(null)} />;
+    if (page === "orders") return <OrdersPage onNavigateToAmendments={() => setPage("order-amendments")} openOrderId={pendingOpenOrderId} onOrderOpened={() => setPendingOpenOrderId(null)} onViewPaymentHistory={(req) => { if (!req) return; setPendingOpenCustomer({ ...req, backOrderId: req.soId ?? null }); setPage("customers"); }} />;
 
     // DELIVERIES
     if (page === "deliveries") return (
@@ -2006,7 +2007,7 @@ export default function App() {
     if (page === "driver") return <DriverPage />;
 
     // CUSTOMERS
-    if (page === "customers") return <CustomerPage />;
+    if (page === "customers") return <CustomerPage openRequest={pendingOpenCustomer} onConsumed={() => setPendingOpenCustomer(null)} onBackToOrder={(backOrderId) => { if (backOrderId) setPendingOpenOrderId(backOrderId); setPage("orders"); }} />;
 
     // FINANCE
     if (page === "finance") return <FinancePage />;
