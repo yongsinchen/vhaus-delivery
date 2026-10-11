@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import { matchPaymentOption } from "./paymentMethodMatch";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -238,8 +239,14 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
 
   const branchLine = esc((branchName || order.branch_name || order.sales_channel || "—").toString().toUpperCase());
   const idLabel = order.customer_id_type === "passport" ? "Passport No" : "I/C No";
+  // Tick the box whose canonical option matches the SO's stored payment_method,
+  // mapping cross-UI / legacy label variants (e.g. "Bank Transfer" → Online
+  // Transfer, "Credit Card" → Card, "Touch n Go" → E-Wallet). A missing or
+  // unrecognised value ticks NOTHING — never inferred from payments, never
+  // defaulted to Cash.
+  const checkedPay = matchPaymentOption(order.payment_method);
   const payOptions = PAYMENT_METHODS
-    .map(m => `<span class="pay-opt"><span class="chk${order.payment_method === m ? " on" : ""}"></span>${esc(m)}</span>`)
+    .map(m => `<span class="pay-opt"><span class="chk${checkedPay === m ? " on" : ""}"></span>${esc(m)}</span>`)
     .join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Order ${esc(order.order_number || "")}</title>
@@ -334,8 +341,10 @@ function printSalesOrder(order, signatureDataUrl, co, branchName) {
     .pay-grid { display: flex; flex-wrap: wrap; margin: 3px 0 6px; }
     .pay-opt { display: flex; align-items: center; gap: 6px; width: 33.33%; font-size: 10px; padding: 2px 0; color: #1f2937; }
     .chk { width: 11px; height: 11px; border: 1px solid #1f2937; border-radius: 2px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .chk.on { background: #1f2937; }
-    .chk.on:after { content: "✓"; color: #fff; font-size: 8px; font-weight: 800; line-height: 1; }
+    /* Print-safe tick: a dark glyph inside the bordered box, visible whether or
+       not the browser/printer honours background fills (a white tick on a filled
+       box disappears when backgrounds are dropped). */
+    .chk.on:after { content: "✓"; color: #1f2937; font-size: 10px; font-weight: 900; line-height: 1; }
     .pay-fields { display: flex; gap: 28px; margin-top: 2px; }
     .pf { display: flex; align-items: flex-end; gap: 7px; font-size: 10px; }
     .pf .lab { font-weight: 600; color: #6b7280; }
