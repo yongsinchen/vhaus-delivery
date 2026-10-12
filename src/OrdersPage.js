@@ -52,11 +52,30 @@ const STATUS_LABEL = {
 };
 const statusLabel = (s) => STATUS_LABEL[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-// "Ordered" ticks on the items of a viewed SO — a personal checklist for
-// "have I placed this line with the supplier yet?". Deliberately NOT tied to
-// arrival/delivery state (those come from supplier DOs via /item-arrival);
-// nothing here is sent to the backend. Stored per browser and scoped to the
-// signed-in user so a shared terminal doesn't show one person's ticks to the next.
+// "Ordered" ticks on the items of a viewed SO — a shared checklist for
+// "has this line been placed with the supplier yet?". Deliberately NOT tied to
+// arrival/delivery state (those come from supplier DOs via /item-arrival).
+// Stored server-side per SO (/sales-orders/:id/item-marks, migrations 119/120):
+// everyone who can open the SO (managers; every salesman on a shared SO) sees
+// the same ticks and who made them. The list gets the count as _ordered_mark_count.
+// Both calls resolve to { marks: Set<item_key>, by: { item_key: { name, at } } }.
+const fetchOrderedMarks = async (orderId) => {
+  const res = await fetch(`${API}/sales-orders/${orderId}/item-marks`, { headers: await authHeaders() });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+  return { marks: new Set(d.marks || []), by: d.ticked_by || {} };
+};
+const saveOrderedMarks = async (orderId, { add = [], remove = [] }) => {
+  const res = await fetch(`${API}/sales-orders/${orderId}/item-marks`, {
+    method: "POST", headers: await authHeaders(), body: JSON.stringify({ add, remove }),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { const e = new Error(d.error || `HTTP ${res.status}`); e.status = res.status; throw e; }
+  return { marks: new Set(d.marks || []), by: d.ticked_by || {} };
+};
+// Legacy per-browser copy (before the ticks were stored server-side), scoped
+// to the signed-in user. Now only (a) uploaded once and cleared, and (b) the
+// fallback when the backend can't be reached for marks.
 const orderedMarksKey = (userId, orderId) => `pulseItemOrdered:${userId || "anon"}:${orderId}`;
 const readOrderedMarks = (userId, orderId) => {
   try {
@@ -719,7 +738,11 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   const [orderServices, setOrderServices] = useState(null); // services linked to the viewed order
   const [orderServiceReqs, setOrderServiceReqs] = useState([]); // service_requests for the viewed order (own, or all for approvers)
   const [serviceForm, setServiceForm] = useState(null);         // { mode: "create" } | { mode: "amend", request }
-  const [orderedMarks, setOrderedMarks] = useState(() => new Set()); // item ids ticked "ordered" on the viewed order — see orderedMarksKey
+  const [orderedMarks, setOrderedMarks] = useState(() => new Set()); // item ids ticked "ordered" on the viewed order — see fetchOrderedMarks
+  const marksLocalOnly = useRef(false); // backend unreachable for the viewed order's marks → old per-browser behaviour
+  const [marksOffline, setMarksOffline] = useState(false); // same, for the warning shown above the items
+  const marksOrderId = useRef(null);    // which order `orderedMarks` belongs to
+  const [orderedBy, setOrderedBy] = useState({}); // item_key → { name, at } of whoever ticked it
   const [arrivalSavingIdx, setArrivalSavingIdx] = useState(null); // index being saved (view or edit drawer)
 
   // Delivery Orders (Phase 2B) — shipments of the viewed sales order
@@ -1157,13 +1180,13 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
         // Drop ticks for items no longer on the order, so the list's
         // "all ordered" reminder (which only knows the item count) stays true.
         const markOrderId = full?.id ?? o.id;
-        let marks = readOrderedMarks(user?.id, markOrderId);
-        if (!pending_amendment || pending_amendment.status !== "pending") {
-          const live = new Set((full?.sales_order_items || []).map((it, i) => itemMarkId(it, i)));
-          const pruned = new Set([...marks].filter(m => live.has(m)));
-          if (pruned.size !== marks.size) { writeOrderedMarks(user?.id, markOrderId, pruned); marks = pruned; }
-        }
+        const live = (!pending_amendment || pending_amendment.status !== "pending")
+          ? new Set((full?.sales_order_items || []).map((it, i) => itemMarkId(it, i)))
+          : null;
+        const { marks, by } = await loadOrderedMarks(markOrderId, live);
+        marksOrderId.current = markOrderId;
         setOrderedMarks(marks);
+        setOrderedBy(by);
         setViewingOrder(full);
         setPendingAmendment(pending_amendment);
         setOrderServiceReqs([]);
@@ -1172,14 +1195,97 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     } catch (e) { toast.error("Failed to load order: " + e.message); }
   };
 
-  // Tick / untick an item's personal "ordered" reminder. Local only — it does
-  // not touch arrival, delivery, or anything the backend knows about.
-  const toggleOrderedMark = (orderId, markId) => {
-    const next = new Set(orderedMarks);
-    if (next.has(markId)) next.delete(markId); else next.add(markId);
-    setOrderedMarks(next);
-    writeOrderedMarks(user?.id, orderId, next);
+  // The order's shared marks from the server, folding in (once) any ticks
+  // this browser still holds from before they were stored server-side, and
+  // pruning keys for items no longer on the order (`live`; null = skip, e.g.
+  // while an amendment is pending). Falls back to the browser copy if the
+  // backend can't serve marks. Resolves to { marks, by }.
+  const loadOrderedMarks = async (orderId, live) => {
+    const legacy = readOrderedMarks(user?.id, orderId);
+    try {
+      let saved = await fetchOrderedMarks(orderId);
+      const add = [...legacy].filter(m => !saved.marks.has(m) && (!live || live.has(m)));
+      const remove = live ? [...saved.marks].filter(m => !live.has(m)) : [];
+      if (add.length || remove.length) saved = await saveOrderedMarks(orderId, { add, remove });
+      if (legacy.size) writeOrderedMarks(user?.id, orderId, new Set());
+      marksLocalOnly.current = false;
+      setMarksOffline(false);
+      return saved;
+    } catch {
+      marksLocalOnly.current = true;
+      setMarksOffline(true);
+      if (!live) return { marks: legacy, by: {} };
+      const pruned = new Set([...legacy].filter(m => live.has(m)));
+      if (pruned.size !== legacy.size) writeOrderedMarks(user?.id, orderId, pruned);
+      return { marks: pruned, by: {} };
+    }
   };
+
+  // Tick / untick an item's shared "ordered" mark. Saved per SO on the server;
+  // it does not touch arrival, delivery, or the order itself.
+  const toggleOrderedMark = async (orderId, markId) => {
+    const wasOrdered = orderedMarks.has(markId);
+    const flip = (on) => setOrderedMarks(prev => {
+      const n = new Set(prev);
+      if (on) n.add(markId); else n.delete(markId);
+      return n;
+    });
+    flip(!wasOrdered);
+    if (marksLocalOnly.current) {
+      const next = new Set(orderedMarks);
+      if (wasOrdered) next.delete(markId); else next.add(markId);
+      writeOrderedMarks(user?.id, orderId, next);
+      return;
+    }
+    try {
+      const { by } = await saveOrderedMarks(orderId, wasOrdered ? { remove: [markId] } : { add: [markId] });
+      if (marksOrderId.current === orderId) setOrderedBy(by);
+    } catch (e) {
+      flip(wasOrdered);
+      toast.error("Couldn't save the ordered tick: " + e.message);
+    }
+  };
+
+  // Keep the list's reminder in step with ticks made in the open SO.
+  useEffect(() => {
+    const id = marksOrderId.current;
+    if (id == null) return;
+    setOrders(prev => prev.some(x => x.id === id && x._ordered_mark_count !== orderedMarks.size)
+      ? prev.map(x => (x.id === id ? { ...x, _ordered_mark_count: orderedMarks.size } : x))
+      : prev);
+  }, [orderedMarks]); // eslint-disable-line
+
+  // One-off: upload every tick this browser still holds for the user (from
+  // before they were stored server-side), so they show for everyone without
+  // opening each SO first. Orders outside the active company 404 and stay
+  // local until that company is active; SOs the user may no longer see (403)
+  // are dropped.
+  useEffect(() => {
+    if (!user?.id || !companyId) return;
+    const prefix = orderedMarksKey(user.id, "");
+    let keys = [];
+    try { keys = Object.keys(localStorage).filter(k => k.startsWith(prefix)); } catch { return; }
+    if (!keys.length) return;
+    let cancelled = false;
+    (async () => {
+      let uploaded = 0;
+      for (const k of keys) {
+        if (cancelled) return;
+        const orderId = k.slice(prefix.length);
+        const marks = readOrderedMarks(user.id, orderId);
+        try {
+          if (marks.size) await saveOrderedMarks(orderId, { add: [...marks] });
+          writeOrderedMarks(user.id, orderId, new Set());
+          uploaded++;
+        } catch (e) {
+          if (e.status === 403) writeOrderedMarks(user.id, orderId, new Set());
+          else if (e.status !== 404) return; // backend not ready / offline — retry next visit
+        }
+      }
+      if (uploaded && !cancelled) loadOrders(page);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, companyId]); // eslint-disable-line
 
   // Services linked to this order (matched by so_number via the legacy order).
   const loadOrderServices = async (order) => {
@@ -1949,12 +2055,16 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
           const balanceDue = hasBalanceDue(o);
           // Order-placement reminder: delivery within ORDER_ITEMS_REMIND_DAYS
           // (or overdue) on a live SO → red until every item is ticked
-          // "ordered" in the SO view (per-user ticks), then green.
+          // "ordered" in the SO view (shared per SO), then green. The server
+          // count is authoritative; the browser copy only covers ticks not yet
+          // uploaded (or a backend that can't serve marks).
           const itemCount = o._item_count || (o.sales_order_items || []).length || 0;
           const dd = /^\d{4}-\d{2}-\d{2}/.test(o.delivery_date || "") ? o.delivery_date.slice(0, 10) : null;
           const remindOrder = itemCount > 0 && dd && daysBetween(today, dd) <= ORDER_ITEMS_REMIND_DAYS
             && !["draft", "cancelled", "delivered"].includes(o.status);
-          const tickedCount = remindOrder ? Math.min(readOrderedMarks(user?.id, o.id).size, itemCount) : 0;
+          const tickedCount = remindOrder
+            ? Math.min(Math.max(o._ordered_mark_count || 0, readOrderedMarks(user?.id, o.id).size), itemCount)
+            : 0;
           const allOrdered = remindOrder && tickedCount >= itemCount;
           const readiness = readinessOf(o);
           return (
@@ -2192,22 +2302,24 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                     <div className="bg-gray-50 rounded-xl p-2.5"><p className="text-xs text-gray-400">Time Slot</p><p className="font-medium text-violet-700">{view.delivery_time_slot || "-"}</p></div>
                   </div>
 
-                  {/* Items — each row doubles as a personal "ordered" tick (see orderedMarksKey) */}
+                  {/* Items — each row doubles as a shared "ordered" tick (see fetchOrderedMarks) */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-xs font-bold text-gray-500">ITEMS ({items.length})</p>
-                      <p className="text-[10px] text-gray-400">
-                        {items.filter((it, i) => orderedMarks.has(itemMarkId(it, i))).length}/{items.length} marked ordered · your reminder only
+                      <p className={`text-[10px] ${marksOffline ? "text-amber-600 font-medium" : "text-gray-400"}`}
+                        title={marksOffline ? "Couldn't reach the server for ordered ticks — they are saved in this browser only and won't show on other devices." : undefined}>
+                        {items.filter((it, i) => orderedMarks.has(itemMarkId(it, i))).length}/{items.length} marked ordered · {marksOffline ? "⚠ saved on this device only" : "shared with everyone on this SO"}
                       </p>
                     </div>
                     <div className="space-y-1.5">
                       {items.map((it, i) => {
                         const markId = itemMarkId(it, i);
                         const isOrdered = orderedMarks.has(markId);
+                        const tickedBy = isOrdered ? orderedBy[markId]?.name : null;
                         const toggle = () => toggleOrderedMark(o.id, markId);
                         return (
                         <div key={it.id || i} role="button" tabIndex={0} aria-pressed={isOrdered}
-                          title={isOrdered ? "Marked as ordered — click to undo" : "Click to mark as ordered"}
+                          title={isOrdered ? `Marked as ordered${tickedBy ? ` by ${tickedBy}` : ""} — click to undo` : "Click to mark as ordered"}
                           onClick={toggle}
                           onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                           className={`border rounded-xl p-2.5 flex items-center justify-between gap-2.5 cursor-pointer select-none transition-colors focus:outline-none focus:ring-2 focus:ring-violet-300 ${isOrdered ? "bg-emerald-50 border-emerald-200 hover:bg-emerald-100/60" : "bg-white border-gray-100 hover:bg-gray-50"}`}>
@@ -2228,7 +2340,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                           <div className="text-right flex-shrink-0 ml-3">
                             <p className="text-sm font-bold text-gray-900">{money(it.unit_price)} × {it.quantity || 1}</p>
                             <p className="text-xs text-gray-400">{money((Number(it.unit_price) || 0) * (Number(it.quantity) || 1))}</p>
-                            <p className={`text-[10px] font-medium ${isOrdered ? "text-emerald-600" : "text-gray-300"}`}>{isOrdered ? "Ordered" : "Not ordered"}</p>
+                            <p className={`text-[10px] font-medium ${isOrdered ? "text-emerald-600" : "text-gray-300"}`}>{isOrdered ? `Ordered${tickedBy ? ` · ${tickedBy}` : ""}` : "Not ordered"}</p>
                           </div>
                         </div>
                       );})}
