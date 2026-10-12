@@ -3115,6 +3115,28 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
 
   useEffect(() => { loadVehicles(); }, [loadVehicles]);
 
+  // Link same-customer stops on the CURRENT schedule (2026-10-12): the backend runs the same
+  // automatic Deliver Together rule (same customer record or phone + same address + same date).
+  // Always a preview first; nothing is linked until the manager confirms.
+  const canLinkSchedule = ["master", "manager"].includes(String(currentUser?.role || "").toLowerCase());
+  const linkSameCustomer = async () => {
+    try {
+      const run = async (dry) => {
+        const r = await af(`${API}/delivery-links/auto-link-sweep`, { method: "POST", body: JSON.stringify({ from_date: date, dry_run: dry }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "Failed");
+        return d;
+      };
+      const preview = await run(true);
+      if (!preview.groups?.length) { toast.info(`No same-customer stops to link from ${date} onward.`); return; }
+      const lines = preview.groups.map(g => `${g.date}: ${g.orders.map(o => `SO ${o.so_number} (${String(o.customer_name || "").trim()})`).join(" + ")}`);
+      if (!window.confirm(`Link these as one customer stop each (same customer, same address, same day)?\n\n${lines.join("\n")}\n\nNothing else changes — no date, team or route is moved.`)) return;
+      const done = await run(false);
+      toast.success(`Linked ${done.linked} customer stop${done.linked === 1 ? "" : "s"}`);
+      loadData();
+    } catch (e) { toast.error(e.message); }
+  };
+
   const loadReadiness = async () => {
     if (!companyId) return;
     try {
@@ -3655,6 +3677,7 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
           {/* Import moves DOs (PATCH /delivery-orders/:id → DELIVERY_ORDER_EDIT) and unassigns stops (DELETE /delivery-schedules/:id → DELIVERY_EDIT). A user holding only one of the two would hit a predictable 403 on every row, so the action is disabled — with the reason — unless they hold BOTH. */}
           {!readOnly && <button onClick={() => canImport && setShowImport(true)} disabled={!canImport} data-testid="import-schedule" className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white" title={canImport ? `Import a schedule file — move its Delivery Orders to ${date} with no vehicle` : "Importing needs permission to edit Delivery Orders as well as the schedule"}>📥 Import</button>}
           {!readOnly && <button onClick={buildSmartPlan} className="bg-emerald-600 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-emerald-700">🧠 Smart Assign</button>}
+          {!readOnly && canLinkSchedule && <button onClick={linkSameCustomer} data-testid="link-same-customer" className="bg-white border border-teal-300 text-teal-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-teal-50" title="Find stops from this date on that are the same customer at the same address on the same day, and link them as one customer stop (preview first)">🔗 Link same-customer stops</button>}
           {!readOnly && <button onClick={() => setShowVehicleModal(true)} className="bg-gray-700 text-white rounded-lg px-4 py-1.5 text-xs font-medium hover:bg-gray-800">Manage Vehicles</button>}
           {!readOnly && <button onClick={() => setShowBlockedDates(true)} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50">Blocked Dates</button>}
           {!readOnly && <button onClick={deleteDate} className="bg-white border border-red-200 text-red-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-red-50" title="Delete this delivery date (only if it has no scheduled deliveries)">Delete Date</button>}

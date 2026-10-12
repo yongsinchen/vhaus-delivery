@@ -53,7 +53,7 @@ async function runExcel(svc) {
   global.Blob = function (parts, opts) { bytes = parts[0]; return new OriginalBlob(parts, opts); };
   URL.createObjectURL = () => "blob:mock"; URL.revokeObjectURL = () => {};
   const spy = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function () { filename = this.download; });
-  try { await exportServiceJobExcel(svc, { name: "V Haus" }); } finally { global.Blob = OriginalBlob; URL.createObjectURL = oc; URL.revokeObjectURL = orv; spy.mockRestore(); }
+  try { await exportServiceJobExcel(svc, { name: "V Haus" }); } finally { global.Blob = OriginalBlob; URL.createObjectURL = oc || (() => ""); URL.revokeObjectURL = orv || (() => {}); spy.mockRestore(); } // jsdom lacks these; the export revokes on a timer after returning
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(bytes);
   const ws = wb.getWorksheet("Service");
   const cells = []; ws.eachRow(row => row.eachCell(c => cells.push(String(c.value ?? ""))));
@@ -84,7 +84,8 @@ describe("Delivery Orders tab — Service row actions", () => {
     global.fetch = async (url, opts = {}) => {
       calls.push({ u: String(url), method: opts.method || "GET" });
       const ok = b => ({ ok: true, status: 200, json: async () => b });
-      if (String(url).includes("/delivery-workbench/services")) return ok({ services: String(url).includes("include_done") ? [] : [SVC] });
+      // The tab hides past-dated Service jobs, so the tab tests use a FUTURE-dated copy (the PDF / Excel tests above keep the fixed date).
+      if (String(url).includes("/delivery-workbench/services")) return ok({ services: String(url).includes("include_done") ? [] : [{ ...SVC, operational_date: "2099-01-15", schedule: { ...SVC.schedule, scheduled_date: "2099-01-15" } }] });
       if (String(url).includes("/delivery-orders?")) return ok({ delivery_orders: [] });
       if (String(url).includes("/delivery-workbench/tbc")) return ok({ entries: [], count: 0 });
       if (String(url).includes("/company-settings")) return ok({ settings: { company_name: "V Haus" } });
