@@ -10,6 +10,7 @@ import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest
 import { addDaysISO } from "./malaysiaDate";
 import { parseProofs, PaymentSummaryPanel, DepositEditModal, PaymentHistoryModal } from "./depositChange";
 import { matchPaymentOption } from "./paymentMethodMatch";
+import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDeliveredItemsModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -51,6 +52,15 @@ const STATUS_LABEL = {
   cancelled: "Cancelled",
 };
 const statusLabel = (s) => STATUS_LABEL[s] || (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+// Delivery progress is never typed in (owner decision 2026-10-20): it comes from
+// recorded item quantities via Confirm Delivered Items.
+const DELIVERY_STATUSES = ["delivered", "partially_delivered"];
+// Status choices for a select: the list, plus the order's current status when it
+// is not in it (e.g. partially_delivered) so the select shows the truth.
+export const statusOptionsFor = (current, { allowDelivery = true } = {}) => {
+  const base = STATUSES.filter(s => s !== "amended" && (allowDelivery || !DELIVERY_STATUSES.includes(s) || s === current));
+  return current && !base.includes(current) && current !== "amended" ? [...base, current] : base;
+};
 
 // "Ordered" ticks on the items of a viewed SO — a shared checklist for
 // "has this line been placed with the supplier yet?". Deliberately NOT tied to
@@ -729,6 +739,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
   const [editPayOpen, setEditPayOpen] = useState(false);
   const [editPayHistory, setEditPayHistory] = useState(false);
   const [editDeposit, setEditDeposit] = useState(false);
+  const [confirmDelivery, setConfirmDelivery] = useState(null);   // order whose delivered items are being confirmed
   // View drawer only: when a "pending" amendment is shown, this toggles the
   // primary display between the proposed snapshot (default) and the current
   // approved order. Also doubles as an expand toggle for rejected/conflict.
@@ -1868,7 +1879,21 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     alert(`Created ${d.created.length} PO(s): ${d.created.map(p => p.po_number).join(", ")}${d.skipped_no_supplier ? ` (${d.skipped_no_supplier} items skipped — no supplier)` : ""}`);
   };
 
+  // Reflect a status change in the list. Delivered auto-archives server-side
+  // (trigger, migration 108) — drop it from the Active view to match.
+  const applyStatusLocally = (o, status) => {
+    const autoArchived = status === "delivered" && !o.archived_at;
+    const next = autoArchived ? { ...o, status, archived_at: new Date().toISOString(), archive_reason: "auto_delivered" } : { ...o, status };
+    setOrders(prev => (autoArchived && archiveView === "exclude")
+      ? prev.filter(ord => ord.id !== o.id)
+      : prev.map(ord => ord.id === o.id ? next : ord));
+    if (autoArchived && archiveView === "exclude") setTotalOrders(n => Math.max(0, n - 1));
+    if (autoArchived && archiveView === "exclude") toast.success(`${o.order_number} delivered — moved to Archived`);
+  };
+
   const changeStatus = async (o, status) => {
+    // Delivered / Partially Delivered come from the delivered item quantities.
+    if (DELIVERY_STATUSES.includes(status) && status !== o.status) { setConfirmDelivery(o); return; }
     let reason = null;
     if (status === "cancelled") {
       reason = window.prompt("Cancel reason (required):");
@@ -1881,15 +1906,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
         const res = await fetch(`${API}/sales-orders/${o.id}/status`, { method: "PATCH", headers, body: JSON.stringify(body) });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || "Failed");
-        // Optimistic local update. Delivered auto-archives server-side (trigger,
-        // migration 108) — drop it from the Active view to match.
-        const autoArchived = status === "delivered" && !o.archived_at;
-        const next = autoArchived ? { ...o, status, archived_at: new Date().toISOString(), archive_reason: "auto_delivered" } : { ...o, status };
-        setOrders(prev => (autoArchived && archiveView === "exclude")
-          ? prev.filter(ord => ord.id !== o.id)
-          : prev.map(ord => ord.id === o.id ? next : ord));
-        if (autoArchived && archiveView === "exclude") setTotalOrders(n => Math.max(0, n - 1));
-        if (autoArchived && archiveView === "exclude") toast.success(`${o.order_number} delivered — moved to Archived`);
+        applyStatusLocally(o, status);
       });
     } catch (e) { toast.error(e.message); }
   };
@@ -2119,7 +2136,7 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                   ) : (
                     <select value={o.status} onClick={e => e.stopPropagation()} onChange={e => changeStatus(o, e.target.value)}
                       className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-violet-400">
-                      {STATUSES.filter(s => s !== "amended").map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                      {statusOptionsFor(o.status).map(s => <option key={s} value={s}>{DELIVERY_STATUSES.includes(s) && s !== o.status ? `${statusLabel(s)}…` : statusLabel(s)}</option>)}
                     </select>
                   )}
                   <button onClick={e => { e.stopPropagation(); setArchived(o, !o.archived_at); }}
@@ -2555,6 +2572,23 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
           current={{ initial_deposit: paymentSummary?.original_deposit ?? 0, payment_method: editingOrder.payment_method || null, payment_proofs: editingOrder.payment_proofs }}
           onClose={() => setEditDeposit(false)} onSaved={async () => { setEditDeposit(false); await refreshEditMoney(); }} />
       )}
+      {confirmDelivery && (() => {
+        const ep = confirmEndpoints(API, "sales_order", confirmDelivery.id);
+        return (
+          <ConfirmDeliveredItemsModal
+            title={`Confirm Delivered Items — SO ${confirmDelivery.order_number || ""}`}
+            subtitle={confirmDelivery.customer_name || ""}
+            load={async () => { const r = await fetch(ep.contextUrl, { headers: await authHeaders() }); const d = await r.json(); if (!r.ok) throw new Error(d.error || "Could not load the order"); return d; }}
+            submit={async body => { const r = await fetch(ep.confirmUrl, { method: "POST", headers: await authHeaders(), body: JSON.stringify(body) }); return { ok: r.ok, body: await r.json().catch(() => ({})) }; }}
+            onClose={() => setConfirmDelivery(null)}
+            onDone={c => {
+              const o = confirmDelivery; setConfirmDelivery(null);
+              const status = c?.sales_order_status;
+              if (status) applyStatusLocally(o, status);
+              toast.success(`SO ${o.order_number}: ${status === "delivered" ? "Delivered" : "Partially Delivered"} — delivered quantities recorded`);
+            }} />
+        );
+      })()}
 
       {/* Record Payment for the viewed SO — same modal as the Customers page,
           allocated to this SO's legacy orders row plus (when this order
@@ -3149,7 +3183,10 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                 <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:border-violet-400">
-                  {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                  {/* Delivery statuses come from Confirm Delivered Items (order list), never typed here. */}
+                  {[...STATUSES.filter(s => !DELIVERY_STATUSES.includes(s) || s === form.status),
+                    ...(form.status && !STATUSES.includes(form.status) ? [form.status] : [])]
+                    .map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                 </select>
               </div>
               )}

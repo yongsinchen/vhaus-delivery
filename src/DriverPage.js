@@ -3,6 +3,7 @@ import { useAuth, supabase } from "./AuthContext";
 import { useToast } from "./UIComponents";
 import { normalizeOrderItems } from "./safeData";
 import { malaysiaToday, formatCalendarDate } from "./malaysiaDate";
+import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDeliveredItemsModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -46,6 +47,8 @@ function DriverPage() {
   const [loading, setLoading] = useState(true);
   const [expandedStop, setExpandedStop] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  // A stop without a Delivery Order needs its delivered item quantities first.
+  const [confirmStop, setConfirmStop] = useState(null);   // { scheduleId, soNumber }
 
   // Payment modal
   const [payModal, setPayModal] = useState(null);
@@ -72,6 +75,8 @@ function DriverPage() {
     if (d.schedule) {
       toast.success(status === "delivered" ? "Delivery completed!" : `Status: ${status}`);
       loadRoute();
+    } else if (d.code === "delivery_items_confirmation_required") {
+      setConfirmStop({ scheduleId, soNumber: d.so_number });
     } else { toast.error(d.error || "Failed"); }
     setActionLoading(null);
   };
@@ -376,6 +381,19 @@ function DriverPage() {
           <p className="text-sm text-emerald-200">{total} stops · {new Date().toLocaleDateString("en-MY")}</p>
         </div>
       )}
+
+      {confirmStop && (() => {
+        const ep = confirmEndpoints(API, "driver", confirmStop.scheduleId);
+        return (
+          <ConfirmDeliveredItemsModal
+            title={`Confirm Delivered Items — SO ${confirmStop.soNumber || ""}`}
+            subtitle="Enter what the customer received at this stop."
+            load={async () => { const r = await af(ep.contextUrl); const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not load the items"); return j; }}
+            submit={async body => { const r = await af(ep.confirmUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return { ok: r.ok, body: await r.json().catch(() => ({})) }; }}
+            onClose={() => setConfirmStop(null)}
+            onDone={c => { setConfirmStop(null); toast.success(c?.sales_order_status === "delivered" ? "Delivery completed!" : "Delivered items recorded — the rest stays open"); loadRoute(); }} />
+        );
+      })()}
     </div>
   );
 }

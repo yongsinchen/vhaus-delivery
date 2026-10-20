@@ -8,6 +8,7 @@ import { ActionCategoryList, FOCUS_CATEGORIES } from "./ActionRequired";
 import { serviceNumberOf, linkedSoLabelOf, salespersonOf, soLabel } from "./serviceNumber";
 import { printHtml } from "./printDocument";
 import { SERVICE_TYPES, ITEM_ACTIONS } from "./ServiceCaseFormModal";
+import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDeliveredItemsModal";
 import { serviceItemQty } from "./serviceItemQty";
 import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
@@ -3012,6 +3013,10 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
   const [blockedDates, setBlockedDates] = useState([]);
   const [showBlockedDates, setShowBlockedDates] = useState(false);
 
+  // Stops marked Delivered that have no Delivery Order: their delivered item
+  // quantities are confirmed one by one (owner decision 2026-10-20).
+  const [confirmQueue, setConfirmQueue] = useState([]);   // [{ scheduleId, soNumber }]
+
   /** Load teams + schedules, group schedules into teams */
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -3457,8 +3462,12 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
     } catch (e) { toast.error("Failed to reassign: " + e.message); }
   }, [withLoading, toast, loadData, teams, linkedMap]);
 
+  // → null, or { scheduleId, soNumber } when the stop needs its delivered items confirmed.
   const updateScheduleStatus = async (scheduleId, status) => {
-    await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    const res = await af(`${API}/delivery-schedules/${scheduleId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    if (res.status !== 409) return null;
+    const d = await res.json().catch(() => ({}));
+    return d.code === "delivery_items_confirmation_required" ? { scheduleId, soNumber: d.so_number } : null;
   };
 
   const updateAllSchedulesStatus = async (teamId, status) => {
@@ -3475,8 +3484,12 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
     if (targets.length === 0) return;
     try {
       await withLoading("Updating route status…", async () => {
-        await Promise.all(targets.map(s => updateScheduleStatus(s.id, status)));
+        const needs = (await Promise.all(targets.map(s => updateScheduleStatus(s.id, status)))).filter(Boolean);
         await loadData();
+        if (needs.length) {
+          toast.warning(`${needs.length} stop${needs.length > 1 ? "s" : ""} without a Delivery Order — confirm the delivered items`);
+          setConfirmQueue(needs);
+        }
       });
     } catch (e) { toast.error("Failed to update route: " + e.message); }
   };
@@ -4023,6 +4036,21 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
           </div>
         </div>
       </div>
+
+      {confirmQueue.length > 0 && (() => {
+        const stop = confirmQueue[0];
+        const ep = confirmEndpoints(API, "schedule", stop.scheduleId);
+        const next = () => setConfirmQueue(q => q.slice(1));
+        return (
+          <ConfirmDeliveredItemsModal key={stop.scheduleId}
+            title={`Confirm Delivered Items — SO ${stop.soNumber || ""}`}
+            subtitle={confirmQueue.length > 1 ? `${confirmQueue.length - 1} more stop${confirmQueue.length > 2 ? "s" : ""} after this one` : "Stop without a Delivery Order"}
+            load={async () => { const r = await af(ep.contextUrl); const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not load the items"); return j; }}
+            submit={async body => { const r = await af(ep.confirmUrl, { method: "POST", body: JSON.stringify(body) }); return { ok: r.ok, body: await r.json().catch(() => ({})) }; }}
+            onClose={next}
+            onDone={c => { toast.success(`SO ${stop.soNumber}: ${c?.sales_order_status === "delivered" ? "Delivered" : "Partially Delivered"}`); next(); loadData(); }} />
+        );
+      })()}
     </div>
   );
 }
