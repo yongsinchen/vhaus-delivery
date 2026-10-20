@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useDebounce, useToast, useLoading } from "./UIComponents";
+import InventoryForecastView from "./InventoryForecastView";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const af = async (url, opts = {}) => { const { data } = await supabase.auth.getSession(); const token = data?.session?.access_token; const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
@@ -17,9 +18,6 @@ const getToken = async () => {
 const authHeaders = async () => { const cid = localStorage.getItem("pulseActiveCompanyId"); return { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}`, ...(cid && { "X-Company-ID": cid }) }; };
 
 const TABS = ["Stock Levels", "Movements", "Forecast", "Adjust", "Import"];
-
-const fmtMonth = m => { const [y, mo] = String(m).split("-"); return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-MY", { month: "short", year: "numeric" }); };
-const fmtDay = d => d ? new Date(String(d).length <= 10 ? d + "T00:00:00" : d).toLocaleDateString("en-MY", { day: "numeric", month: "short" }) : "";
 
 function InventoryPage() {
   const { user, activeCompanyId } = useAuth();
@@ -82,35 +80,23 @@ function InventoryPage() {
   const [projection, setProjection] = useState([]);
   const [projMonths, setProjMonths] = useState(6);
   const [projLoading, setProjLoading] = useState(false);
-  const [projExpanded, setProjExpanded] = useState(() => new Set()); // "month|product_id" rows showing their events
-  const toggleProjRow = (key) => setProjExpanded(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  // Only the latest request may fill the view — a slow answer for the previous
+  // company (or horizon) never replaces the current one.
+  const projReq = useRef(0);
   const loadProjection = useCallback(async () => {
     if (!companyId) return;
+    const req = ++projReq.current;
     setProjLoading(true);
+    let rows = [];
     try {
       const res = await af(`${API}/inventory/projection?company_id=${companyId}&months=${projMonths}`);
       const d = await res.json();
-      setProjection(Array.isArray(d.products) ? d.products : []);
-    } catch { setProjection([]); }
+      rows = Array.isArray(d.products) ? d.products : [];
+    } catch { rows = []; }
+    if (req !== projReq.current) return;
+    setProjection(rows);
     setProjLoading(false);
   }, [companyId, projMonths]);
-
-  // Pivot the per-product projection into a month-by-month view: each month
-  // lists every product with its opening / in / out / closing for that month.
-  const projByMonth = useMemo(() => {
-    const map = {};
-    for (const p of projection) {
-      for (const m of (p.months || [])) {
-        const inQty = (m.events || []).filter(e => e.type === "in").reduce((s, e) => s + (Number(e.qty) || 0), 0);
-        const outQty = (m.events || []).filter(e => e.type === "out").reduce((s, e) => s + (Number(e.qty) || 0), 0);
-        (map[m.month] ||= []).push({ product_id: p.product_id, product: p.product, opening: m.opening, closing: m.closing, inQty, outQty, events: m.events || [] });
-      }
-    }
-    return Object.keys(map).sort().map(month => {
-      const rows = map[month].sort((a, b) => (a.closing < 0 ? 0 : 1) - (b.closing < 0 ? 0 : 1) || String(a.product?.name || "").localeCompare(String(b.product?.name || "")));
-      return { month, rows, negatives: rows.filter(r => r.closing < 0).length };
-    });
-  }, [projection]);
 
   const loadedRef = useRef({ inv: false, mov: false });
   useEffect(() => { loadWarehouses(); loadProducts(); }, [loadWarehouses, loadProducts]);
@@ -269,83 +255,7 @@ function InventoryPage() {
 
       {/* Forecast — monthly stock movement projection */}
       {tab === 2 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-sm text-gray-500 max-w-2xl">Projected stock per product: opening on-hand, upcoming <b>out</b> (confirmed orders by delivery date) and <b>in</b> (open POs by expected date), and each month's closing balance. A red month is when a product runs out — restock before that date.</p>
-            <label className="text-xs text-gray-500 flex items-center gap-2">Horizon
-              <select value={projMonths} onChange={e => setProjMonths(Number(e.target.value))} className="border rounded-lg px-2 py-1 text-sm">
-                {[3, 6, 9, 12].map(m => <option key={m} value={m}>{m} months</option>)}
-              </select>
-            </label>
-          </div>
-          {projLoading && <p className="text-sm text-gray-400">Loading forecast…</p>}
-          {!projLoading && projection.length === 0 && (
-            <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400">
-              <p className="font-medium">Nothing to forecast yet</p>
-              <p className="text-xs mt-1">Products appear here once they have stock, upcoming confirmed orders, or open purchase orders.</p>
-            </div>
-          )}
-          {!projLoading && projByMonth.map(({ month, rows, negatives }) => (
-            <div key={month} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${negatives > 0 ? "border-red-200" : "border-gray-100"}`}>
-              <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2 bg-gray-50/60">
-                <span className="font-bold text-gray-900 text-sm">{fmtMonth(month)}</span>
-                {negatives > 0
-                  ? <span className="bg-red-100 text-red-700 font-semibold text-xs px-2 py-1 rounded-full">{negatives} product{negatives > 1 ? "s" : ""} run out</span>
-                  : <span className="bg-emerald-100 text-emerald-700 font-medium text-xs px-2 py-1 rounded-full">All covered</span>}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="text-gray-400 text-left">
-                    <th className="px-4 py-2 font-medium">Product</th>
-                    <th className="px-3 py-2 font-medium text-right">Opening</th>
-                    <th className="px-3 py-2 font-medium text-right">In</th>
-                    <th className="px-3 py-2 font-medium text-right">Out</th>
-                    <th className="px-4 py-2 font-medium text-right">Closing</th>
-                  </tr></thead>
-                  <tbody>
-                    {rows.map(r => {
-                      const key = `${month}|${r.product_id}`;
-                      const hasEvents = (r.events || []).length > 0;
-                      const open = projExpanded.has(key);
-                      return (
-                        <React.Fragment key={r.product_id}>
-                          <tr onClick={() => hasEvents && toggleProjRow(key)}
-                            className={`border-t border-gray-100 ${r.closing < 0 ? "bg-red-50/50" : ""} ${hasEvents ? "cursor-pointer hover:bg-gray-50" : ""}`}>
-                            <td className="px-4 py-2">
-                              <span className="text-gray-300 text-xs mr-1 inline-block w-3">{hasEvents ? (open ? "▾" : "▸") : ""}</span>
-                              <span className="font-medium text-gray-800">{r.product?.name || r.product?.code || "Product"}</span>
-                              {r.product?.code && <span className="text-xs text-gray-400 ml-2">{r.product.code}</span>}
-                            </td>
-                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.opening}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-emerald-600">{r.inQty ? `+${r.inQty}` : ""}</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-red-600">{r.outQty ? `−${r.outQty}` : ""}</td>
-                            <td className={`px-4 py-2 text-right tabular-nums font-bold ${r.closing < 0 ? "text-red-600" : "text-gray-800"}`}>{r.closing}</td>
-                          </tr>
-                          {open && hasEvents && (
-                            <tr className="bg-gray-50/70">
-                              <td colSpan={5} className="px-4 py-2">
-                                <div className="space-y-0.5 pl-6">
-                                  {r.events.map((e, i) => (
-                                    <div key={i} className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400 w-14 shrink-0">{fmtDay(e.date)}</span>
-                                      <span className={`font-semibold w-12 shrink-0 ${e.type === "in" ? "text-emerald-600" : "text-red-600"}`}>{e.type === "in" ? "+" : "−"}{e.qty}</span>
-                                      <span className="text-gray-500 shrink-0">{e.type === "in" ? "PO" : "SO"} {e.ref}</span>
-                                      <span className="text-gray-400 ml-auto tabular-nums">balance {e.balance}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </div>
+        <InventoryForecastView projection={projection} loading={projLoading} months={projMonths} onMonthsChange={setProjMonths} resetKey={companyId} />
       )}
 
       {/* Adjust */}
