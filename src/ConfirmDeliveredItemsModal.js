@@ -23,27 +23,32 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const num = v => Number(v) || 0;
 export const doLineKey = (doId, itemId) => `${doId || "none"}|${itemId}`;
+// Billing / service lines (BILL "Full Bill Amount", delivery / installation charges, fee lines — flagged by the
+// server with the same exact rules as the forecast) are never delivered: shown read-only, never entered.
+const goodsLines = d => (d.lines || []).filter(l => !l.non_goods);
+const deliverableDos = ctx => (ctx?.open_delivery_orders || []).filter(d => goodsLines(d).length > 0);
 
 /** Initial selection + quantities from the server context. */
 export function initialConfirmState(ctx) {
-  const openDos = ctx?.open_delivery_orders || [];
+  const openDos = deliverableDos(ctx);
   const selected = new Set(openDos.length === 1 ? [openDos[0].id] : []);
   const qty = {};
-  for (const d of openDos) for (const l of d.lines || []) qty[doLineKey(d.id, l.sales_order_item_id)] = String(Math.max(0, num(l.quantity) - num(l.delivered_qty)));
-  for (const i of ctx?.items || []) if (num(i.without_do) > 0) qty[doLineKey(null, i.id)] = String(openDos.length === 0 ? num(i.without_do) : 0);
+  for (const d of openDos) for (const l of goodsLines(d)) qty[doLineKey(d.id, l.sales_order_item_id)] = String(Math.max(0, num(l.quantity) - num(l.delivered_qty)));
+  for (const i of ctx?.items || []) if (!i.non_goods && num(i.without_do) > 0) qty[doLineKey(null, i.id)] = String(openDos.length === 0 ? num(i.without_do) : 0);
   return { selected, qty };
 }
 
 /** The lines to send, plus validation problems (empty = OK). */
 export function buildConfirmLines(ctx, selected, qty) {
-  const openDos = ctx?.open_delivery_orders || [];
+  const openDos = deliverableDos(ctx);
   const items = new Map((ctx?.items || []).map(i => [i.id, i]));
   const lines = [], problems = [];
+  if (ctx?.only_non_goods) return { lines, problems: ["This order has only billing / charge lines — there is nothing to deliver (flagged for review)"] };
   const bad = v => v !== "" && (!Number.isFinite(Number(v)) || Number(v) < 0);
   for (const d of openDos) {
     if (!selected.has(d.id)) continue;
     let total = 0;
-    for (const l of d.lines || []) {
+    for (const l of goodsLines(d)) {
       const v = qty[doLineKey(d.id, l.sales_order_item_id)] ?? "";
       const max = Math.max(0, num(l.quantity) - num(l.delivered_qty));
       const name = items.get(l.sales_order_item_id)?.product_name || "item";
@@ -54,7 +59,7 @@ export function buildConfirmLines(ctx, selected, qty) {
     if (total === 0) problems.push(`${d.do_number} is ticked but no quantity is entered — enter what was delivered or untick it`);
   }
   for (const i of ctx?.items || []) {
-    if (num(i.without_do) <= 0) continue;
+    if (i.non_goods || num(i.without_do) <= 0) continue;
     const v = qty[doLineKey(null, i.id)] ?? "";
     if (bad(v)) { problems.push(`Enter a valid quantity for ${i.product_name || "item"}`); continue; }
     if (num(v) > num(i.without_do)) { problems.push(`${i.product_name || "Item"} — at most ${num(i.without_do)} without a Delivery Order`); continue; }
@@ -64,11 +69,11 @@ export function buildConfirmLines(ctx, selected, qty) {
   return { lines, problems };
 }
 
-/** What the order will look like after these lines: per item, and overall. */
+/** What the order will look like after these lines: per PHYSICAL item, and overall (billing lines never count). */
 export function summariseConfirm(ctx, lines) {
   const add = new Map();
   for (const l of lines) add.set(l.sales_order_item_id, (add.get(l.sales_order_item_id) || 0) + l.quantity);
-  const rows = (ctx?.items || []).map(i => {
+  const rows = (ctx?.items || []).filter(i => !i.non_goods).map(i => {
     const after = num(i.delivered_qty) + (add.get(i.id) || 0);
     return { id: i.id, name: i.product_name, code: i.product_code, ordered: num(i.quantity), before: num(i.delivered_qty), now: add.get(i.id) || 0, after };
   });
@@ -123,8 +128,9 @@ export default function ConfirmDeliveredItemsModal({ title = "Confirm Delivered 
     finally { setBusy(false); }
   };
 
-  const noDoItems = (ctx?.items || []).filter(i => num(i.without_do) > 0);
-  const openDos = ctx?.open_delivery_orders || [];
+  const noDoItems = (ctx?.items || []).filter(i => !i.non_goods && num(i.without_do) > 0);
+  const nonGoodsItems = (ctx?.items || []).filter(i => i.non_goods);
+  const openDos = deliverableDos(ctx);
   return (
     <div className="fixed inset-0 bg-black/40 z-[80] flex items-center justify-center p-4" role="dialog" aria-label={title}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -139,9 +145,14 @@ export default function ConfirmDeliveredItemsModal({ title = "Confirm Delivered 
           {!ctx && !loadError && <p className="text-gray-400">Loading items…</p>}
           {loadError && <p className="text-red-600" role="alert">{loadError}</p>}
           {ctx && (<>
-            <p className="text-xs text-gray-600">Enter what the customer actually received. The order becomes <b>Delivered</b> only when every item is recorded; anything not delivered stays open to be scheduled again.</p>
+            <p className="text-xs text-gray-600">Enter what the customer actually received. The order becomes <b>Delivered</b> only when every physical item is recorded; anything not delivered stays open to be scheduled again.</p>
 
-            {openDos.length === 0 && noDoItems.length === 0 && <p className="text-gray-500">Nothing is left to deliver on this order.</p>}
+            {ctx.only_non_goods && (
+              <p className="rounded-xl bg-sky-50 border border-sky-200 px-3 py-2 text-sky-900" role="note" data-testid="only-non-goods">
+                This order has only billing / charge lines — there is nothing to deliver. It keeps its current status and is flagged for review.
+              </p>
+            )}
+            {!ctx.only_non_goods && openDos.length === 0 && noDoItems.length === 0 && <p className="text-gray-500">Nothing is left to deliver on this order.</p>}
 
             {openDos.map(d => (
               <div key={d.id} className={`rounded-xl border ${selected.has(d.id) ? "border-violet-300 bg-violet-50/40" : "border-gray-200"}`}>
@@ -156,6 +167,13 @@ export default function ConfirmDeliveredItemsModal({ title = "Confirm Delivered 
                     <tbody>
                       {(d.lines || []).map(l => {
                         const k = doLineKey(d.id, l.sales_order_item_id), max = Math.max(0, num(l.quantity) - num(l.delivered_qty));
+                        if (l.non_goods) return (
+                          <tr key={k} className="border-t border-gray-100 text-gray-400" data-testid="do-line-non-goods">
+                            <td className="px-3 py-1.5">{itemName(l.sales_order_item_id)}</td>
+                            <td className="px-3 py-1.5 text-right">—</td>
+                            <td className="px-3 py-1.5 text-right text-xs">billing / charge line — not delivered</td>
+                          </tr>
+                        );
                         return (
                           <tr key={k} className="border-t border-gray-100">
                             <td className="px-3 py-1.5 text-gray-800">{itemName(l.sales_order_item_id)}</td>
@@ -201,6 +219,16 @@ export default function ConfirmDeliveredItemsModal({ title = "Confirm Delivered 
             )}
             {(ctx.failed_delivery_orders || []).length > 0 && (
               <p className="text-xs text-gray-500">Failed Delivery Order{ctx.failed_delivery_orders.length > 1 ? "s" : ""} {ctx.failed_delivery_orders.map(d => d.do_number).join(", ")}: reschedule or cancel {ctx.failed_delivery_orders.length > 1 ? "them" : "it"} first — {ctx.failed_delivery_orders.length > 1 ? "their" : "its"} items cannot be confirmed here.</p>
+            )}
+
+            {nonGoodsItems.length > 0 && (
+              <div className="rounded-xl border border-gray-200 px-3 py-2" data-testid="non-goods-lines">
+                <p className="font-semibold text-gray-700 text-xs">Billing / charge lines — not delivered</p>
+                <p className="text-[11px] text-gray-500 mb-1">Not physical goods: never recorded as delivered and never needed for the order to be Delivered.</p>
+                <ul className="text-xs text-gray-600 space-y-0.5">
+                  {nonGoodsItems.map(i => <li key={i.id}>{i.product_name}{i.product_code ? <span className="text-gray-400"> · {i.product_code}</span> : null} × {num(i.quantity)}</li>)}
+                </ul>
+              </div>
             )}
 
             {summary && summary.rows.length > 0 && (

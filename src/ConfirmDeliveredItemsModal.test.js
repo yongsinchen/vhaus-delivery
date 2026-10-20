@@ -135,3 +135,53 @@ describe("Confirm Delivered Items — dialog", () => {
     expect(await screen.findByText("Sales order not found")).toBeInTheDocument();
   });
 });
+
+// Sofa + BILL "Full Bill Amount" (+ an ambiguous TOP UP line), as GET …/delivery-confirmation returns it.
+const bill = { ...item("b1", "Full Bill Amount", 1), product_code: "BILL", remaining: 0, without_do: 0, non_goods: true, non_goods_rule: "bill_full_amount" };
+const ctxBill = {
+  items: [item("s1", "Sofa", 1, { on_open_do: 1, without_do: 0 }), bill, item("t1", "TOP UP SOFA", 1, { non_goods: false })],
+  open_delivery_orders: [{ id: "d1", do_number: "DO-S", status: "scheduled", delivery_date: "2026-10-25",
+    lines: [{ sales_order_item_id: "s1", quantity: 1, delivered_qty: 0, non_goods: false }, { sales_order_item_id: "b1", quantity: 1, delivered_qty: 0, non_goods: true }] }],
+  failed_delivery_orders: [], goods_count: 2, only_non_goods: false,
+};
+const ctxOnlyBill = { items: [bill, { ...bill, id: "b2", product_name: "Delivery Fee", product_code: "CUSTOM" }], open_delivery_orders: [], failed_delivery_orders: [], goods_count: 0, only_non_goods: true };
+
+describe("Confirm Delivered Items — billing / charge lines (owner decision 2026-10-20)", () => {
+  test("a BILL line is never entered: no quantity key, never sent, not in the summary", () => {
+    const s = initialConfirmState(ctxBill);
+    expect(s.qty[doLineKey("d1", "b1")]).toBeUndefined();
+    expect(s.qty[doLineKey(null, "b1")]).toBeUndefined();
+    const { lines } = buildConfirmLines(ctxBill, s.selected, { ...s.qty, [doLineKey("d1", "b1")]: "1", [doLineKey(null, "b1")]: "1" });
+    expect(lines.some(l => l.sales_order_item_id === "b1")).toBe(false);
+    expect(summariseConfirm(ctxBill, lines).rows.map(r => r.id)).toEqual(["s1", "t1"]);
+  });
+
+  test("the BILL never holds the order back: sofa + the ambiguous TOP UP confirmed → Delivered", () => {
+    const s = initialConfirmState(ctxBill);
+    const { lines } = buildConfirmLines(ctxBill, s.selected, { ...s.qty, [doLineKey(null, "t1")]: "1" });
+    expect(summariseConfirm(ctxBill, lines).status).toBe("Delivered");
+  });
+
+  test("an ambiguous line (TOP UP) is still goods: without it the order is only Partially Delivered", () => {
+    const s = initialConfirmState(ctxBill);
+    expect(s.qty[doLineKey(null, "t1")]).toBe("0");
+    expect(summariseConfirm(ctxBill, buildConfirmLines(ctxBill, s.selected, s.qty).lines).status).toBe("Partially Delivered");
+  });
+
+  test("dialog: BILL shown read-only on the DO and in the billing list, no input for it", async () => {
+    render(<ConfirmDeliveredItemsModal load={() => Promise.resolve(ctxBill)} submit={jest.fn()} onClose={() => {}} onDone={() => {}} />);
+    await screen.findByText("DO-S");
+    expect(screen.getByTestId("do-line-non-goods")).toHaveTextContent("billing / charge line — not delivered");
+    expect(screen.queryByLabelText("Delivered Full Bill Amount on DO-S")).toBeNull();
+    expect(screen.queryByLabelText("Delivered Full Bill Amount without a Delivery Order")).toBeNull();
+    expect(screen.getByTestId("non-goods-lines")).toHaveTextContent("Full Bill Amount");
+    expect(screen.getByLabelText("Delivered TOP UP SOFA without a Delivery Order")).toBeInTheDocument();
+  });
+
+  test("dialog: an order with only billing / charge lines — nothing to deliver, flagged for review, button disabled", async () => {
+    render(<ConfirmDeliveredItemsModal load={() => Promise.resolve(ctxOnlyBill)} submit={jest.fn()} onClose={() => {}} onDone={() => {}} />);
+    expect(await screen.findByTestId("only-non-goods")).toHaveTextContent(/flagged for review/);
+    expect(screen.getByRole("button", { name: "Confirm Delivered Items" })).toBeDisabled();
+    expect(buildConfirmLines(ctxOnlyBill, new Set(), {}).problems[0]).toMatch(/only billing \/ charge lines/);
+  });
+});
