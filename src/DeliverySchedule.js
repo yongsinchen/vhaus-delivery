@@ -858,6 +858,18 @@ const fmtBalance = (v) => `Bal: RM ${Number(v).toLocaleString("en-MY", { minimum
 // Inside a grouped Customer Stop (rows[0].grouped) the customer name and
 // contact are shown once in the stop banner, not per child; a child's address
 // is only repeated when it differs from the banner's.
+// The stop's delivery time on the printed sheet / PDF / Excel: the slot the
+// dispatcher confirmed ("Slot: 10-12") wins; with none, the customer's
+// preferred time from the order ("Pref: AFTER 3PM", the purple tag on the
+// board) so the crew still sees it. null when neither is set.
+export function stopTimeLabel(sc, o) {
+  const slot = String(sc?.slot || "").trim();
+  if (slot) return { text: `Slot: ${slot}`, kind: "slot" };
+  const pref = String(o?.time_slot || "").trim();
+  if (pref) return { text: `Pref: ${pref}`, kind: "pref" };
+  return null;
+}
+
 export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {}) {
   const grouped = !!rows[0]?.grouped;
   const isService = o.type === "Service";
@@ -868,7 +880,8 @@ export function teamScheduleStopCells(o, sc, rows, team, { bannerAddress } = {})
   if (o.contact && !grouped) info.push({ text: o.contact, color: "#555555" });
   if (o.address && (!grouped || o.address !== bannerAddress)) info.push({ text: o.address, color: "#555555", small: true });
   if (parseFloat(o.balance) > 0) info.push({ text: fmtBalance(o.balance), bold: true, color: "#ff0000" });
-  if (sc.slot) info.push({ text: `Slot: ${sc.slot}`, bold: true, color: "#1e40af" });
+  const time = stopTimeLabel(sc, o);
+  if (time) info.push({ text: time.text, bold: true, color: time.kind === "slot" ? "#1e40af" : "#7e22ce" });
 
   const rowRemark = sc.delivery_orders ? (sc.delivery_orders.remark || "") : (o.remark || "");
   const remark = [];
@@ -1751,7 +1764,7 @@ export function TeamPrintView({ team, onClose, company }) {
                           {showCustomer&&o.contact&&<div style={{color:"#555"}}>{o.contact}</div>}
                           {showAddress&&<div style={{color:"#555",fontSize:"9px",wordBreak:"break-word"}}>{o.address}</div>}
                           {hasBalance&&<div style={{color:"red",fontWeight:"bold"}}>Bal: RM {Number(o.balance).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
-                          {sc.slot&&<div style={{color:"#1e40af",fontWeight:"bold"}}>Slot: {sc.slot}</div>}
+                          {(() => { const t = stopTimeLabel(sc, o); return t && <div style={{color:t.kind==="slot"?"#1e40af":"#7e22ce",fontWeight:"bold"}} data-field="stop-time">{t.text}</div>; })()}
                         </td>}
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,verticalAlign:"top",fontSize:"9px"}}>{salespersonOf(o)||"-"}</td>}
                         {isFirst&&<td rowSpan={rowspan} style={{...BD,textAlign:"center",verticalAlign:"top",fontSize:"9px",color:sc.trip_no>1?"#6b7280":"#059669"}}>{tripLabel}</td>}
