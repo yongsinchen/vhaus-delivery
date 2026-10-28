@@ -20,6 +20,7 @@ import {
   buildTeamScheduleRows, teamScheduleStopCells, teamScheduleItemCells, TEAM_SCHEDULE_COLUMNS,
   teamScheduleStopUnits, teamScheduleGroupBanner,
 } from "./DeliverySchedule";
+import { SCHEDULE_FONT_FILES, clean, boldSafe, loadFont } from "./pdfFonts";
 
 const PAGE_W = 297, PAGE_H = 210, MARGIN = 8;
 const CONTENT_W = PAGE_W - 2 * MARGIN;
@@ -38,18 +39,6 @@ const LINE_FACTOR = 1.15;
 const PT_TO_MM = 0.352778;
 const lineHeight = pt => pt * PT_TO_MM * LINE_FACTOR;
 
-export const SCHEDULE_FONT_FILES = { regular: "NotoSansSC-Schedule-Regular.ttf", bold: "NotoSansSC-Schedule-Bold.ttf" };
-
-// Invisible/zero-width characters (seen in pasted remarks) and CR/tab
-// normalisation — they'd otherwise print as missing-glyph boxes.
-const clean = s => String(s ?? "").replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").replace(/\r\n?/g, "\n").replace(/\t/g, " ");
-// The bold subset only carries Latin + punctuation; anything else is drawn in
-// Regular so it never comes out as missing glyphs.
-const BOLD_EXTRA = new Set([0x20ac, 0x2122, 0x2713, 0x2714]); // € ™ ✓ ✔
-const boldSafe = s => [...String(s)].every(ch => {
-  const cp = ch.codePointAt(0);
-  return cp <= 0xff || (cp >= 0x2010 && cp <= 0x203a) || BOLD_EXTRA.has(cp);
-});
 const rgb = hex => { const h = String(hex || "").replace("#", ""); return h.length === 6 ? [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)) : [20, 20, 20]; };
 
 // Lines of a rich (multi-part) cell, each with its own font settings, wrapped
@@ -281,23 +270,8 @@ export function buildTeamSchedulePdf({ jsPDF, createTable, drawTable, team, comp
   return doc;
 }
 
-// Fonts are fetched once per session, only when a PDF is actually downloaded.
-const fontCache = {};
-const toBase64 = (buf) => {
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
-};
-function loadFont(file) {
-  if (!fontCache[file]) {
-    fontCache[file] = fetch(`${process.env.PUBLIC_URL || ""}/fonts/${file}`)
-      .then(r => { if (!r.ok) throw new Error(`Could not load the PDF font (${r.status})`); return r.arrayBuffer(); })
-      .then(toBase64)
-      .catch(e => { delete fontCache[file]; throw e; });
-  }
-  return fontCache[file];
-}
+// Re-exported for existing callers/tests.
+export { SCHEDULE_FONT_FILES };
 
 export async function exportTeamSchedulePdf(team, company = {}) {
   const [{ jsPDF }, { __createTable, __drawTable }, regular, bold] = await Promise.all([

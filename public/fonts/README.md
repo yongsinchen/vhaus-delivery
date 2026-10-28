@@ -2,9 +2,10 @@
 
 `NotoSansSC-Schedule-Regular.ttf` and `NotoSansSC-Schedule-Bold.ttf` are
 glyph **subsets** of Noto Sans SC (Regular 400 / Bold 700), used by
-`src/teamSchedulePdf.js` so the downloaded schedule PDF can render Chinese
-remarks, service notes and item names. They are fetched only when someone
-clicks **Download PDF**.
+`src/teamSchedulePdf.js` (Delivery Schedule) and `src/salesOrderPdf.js`
+(My Orders → Download PDF) via `src/pdfFonts.js`, so the downloaded PDFs can
+render Chinese remarks, service notes and item names. They are fetched only
+when someone clicks **Download PDF**.
 
 - Regular: Basic Latin + Latin-1, general punctuation, CJK symbols and
   full-width forms, all GB2312 characters, plus every character present in

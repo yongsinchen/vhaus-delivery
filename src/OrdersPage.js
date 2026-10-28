@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef , memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
-import { useDebounce, useToast, useLoading, formatMoney } from "./UIComponents";
+import { useDebounce, useToast, useLoading } from "./UIComponents";
 import { printHtml } from "./printDocument";
 import RequestDeliveryDatePanel from "./RequestDeliveryDatePanel";
 import { effectiveDeliveryDisplay, editFormDeliveryDate, effectiveAfterEdit } from "./effectiveDelivery";
@@ -9,7 +9,7 @@ import OrderNotes from "./OrderNotes";
 import ServiceCaseFormModal, { SERVICE_TYPES, TYPE_ICON, canChangeServiceRequest, deleteServiceRequest } from "./ServiceCaseFormModal";
 import { addDaysISO } from "./malaysiaDate";
 import { parseProofs, PaymentSummaryPanel, DepositEditModal, PaymentHistoryModal } from "./depositChange";
-import { matchPaymentOption } from "./paymentMethodMatch";
+import { PAYMENT_METHODS, SALES_ORDER_TERMS as TERMS, salesOrderFigures, soMoney } from "./salesOrderDoc";
 import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDeliveredItemsModal";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
@@ -141,8 +141,6 @@ const todayMY = () => new Intl.DateTimeFormat("en-CA", {
 
 const DELIVERY_TYPES = ["Delivery", "Self Pickup", "Service"];
 
-const PAYMENT_METHODS = ["Cash", "Card", "Online Transfer", "E-Wallet", "Cheque", "Instalment"];
-
 const EMPTY_ORDER = {
   order_number: "", sales_channel: "branch", customer_name: "", customer_contact: "", customer_address: "",
   customer_id_type: "ic", customer_id_no: "", customer_email: "", einvoice_requested: false,
@@ -159,20 +157,7 @@ const DEFAULT_COMPANY = {
   name: "", reg: "", address: "", hotline: "", bank: "", branches_display: "", logo: "",
 };
 
-const TERMS = [
-  "All orders are confirmed only upon payment of a deposit. Deposits are strictly non-refundable.",
-  "Full payment must be settled prior to delivery or collection of goods.",
-  "Delivery dates provided are estimates only. The Company shall not be liable for any delay caused by suppliers, manufacturing, transportation, or any cause beyond its reasonable control.",
-  "Goods sold are not returnable, refundable, or exchangeable once the order is confirmed, except for genuine manufacturing defects reported within 3 days of delivery.",
-  "Customised, made-to-order, and special-size items cannot be cancelled, refunded, or exchanged under any circumstances.",
-  "Natural materials (wood, rattan, leather, fabric) may vary in colour, grain, and texture. Such variations are inherent characteristics and shall not be regarded as defects.",
-  "The customer must inspect all goods upon delivery. Signing the delivery note constitutes acceptance of the goods in good condition.",
-  "Ownership of goods remains with the Company until full payment is received. Goods stored beyond 14 days from the agreed delivery date at the customer's request may incur storage charges.",
-  "Warranty (where applicable) covers manufacturing defects only and excludes normal wear and tear, misuse, or improper care.",
-  "The Company's total liability shall not exceed the purchase value of the goods. This agreement is governed by the laws of Malaysia.",
-];
-
-const money = (v) => (v == null || v === "" ? "" : formatMoney(v));
+const money = soMoney;
 
 // Order total and outstanding balance — same formula as the detail view.
 // sales_orders.deposit is the amount paid to date (kept in sync with payments).
@@ -330,46 +315,23 @@ function printDeliveryNote(doData, order, co) {
 
 function printSalesOrder(order, signatureDataUrl, co, branchName) {
   const COMPANY = co || DEFAULT_COMPANY;
-  const items = order.items || order.sales_order_items || [];
-  let gross = 0;
+  // Figures, item lines and the ticked payment option are shared with the
+  // Download PDF (salesOrderDoc.js) so the two documents never disagree.
+  const fig = salesOrderFigures(order, branchName);
+  const { subtotal, discount, deposit, total, balance, dateStr, idLabel, checkedPay } = fig;
+  const orderGst = fig.gst, orderGstRate = fig.gstRate;
+  const branchLine = esc(fig.branchLine);
   const MIN_ROWS = 3;
-  const itemRows = items.map((it, i) => {
-    const qty = Number(it.quantity) || 1;
-    const price = Number(it.unit_price) || 0;
-    const line = qty * price;
-    gross += line;
-    const sub = [it.product_code, it.size, it.color, it.custom_dimensions].filter(Boolean).join(" · ");
-    return `<tr>
-      <td class="c">${i + 1}</td>
-      <td class="desc"><div class="pname">${esc(it.product_name || it.product_code || "")}</div>${sub ? `<div class="psub">${esc(sub)}</div>` : ""}${it.notes ? `<div class="psub">${esc(it.notes)}</div>` : ""}</td>
-      <td class="c">${qty}</td>
-      <td class="r">${it.unit_price === 0 || it.unit_price == null ? "" : money(price)}</td>
-      <td class="r">${line ? money(line) : ""}</td>
-    </tr>`;
-  });
-  for (let i = items.length; i < MIN_ROWS; i++) {
+  const itemRows = fig.lines.map(l => `<tr>
+      <td class="c">${l.no}</td>
+      <td class="desc"><div class="pname">${esc(l.name)}</div>${l.sub ? `<div class="psub">${esc(l.sub)}</div>` : ""}${l.notes ? `<div class="psub">${esc(l.notes)}</div>` : ""}</td>
+      <td class="c">${l.qty}</td>
+      <td class="r">${l.unitPrice}</td>
+      <td class="r">${l.amount}</td>
+    </tr>`);
+  for (let i = fig.lines.length; i < MIN_ROWS; i++) {
     itemRows.push(`<tr><td class="c">${i + 1}</td><td></td><td class="c">&nbsp;</td><td></td><td></td></tr>`);
   }
-
-  const discount = Number(order.discount) || 0;
-  const deposit = Number(order.deposit) || 0;
-  const subtotal = order.subtotal != null && order.subtotal !== "" ? Number(order.subtotal) : gross;
-  const orderGstRate = order.gst_waived ? 0 : (Number(order.gst_rate) || 0);
-  // Stored gst_amount wins (old orders keep the GST they were sold at);
-  // fallback computes on the full subtotal — discount comes off after tax.
-  const orderGst = order.gst_waived ? 0 : (order.gst_amount != null ? Number(order.gst_amount) : Math.round(subtotal * orderGstRate) / 100);
-  const total = subtotal + orderGst - discount;
-  const balance = total - deposit;
-  const dateStr = new Date((order.order_date || order.created_at || new Date().toISOString()) + (order.order_date ? "T00:00:00" : "")).toLocaleDateString("en-MY");
-
-  const branchLine = esc((branchName || order.branch_name || order.sales_channel || "—").toString().toUpperCase());
-  const idLabel = order.customer_id_type === "passport" ? "Passport No" : "I/C No";
-  // Tick the box whose canonical option matches the SO's stored payment_method,
-  // mapping cross-UI / legacy label variants (e.g. "Bank Transfer" → Online
-  // Transfer, "Credit Card" → Card, "Touch n Go" → E-Wallet). A missing or
-  // unrecognised value ticks NOTHING — never inferred from payments, never
-  // defaulted to Cash.
-  const checkedPay = matchPaymentOption(order.payment_method);
   const payOptions = PAYMENT_METHODS
     .map(m => `<span class="pay-opt"><span class="chk${checkedPay === m ? " on" : ""}"></span>${esc(m)}</span>`)
     .join("");
@@ -1824,6 +1786,20 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
     printSalesOrder(order, null, companyInfo, branches.find(b => b.id === order.branch_id)?.name);
   };
 
+  // Download the sales order as a real PDF file (Customer Copy) — same content
+  // as Print. The PDF module, jsPDF and the font load only when it's used.
+  const downloadSOPdf = async (order) => {
+    if (!order) return;
+    try {
+      await withLoading("Creating PDF…", async () => {
+        const { exportSalesOrderPdf } = await import("./salesOrderPdf");
+        await exportSalesOrderPdf(order, companyInfo, branches.find(b => b.id === order.branch_id)?.name);
+      });
+    } catch (e) {
+      toast.error(`Could not create the PDF: ${e.message || e}`);
+    }
+  };
+
   const openSubmitPO = async (order) => await withLoading("Preparing purchase orders…", async () => {
     const { order: fullOrder } = await getFullOrder(order);
     const items = fullOrder.sales_order_items || fullOrder.items || [];
@@ -2126,6 +2102,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                 <div className="flex items-center gap-1 mt-1 justify-end">
                   <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); printSO(full); }}
                     className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                  <button onClick={async e => { e.stopPropagation(); const { order: full } = await withLoading("Loading order…", () => getFullOrder(o)); downloadSOPdf(full); }}
+                    title="Download this sales order as a PDF"
+                    className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700">⬇ PDF</button>
                   {/* P0-19 §14: "amended" is a pending-review flag, not a status a
                       dropdown can flip past — that bypasses the canonical
                       Before→After review on the Order Amendments page. Route
@@ -2729,6 +2708,9 @@ function OrdersPage({ onNavigateToAmendments, editRequest, onEditRequestHandled,
                     }} className="text-sm px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">🚚 Generate DO</button>
                     <button onClick={() => printSO({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
                       className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">🖨 Print</button>
+                    <button onClick={() => downloadSOPdf({ ...editingOrder, ...form, salesman_name: form.salesman_names, items: form.items, subtotal: null })}
+                      title="Download this sales order as a PDF"
+                      className="text-sm px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-violet-100 hover:text-violet-700">⬇ Download PDF</button>
                   </>
                 )}
                 {!editId && draftHasContent(form) && (
