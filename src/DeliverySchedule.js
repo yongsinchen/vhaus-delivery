@@ -14,6 +14,21 @@ import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
+
+// The schedule board's DO set: every DO still on the road to delivery. Fetched
+// via active=1 — NOT ?status=…, which the backend caps at the newest 500 DOs
+// by created_at. Once a company has more than 500 open DOs, an older-created
+// draft (e.g. DO2609-0015, rescheduled to a later date) fell outside that
+// window and silently vanished from its date's Unassigned pool. active=1 is
+// the same uncapped-window feed the Delivery Orders tab already uses; narrowed
+// here to exactly the statuses the board has always worked with.
+export const BOARD_DO_STATUSES = ["draft", "scheduled", "out_for_delivery", "arrived", "failed"];
+export async function fetchBoardDeliveryOrders() {
+  const res = await af(`${API}/delivery-orders?active=1`);
+  if (!res.ok) return { ok: false, delivery_orders: [] };
+  const data = await res.json();
+  return { ok: true, delivery_orders: (data.delivery_orders || []).filter(d => BOARD_DO_STATUSES.includes(d.status)) };
+}
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
 const af = async (url, opts = {}) => { const token = await getToken(); const cid = localStorage.getItem("pulseActiveCompanyId"); return fetch(url, { ...opts, headers: { ...opts.headers, "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(cid && { "X-Company-ID": cid }) } }); };
 
@@ -1869,8 +1884,7 @@ export function ImportScheduleModal({ date, companyId, onClose, onDone }) {
   const loadContext = async (refs) => {
     const qs = companyId ? `&company_id=${companyId}` : "";
     const wanted = new Set(refs.map(r => r.doNumber).filter(Boolean).map(String));
-    const res = await af(`${API}/delivery-orders?status=draft,scheduled,out_for_delivery,arrived,failed`);
-    const data = res.ok ? await res.json() : { delivery_orders: [] };
+    const data = await fetchBoardDeliveryOrders();
     const dos = (data.delivery_orders || []).filter(d => wanted.has(String(d.do_number)));
     const dates = [...new Set([...dos.map(d => d.delivery_date).filter(Boolean), date])];
     const schedules = [], teams = [];
@@ -3042,12 +3056,12 @@ function DeliverySchedule({ readOnly = false, canImport = true, canEditDo = true
         af(`${API}/order-trips?date=${date}`),
         // Phase 2B/5: draft + failed DOs feed the pool; any active DO excludes
         // its SO from whole-order scheduling (an order ships as DOs OR whole)
-        af(`${API}/delivery-orders?status=draft,scheduled,out_for_delivery,arrived,failed`),
+        fetchBoardDeliveryOrders(),
       ]);
-      const [teamsData, schedulesData, unassignedData, tripsData, dosData] = await Promise.all([
+      const [teamsData, schedulesData, unassignedData, tripsData] = await Promise.all([
         teamsRes.json(), schedulesRes.json(), unassignedRes.json(), tripsRes.json(),
-        dosRes.ok ? dosRes.json() : Promise.resolve({ delivery_orders: [] }),
       ]);
+      const dosData = dosRes;
       // P1-1 stabilization: a superseded DO (superseded_at set) is retired —
       // its own status can still read "draft"/"scheduled" (the supersession
       // RPC never touches it; superseded_at is the sole authoritative
