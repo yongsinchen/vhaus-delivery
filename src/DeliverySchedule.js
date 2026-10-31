@@ -12,6 +12,7 @@ import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDelivered
 import { serviceItemQty } from "./serviceItemQty";
 import { normalizeOrderItems } from "./safeData";
 import { copyStopDetails } from "./stopCopy";
+import { doItemLabel, doItemCustomDimensions } from "./doItemLabel";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 
@@ -793,8 +794,8 @@ export function buildTeamScheduleRows(team) {
     };
     let items = sc.delivery_orders
       ? (sc.delivery_orders.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
-          itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
-          supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+          itemCode: i.product_code, itemName: doItemLabel(i), unit: String(Number(i.quantity)),
+          supplier: i.supplier_name, custom_dimensions: doItemCustomDimensions(i), notes: i.notes,
           arrivalDate: arrivalFor(i),
         }))
       : parseItemsSafe(o.items);
@@ -1426,8 +1427,8 @@ export const StopRow = memo(function StopRow({ schedule, teamId, index, isLocked
   }
   const items = dord
     ? (dord.delivery_order_items || []).filter(i => i.status !== "cancelled").map(i => ({
-        itemCode: i.product_code, itemName: [i.product_name, i.size, i.color].filter(Boolean).join(" "), unit: String(Number(i.quantity)),
-        supplier: i.supplier_name, custom_dimensions: i.custom_dimensions, notes: i.notes,
+        itemCode: i.product_code, itemName: doItemLabel(i), unit: String(Number(i.quantity)),
+        supplier: i.supplier_name, custom_dimensions: doItemCustomDimensions(i), notes: i.notes,
         arrivalDate: arrivalByKey[String(i.product_code || i.product_name || "").toLowerCase().trim()] || null,
         _do: true,
       }))

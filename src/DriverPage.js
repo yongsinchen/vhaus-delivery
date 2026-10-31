@@ -4,6 +4,7 @@ import { useToast } from "./UIComponents";
 import { normalizeOrderItems } from "./safeData";
 import { malaysiaToday, formatCalendarDate } from "./malaysiaDate";
 import ConfirmDeliveredItemsModal, { confirmEndpoints } from "./ConfirmDeliveredItemsModal";
+import { doItemLabel, doItemCustomDimensions } from "./doItemLabel";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -163,9 +164,9 @@ function DriverPage() {
           // fall back to instead of losing the size/color context.
           const items = dord
             ? (dord.delivery_order_items || []).filter(it => it.status !== "cancelled").map(it => ({
-                itemCode: it.product_code, itemName: [it.product_name, it.size, it.color].filter(Boolean).join(" "),
+                itemCode: it.product_code, itemName: doItemLabel(it),
                 unit: String(Number(it.quantity)), supplier: it.supplier_name,
-                custom_dimensions: it.custom_dimensions, notes: it.notes,
+                custom_dimensions: doItemCustomDimensions(it), notes: it.notes,
               }))
             : parseItems(o.items);
           const st = STATUS_STYLE[sc.status] || STATUS_STYLE.scheduled;
