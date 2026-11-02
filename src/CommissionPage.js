@@ -505,7 +505,12 @@ function CommissionPage() {
         const d = await readJson(res, "Commission payout report");
         if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
         const byId = new Map((d.users || []).map(u => [u.user_id, u]));
-        const report = buildPayoutReport(visibleUsers.map(u => byId.get(u.user_id)).filter(Boolean), payoutMonth);
+        const users = visibleUsers.map(u => byId.get(u.user_id)).filter(Boolean);
+        // A backend without the report rows answers normally but without `report` — never
+        // hand out a silently empty report.
+        const comms = users.flatMap(u => u.commissions || []);
+        if (comms.length && !comms.some(c => c.report)) throw new Error("the server has not been updated for this report yet (deploy the backend first)");
+        const report = buildPayoutReport(users, payoutMonth);
         if (kind === "excel") await downloadPayoutExcel(report);
         else printHtml(payoutReportHtml(report, { filterNote: isFiltered ? `filtered by "${search.trim()}"` : "" }));
       });
