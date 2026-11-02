@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
 import { useAuth, supabase } from "./AuthContext";
 import { useToast, useLoading, formatMoney } from "./UIComponents";
 import { printHtml } from "./printDocument";
+import { buildPayoutReport, downloadPayoutExcel, payoutReportHtml } from "./commissionPayoutReport";
 
 const API = process.env.REACT_APP_BOT_API || "https://vhaus-bot-production.up.railway.app";
 const getToken = async () => { const { data } = await supabase.auth.getSession(); return data?.session?.access_token || ""; };
@@ -492,6 +493,29 @@ function CommissionPage() {
 
   const visibleTotal = useMemo(() => visibleUsers.reduce((s, u) => s + (Number(u.total) || 0), 0), [visibleUsers]);
   const isFiltered = needle.length > 0;
+
+  // Commission Payout Report — Excel download or print, in the salesman commission-sheet
+  // layout (src/commissionPayoutReport.js). The figures come from the backend
+  // (/commission-payout?report=1); it covers exactly the people on screen, in the
+  // on-screen order, so the report can never disagree with the page.
+  const runPayoutReport = async (kind) => {
+    try {
+      await withLoading(kind === "excel" ? "Preparing Excel…" : "Preparing report…", async () => {
+        const res = await af(`${API}/commission-payout?company_id=${companyId}&payout_month=${payoutMonth}&report=1`);
+        const d = await readJson(res, "Commission payout report");
+        if (!res.ok) throw new Error(d.error || `Failed (${res.status})`);
+        const byId = new Map((d.users || []).map(u => [u.user_id, u]));
+        const users = visibleUsers.map(u => byId.get(u.user_id)).filter(Boolean);
+        // A backend without the report rows answers normally but without `report` — never
+        // hand out a silently empty report.
+        const comms = users.flatMap(u => u.commissions || []);
+        if (comms.length && !comms.some(c => c.report)) throw new Error("the server has not been updated for this report yet (deploy the backend first)");
+        const report = buildPayoutReport(users, payoutMonth);
+        if (kind === "excel") await downloadPayoutExcel(report);
+        else printHtml(payoutReportHtml(report, { filterNote: isFiltered ? `filtered by "${search.trim()}"` : "" }));
+      });
+    } catch (e) { toast.error("Report failed: " + e.message); }
+  };
   const atCurrentMonth = payoutMonth >= currentMonth();
   useEffect(() => { if (tab === 2) {
     loadRules();
@@ -749,31 +773,12 @@ function CommissionPage() {
         <div className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             {payout && (payout.users || []).length > 0 && (
-              <button onClick={() => {
-                // Print exactly what is on screen — the same search filter and sort
-                // order — so a printed report can never disagree with the page it
-                // was printed from.
-                const rows = visibleUsers.flatMap(u => {
-                  const ownComms = u.commissions.filter(c => !isOverrideRow(c));
-                  const overrideComms = u.commissions.filter(isOverrideRow).sort(bySoAsc);
-                  const eligible = ownComms.filter(c => c.status === "eligible").sort(bySoAsc);
-                  const pending = ownComms.filter(c => c.status === "pending" && orderMonthOf(c) === batchYM).sort(bySoAsc);
-                  const totalSales = ownSalesInMonth(u, batchYM);
-                  const adjTotal = u.adjustments.reduce((s, a) => s + (Number(a.delta_amt) || 0), 0);
-                  const holdTotal = u.holds.filter(h => h.status === "held").reduce((s, h) => s + (Number(h.held_amt) || 0), 0);
-                  return [`<tr style="background:#f3f0ff"><td colspan="6" style="border:1px solid #ddd;padding:6px 8px;font-weight:700">${u.name} <span style="font-weight:400;color:#666">(${u.role}) · Total Sales: ${money(totalSales)}</span></td><td style="border:1px solid #ddd;padding:6px 8px;font-weight:700;text-align:right">${money(u.total)}</td></tr>`,
-                    // commission_amt already excludes a switched-off incentive, so the
-                    // printed figures follow automatically. The marker exists so a reader
-                    // can see WHY a row pays less than its rate implies.
-                    ...eligible.map(c => `<tr><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:green">Eligible</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
-                    ...pending.map(c => `<tr style="opacity:0.5"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:orange">Pending</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:red">✗ &lt;30%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(c.commission_amt)}</td></tr>`),
-                    ...overrideComms.map(c => `<tr style="background:#eef2ff"><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.so_number || ""}</td><td style="border:1px solid #ddd;padding:4px 8px">${c.orders?.customer_name || ""} <span style="color:#4338ca">(${c.role_name === "director_override" ? "director" : c.role_name === "branch_override" ? "override" : "mgr override"})</span></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.rate_pct}%</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right">${money(shareNetOf(c))}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;color:#4338ca">${c.status === "pending" ? "Pending" : "Override"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center">${c.deposit_met ? "✓" : "✗"}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600">${money(c.commission_amt)}</td></tr>`),
-                    ...(adjTotal !== 0 ? [`<tr style="background:#fef3c7"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#92400e">Adjustments</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:${adjTotal >= 0 ? "green" : "red"}">${money(adjTotal)}</td></tr>`] : []),
-                    ...(holdTotal > 0 ? [`<tr style="background:#fee2e2"><td colspan="5" style="border:1px solid #ddd;padding:4px 8px;color:#991b1b">Wrong-item Holds</td><td></td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;font-weight:600;color:red">-${money(holdTotal)}</td></tr>`] : []),
-                  ];
-                });
-                printHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Commission Payout</title><style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:11px;padding:10px}table{border-collapse:collapse;width:100%}th{background:#7C3AED;color:#fff;padding:6px 8px;text-align:left;font-size:10px}</style></head><body><h2>Commission Payout Report</h2><p style="color:#666">Payout month: ${monthLabel(payoutMonth)} · Orders dated: ${orderMonthLabel(payoutMonth)}<br/>Total: ${money(visibleTotal)} · ${visibleUsers.length} person(s)${isFiltered ? ` · filtered by "${search.trim()}"` : ""}</p><table><thead><tr><th>SO</th><th>Customer</th><th>Rate</th><th style="text-align:right">Net</th><th>Status</th><th>Deposit</th><th style="text-align:right">Commission</th></tr></thead><tbody>${rows.join("")}</tbody></table><p style="text-align:right;font-size:14px;font-weight:700;margin-top:12px">Total Payout: ${money(visibleTotal)}</p></body></html>`);
-              }} className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Report</button>
+              <>
+                <button onClick={() => runPayoutReport("excel")} title="One sheet per person in the commission-sheet layout"
+                  className="px-4 py-2 rounded-xl text-sm bg-emerald-600 text-white hover:bg-emerald-700">⬇ Download Excel</button>
+                <button onClick={() => runPayoutReport("print")}
+                  className="px-4 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 hover:bg-gray-200">🖨 Print Report</button>
+              </>
             )}
             {payout && !payoutLoading && (
               <span className="text-sm font-bold text-gray-700">
