@@ -157,7 +157,7 @@ export default function PerformancePage() {
                 <tbody>
                   {(data.orders || []).slice(0, 200).map((o, i) => (
                     <tr key={`${o.so_number}-${i}`} className="border-t border-gray-50">
-                      <td className="px-4 py-2 font-medium text-violet-700">{o.so_number}{!o.legit && <span className="ml-1 text-[10px] text-amber-600">(no deposit)</span>}</td>
+                      <td className="px-4 py-2 font-medium text-violet-700">{o.so_number}{!o.legit && <span className="ml-1 text-[10px] text-amber-600">{o.so_status === "draft" ? "(draft)" : "(no deposit)"}</span>}</td>
                       <td className="px-4 py-2 text-gray-500">{o.order_date}</td>
                       <td className="px-4 py-2 text-gray-700">{o.customer_name}</td>
                       <td className="px-4 py-2 text-gray-500">{o.salesman}</td>
