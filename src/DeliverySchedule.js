@@ -2788,17 +2788,27 @@ export function DeliveryOrdersTab({ onChanged, canEditDo = true, canViewService 
     return [team.delivery_vehicles?.vehicle_plate, team.driver?.name].filter(Boolean).join(" · ") || null;
   };
 
-  // Distinct assigned teams currently in the list, for the filter dropdown.
+  // Distinct assigned teams, for the filter dropdown. Teams are per date (a
+  // truck has a separate team on every day it runs), so with a date picked
+  // only that date's teams are offered; with no date, each option carries its
+  // date so the same truck on different days can be told apart.
   const teamFilterOptions = (() => {
     const map = new Map();
-    dos.forEach(o => {
-      const teamId = activeSchedule(o)?.team_id;
-      const label = teamLabel(o);
-      if (teamId && label) map.set(teamId, label);
-    });
-    services.forEach(sv => { if (sv.schedule?.team_id && sv.schedule.team_label) map.set(sv.schedule.team_id, sv.schedule.team_label); });
-    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    const add = (teamId, label, teamDate) => {
+      if (!teamId || !label) return;
+      if (dateFilter && teamDate !== dateFilter) return;
+      map.set(teamId, { label: dateFilter || !teamDate ? label : `${label} · ${teamDate}`, teamDate: teamDate || "" });
+    };
+    dos.forEach(o => { const sc = activeSchedule(o); add(sc?.team_id, teamLabel(o), sc?.scheduled_date); });
+    services.forEach(sv => add(sv.schedule?.team_id, sv.schedule?.team_label, sv.schedule?.scheduled_date));
+    return Array.from(map.entries())
+      .sort((a, b) => a[1].teamDate.localeCompare(b[1].teamDate) || a[1].label.localeCompare(b[1].label))
+      .map(([id, o]) => [id, o.label]);
   })();
+  // A team picked for another date can't match the new date's list — drop it.
+  useEffect(() => {
+    if (teamFilter && teamFilter !== "unassigned" && !teamFilterOptions.some(([id]) => id === teamFilter)) setTeamFilter("");
+  }, [dateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = dos
     .filter(o => showDone || !TERMINAL.includes(String(o.status || "").toLowerCase()))
