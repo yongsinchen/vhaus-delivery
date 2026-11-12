@@ -264,7 +264,7 @@ function printDeliveryOrder(o, company = {}) {
     .title { font-size: 22px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; letter-spacing: 2px; }
     .info td { padding: 4px 12px; font-size: 14px; vertical-align: top; }
     .info .lbl { font-weight: 700; width: 100px; }
-    .info .rv { white-space: nowrap; width: 1%; }
+    .info .rv { width: 150px; }
     table.items { width: 100%; border-collapse: collapse; }
     table.items th { border: 1px solid #111; background: #f5f5f5; padding: 6px; font-size: 13px; }
     table.items td { border: 1px solid #ddd; padding: 7px 8px; }
