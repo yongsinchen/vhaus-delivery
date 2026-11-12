@@ -248,7 +248,7 @@ function printDeliveryOrder(o, company = {}) {
     return `<tr>
       <td class="c">${i + 1}</td>
       <td>${esc(it.product_code || "")}</td>
-      <td>${esc(it.product_name || "")}${spec ? `<div style="font-size:9px;color:#555">${esc(spec)}</div>` : ""}</td>
+      <td>${esc(it.product_name || "")}${spec ? `<div style="font-size:12px;color:#555">${esc(spec)}</div>` : ""}</td>
       <td class="c">${Number(it.quantity) || 1}</td>
     </tr>`;
   }).join("");
@@ -256,23 +256,24 @@ function printDeliveryOrder(o, company = {}) {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @page { size: A4; margin: 10mm; }
-    body { font-family: Arial, sans-serif; font-size: 11px; color: #111; }
+    body { font-family: Arial, sans-serif; font-size: 14px; color: #111; }
     .sheet { border: 1px solid #111; }
     .pad { padding: 8px 12px; }
     .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid #111; }
-    .logo { height: 42px; max-width: 180px; object-fit: contain; }
-    .title { font-size: 18px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; letter-spacing: 2px; }
-    .info td { padding: 3px 12px; font-size: 11px; vertical-align: top; }
-    .info .lbl { font-weight: 700; width: 80px; }
+    .logo { height: 50px; max-width: 200px; object-fit: contain; }
+    .title { font-size: 22px; font-weight: 900; text-align: center; border-bottom: 1px solid #111; padding: 6px; background: #f5f5f5; letter-spacing: 2px; }
+    .info td { padding: 4px 12px; font-size: 14px; vertical-align: top; }
+    .info .lbl { font-weight: 700; width: 100px; }
+    .info .rv { white-space: nowrap; width: 1%; }
     table.items { width: 100%; border-collapse: collapse; }
-    table.items th { border: 1px solid #111; background: #f5f5f5; padding: 5px; font-size: 10px; }
-    table.items td { border: 1px solid #ddd; padding: 5px 8px; }
+    table.items th { border: 1px solid #111; background: #f5f5f5; padding: 6px; font-size: 13px; }
+    table.items td { border: 1px solid #ddd; padding: 7px 8px; }
     .c { text-align: center; }
     .foot { display: flex; border-top: 1px solid #111; }
     .foot .col { flex: 1; padding: 8px 12px; min-height: 80px; }
     .foot .col + .col { border-left: 1px solid #111; }
     .foot .remarks-text { white-space: pre-wrap; overflow-wrap: break-word; }
-    .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 9px; }
+    .sigline { margin-top: 40px; border-top: 1px solid #111; padding-top: 2px; text-align: center; font-size: 12px; }
   </style></head><body>
   <div class="sheet">
     <div class="head pad">
@@ -280,16 +281,16 @@ function printDeliveryOrder(o, company = {}) {
         ${company.logo ? `<img src="${esc(company.logo)}" class="logo" alt="logo">` : ""}
         <div><b>${esc(company.name || "")}</b>${company.reg ? ` (${esc(company.reg)})` : ""}<br>${esc(company.address || "")}<br>${company.hotline ? "Tel: " + esc(company.hotline) : ""}</div>
       </div>
-      <div style="text-align:right"><b>DO#: ${esc(o.do_number || "")}</b></div>
+      <div style="text-align:right;font-size:16px"><b>DO#: ${esc(o.do_number || "")}</b></div>
     </div>
     <div class="title">DELIVERY ORDER</div>
     <table class="info" style="width:100%;border-bottom:1px solid #111;border-collapse:collapse;">
-      <tr><td class="lbl">Customer</td><td>${esc(so.customer_name || "")}</td><td class="lbl">SO#</td><td>${esc(so.order_number || "")}</td></tr>
-      <tr><td class="lbl">Address</td><td>${esc(o.delivery_address || so.delivery_address || so.customer_address || "")}</td><td class="lbl">Date</td><td>${esc(o.delivery_date || "")}</td></tr>
-      <tr><td class="lbl">Contact</td><td>${esc(so.customer_contact || "")}</td><td class="lbl">Salesman</td><td>${esc(so.salesman_name || "")}</td></tr>
+      <tr><td class="lbl">Customer</td><td>${esc(so.customer_name || "")}</td><td class="lbl">SO#</td><td class="rv">${esc(so.order_number || "")}</td></tr>
+      <tr><td class="lbl">Address</td><td>${esc(o.delivery_address || so.delivery_address || so.customer_address || "")}</td><td class="lbl">Date</td><td class="rv">${esc(o.delivery_date || "")}</td></tr>
+      <tr><td class="lbl">Contact</td><td>${esc(so.customer_contact || "")}</td><td class="lbl">Salesman</td><td class="rv">${esc(so.salesman_name || "")}</td></tr>
     </table>
     <table class="items">
-      <thead><tr><th style="width:30px">NO</th><th style="width:80px">CODE</th><th>DESCRIPTION</th><th style="width:50px">QTY</th></tr></thead>
+      <thead><tr><th style="width:36px">NO</th><th style="width:100px">CODE</th><th>DESCRIPTION</th><th style="width:56px">QTY</th></tr></thead>
       <tbody>${itemRows}</tbody>
     </table>
     <div class="foot">
