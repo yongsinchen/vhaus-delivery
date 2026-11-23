@@ -1,4 +1,5 @@
-// Copy a Customer Stop's delivery details to the clipboard (Delivery Schedule).
+// Copy a Customer Stop's delivery details to the clipboard (Delivery Schedule):
+// SO / NAME / CONTACT / ADDRESS / BALANCE.
 //
 // Pure text builder + a clipboard helper with a safe fallback. The values are
 // exactly what the board already shows for the stop — the schedule row's joined
@@ -50,7 +51,10 @@ function field(label, orders, pick) {
 export function buildStopCopyText(orders) {
   const list = (Array.isArray(orders) ? orders : []).filter(Boolean);
   if (list.length === 0) return "";
+  // SO number(s) first — one stop can be several orders delivered together.
+  const sos = [...new Set(list.map(o => oneLine(o.so_number)).filter(Boolean))];
   const lines = [
+    `SO: ${sos.length ? sos.join(" / ") : "-"}`,
     field("NAME", list, o => o.customer_name),
     field("CONTACT", list, o => o.contact),
     field("ADDRESS", list, o => o.address),

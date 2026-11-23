@@ -38,7 +38,7 @@ describe("StopRow — Copy customer details (assigned stop)", () => {
     expect(btns).toHaveLength(1);
     fireEvent.click(btns[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-    expect(writeText).toHaveBeenCalledWith("NAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE: RM 1,250.00");
+    expect(writeText).toHaveBeenCalledWith("SO: SO1001\nNAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE: RM 1,250.00");
     expect(await screen.findByText("Copied")).toBeInTheDocument();
   });
   test("a stop inside a Deliver Together group has NO per-child Copy (the group banner carries the one action)", () => {

@@ -4,9 +4,9 @@ import { buildStopCopyText, copyTextToClipboard, copyStopDetails } from "./stopC
 const so = (no, extra = {}) => ({ so_number: no, customer_name: "TAN AH KOW", contact: "0123456789", address: "123, JALAN ABC, 14000 BUKIT MERTAJAM", balance: 1250, ...extra });
 
 describe("buildStopCopyText", () => {
-  test("E. single stop → NAME / CONTACT / ADDRESS / BALANCE exactly as specified", () => {
+  test("E. single stop → SO / NAME / CONTACT / ADDRESS / BALANCE exactly as specified", () => {
     expect(buildStopCopyText([so("SO1")])).toBe(
-      "NAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE: RM 1,250.00");
+      "SO: SO1\nNAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE: RM 1,250.00");
   });
   test("a multi-line address is kept on one line; zero / null balance are explicit, never blank", () => {
     expect(buildStopCopyText([so("SO1", { address: "123 Jalan ABC,\r\nBukit Mertajam", balance: 0 })])).toMatch(/ADDRESS: 123 Jalan ABC, Bukit Mertajam\nBALANCE: RM 0.00$/);
@@ -21,7 +21,7 @@ describe("buildStopCopyText", () => {
   });
   test("F. Deliver Together: customer details once, TOTAL balance + per-SO breakdown (never one SO's balance alone)", () => {
     const t = buildStopCopyText([so("SO1", { balance: 1000 }), so("SO2", { balance: 250.5 })]);
-    expect(t).toBe("NAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE (TOTAL): RM 1,250.50\n  SO1: RM 1,000.00\n  SO2: RM 250.50");
+    expect(t).toBe("SO: SO1 / SO2\nNAME: TAN AH KOW\nCONTACT: 0123456789\nADDRESS: 123, JALAN ABC, 14000 BUKIT MERTAJAM\nBALANCE (TOTAL): RM 1,250.50\n  SO1: RM 1,000.00\n  SO2: RM 250.50");
     expect(t.match(/NAME:/g)).toHaveLength(1);
   });
   test("F. a member with an unknown balance flags the total as INCOMPLETE", () => {
@@ -82,5 +82,13 @@ describe("copyTextToClipboard", () => {
     expect(toast.success).toHaveBeenCalledWith("Copied");
     expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
+  });
+});
+
+describe("SO line (2026-11-23)", () => {
+  test("SO number comes first; a missing SO number shows '-'; the same SO twice is listed once", () => {
+    expect(buildStopCopyText([so("33866")]).split("\n")[0]).toBe("SO: 33866");
+    expect(buildStopCopyText([so(null)]).split("\n")[0]).toBe("SO: -");
+    expect(buildStopCopyText([so("33866"), so("33866", { balance: 10 })]).split("\n")[0]).toBe("SO: 33866");
   });
 });
