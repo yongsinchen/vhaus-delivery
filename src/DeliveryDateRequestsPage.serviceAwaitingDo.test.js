@@ -121,3 +121,38 @@ describe("DeliveryDateRequestsPage — Service vs normal Sales Order badge", () 
     expect(badge("Awaiting DO")).toBeFalsy();
   });
 });
+
+// 2026-11-23: a Service Note date change is stored with so_number NULL (on
+// purpose — approval must not touch orders by SO number), so the card read
+// "SO" with no number. The backend now sends the case's display number.
+describe("DeliveryDateRequestsPage — Service date change without an SO number", () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+  const base = { status: "approved", sales_order_id: null, requested_date: "2026-11-25", original_date: "2026-11-21", is_service: true, has_delivery_order: false, service_status: "scheduled", remark: "Service Note date change (case x)" };
+
+  test("linked Service → shows its case number (SV-21814), never a bare 'SO'", async () => {
+    mockRequests([{ ...base, id: "r1", so_number: null, order_id: 7001, customer_name: "Goh Pei Juan", service_number: "SV-21814", service_linked_so_label: "SO21814" }]);
+    render(withProviders(<DeliveryDateRequestsPage />));
+    await waitFor(() => expect(screen.getByText("Goh Pei Juan")).toBeTruthy());
+    expect(screen.getByText("SV-21814")).toBeTruthy();
+    expect(screen.queryByText(/^SO\s*$/)).toBeNull();
+  });
+
+  test("standalone Service → its running number; a multi-SO link is spelled out", async () => {
+    mockRequests([
+      { ...base, id: "r2", so_number: null, order_id: 7002, customer_name: "Walk In", service_number: "SV-1000", service_linked_so_label: null },
+      { ...base, id: "r3", so_number: null, order_id: 7003, customer_name: "Two Orders", service_number: "SV-21312", service_linked_so_label: "SO21312 / SO21313" },
+    ]);
+    render(withProviders(<DeliveryDateRequestsPage />));
+    await waitFor(() => expect(screen.getByText("Walk In")).toBeTruthy());
+    expect(screen.getByText("SV-1000")).toBeTruthy();
+    expect(screen.getByText("SV-21312 (SO21312 / SO21313)")).toBeTruthy();
+  });
+
+  test("normal SO request unchanged", async () => {
+    mockRequests([NORMAL_SO_NO_DO]);
+    render(withProviders(<DeliveryDateRequestsPage />));
+    await waitFor(() => expect(screen.getByText("SO A-1")).toBeTruthy());
+  });
+});

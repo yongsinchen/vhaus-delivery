@@ -20,6 +20,18 @@ const fmt = d => d ? new Date(d + "T00:00").toLocaleDateString("en-MY", { weekda
 // yet — every existing and new row has it NULL today) — show "TBC / Not Set"
 // instead, same as any other genuinely unset date on this page.
 const fmtOrTBC = d => d ? fmt(d) : "TBC / Not Set";
+// The card's reference: "SO 21814"; a Service date change has no SO number of
+// its own (stored NULL on purpose), so it shows the case number the Services
+// page uses — "SV-21814 (SO21814)" when linked, else "SV-1000".
+export const requestRef = r => {
+  if (r?.so_number) return `SO ${r.so_number}`;
+  if (r?.is_service) {
+    const sv = r.service_number || "Service";
+    const linked = r.service_linked_so_label && !sv.includes(String(r.service_linked_so_label).replace(/^SO/i, "")) ? ` (${r.service_linked_so_label})` : "";
+    return `${sv}${linked}`;
+  }
+  return "SO -";
+};
 const todayStr = malaysiaToday();   // Phase 2D: Malaysia business date
 
 const STATUS = {
@@ -134,7 +146,7 @@ function DeliveryDateRequestsPage({ initialFilter = null }) {
     finally { setSaving(false); }
   };
   const pickAlternative = async (r, date) => {
-    if (!window.confirm(`Confirm delivery on ${fmt(date)} for SO ${r.so_number}?`)) return;
+    if (!window.confirm(`Confirm delivery on ${fmt(date)} for ${requestRef(r)}?`)) return;
     const res = await af(`${API}/delivery-date-requests/${r.id}/pick`, { method: "PATCH", body: JSON.stringify({ requested_date: date }) });
     const d = await res.json();
     if (res.ok) {
@@ -204,7 +216,7 @@ function DeliveryDateRequestsPage({ initialFilter = null }) {
   const ft = filterText.trim().toLowerCase();
   const filtered = rows.filter(r =>
     matchStatus(r, statusFilter) &&
-    (!ft || String(r.so_number || "").toLowerCase().includes(ft) || String(r.customer_name || "").toLowerCase().includes(ft))
+    (!ft || String(r.so_number || "").toLowerCase().includes(ft) || String(r.service_number || "").toLowerCase().includes(ft) || String(r.customer_name || "").toLowerCase().includes(ft))
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const curPage = Math.min(page, totalPages - 1);
@@ -258,7 +270,7 @@ function DeliveryDateRequestsPage({ initialFilter = null }) {
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-violet-700">SO {r.so_number}</span>
+            <span className="font-bold text-violet-700">{requestRef(r)}</span>
             {/* P1-2: DO-scoped request — show exactly which shipment this
                 targets so the approver never has to guess. */}
             {r.delivery_order_id && (
@@ -501,7 +513,7 @@ function DeliveryDateRequestsPage({ initialFilter = null }) {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="px-6 py-4 border-b flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-violet-700">SO {detailReq.so_number}</span>
+                  <span className="font-bold text-violet-700">{requestRef(detailReq)}</span>
                   {detailReq.delivery_order_id && (
                     <span className="text-xs bg-violet-100 text-violet-700 font-bold px-1.5 py-0.5 rounded">{detailReq.delivery_orders?.do_number || "DO"}</span>
                   )}
@@ -568,7 +580,7 @@ function DeliveryDateRequestsPage({ initialFilter = null }) {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setProposeFor(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <h3 className="text-base font-bold text-gray-900">Propose dates · SO {proposeFor.so_number}</h3>
+              <h3 className="text-base font-bold text-gray-900">Propose dates · {requestRef(proposeFor)}</h3>
               <button onClick={() => setProposeFor(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
             </div>
             <div className="px-5 py-4 space-y-3">
